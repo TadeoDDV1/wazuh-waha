@@ -1,0 +1,42 @@
+# Secrets — NUNCA subir
+.env
+.env.*
+!.env.example
+deploy/**/relay.env
+deploy/**/*.env.local
+# El config del manager (con API key real) — solo commitear el .example
+manager/wsl-relay.conf
+!manager/wsl-relay.conf.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Cache local de Wazuh (no es parte del repo)
+.sixth/

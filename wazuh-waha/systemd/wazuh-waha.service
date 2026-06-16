@@ -1,0 +1,27 @@
+[Unit]
+Description=wazuh-waha (Wazuh -> WAHA bridge)
+Documentation=file:///home/<REEMPLAZAR_USUARIO>/Desktop/wazuh-waha/README.md
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=<REEMPLAZAR_USUARIO>
+Group=<REEMPLAZAR_USUARIO>
+WorkingDirectory=<REEMPLAZAR_PROYECTO>/wazuh-waha
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=<REEMPLAZAR_PROYECTO>/wazuh-waha/.venv/bin/uvicorn wazuh_waha.main:app --host 0.0.0.0 --port 8765 --workers 2
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Hardening basico
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/log/wazuh-waha /var/lib/wazuh-waha
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+<integration>
+  <name>custom-whatsapp</name>
+  <hook_url>http://REEMPLAZAR_RELAY_HOST:8765/alerts</hook_url>
+  <api_key>REEMPLAZAR_RELAY_API_KEY</api_key>
+  <level>10</level>
+  <alert_format>json</alert_format>
+  <options>--script /var/ossec/integrations/custom/whatsapp_alert.py --timeout 5</options>
+</integration>

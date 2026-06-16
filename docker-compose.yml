@@ -1,0 +1,37 @@
+# =============================================================================
+# WAHA - WhatsApp HTTP API
+# https://waha.devlike.pro/
+# =============================================================================
+# Engine: WEBJS (Puppeteer). Sesion persiste en volumen waha_sessions.
+# =============================================================================
+
+services:
+  waha:
+    image: devlikeapro/waha:latest
+    container_name: wazuh-waha
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: WEBJS
+      WHATSAPP_HOOK_URL: $${WAHA_HOOK_URL:-}
+      NODE_OPTIONS: --max-old-space-size=2048
+      PUPPETEER_ARGS: --no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu
+      LOG_LEVEL: $${WAHA_LOG_LEVEL:-info}
+      WAHA_PRINT_QR: "false"
+    volumes:
+      - waha_sessions:/app/.sessions
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/server/version"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    mem_limit: 3g
+    cpus: "2.0"
+
+volumes:
+  waha_sessions:
+    name: wazuh_waha_sessions

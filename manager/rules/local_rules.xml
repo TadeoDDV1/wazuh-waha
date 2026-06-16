@@ -1,0 +1,80 @@
+<!--
+  =============================================================================
+  Reglas locales para Wazuh - Login exitoso y eventos relacionados
+  =============================================================================
+  Copiar a la VM en: /var/ossec/etc/rules/local_rules.xml
+  Reiniciar manager:  sudo systemctl restart wazuh-manager
+
+  Estas reglas SUBEN el level de los eventos de "login exitoso" que por
+  defecto estan en level 3 (informational, debajo del umbral 10 del
+  integration) a level 8-12, para que disparen el WhatsApp.
+
+  IDs usados: 57100-57199 (rango custom, fuera de stock Wazuh).
+
+  NOTA SOBRE if_sid: usamos una combinacion de <if_sid> (cuando estamos
+  seguros del ID padre) Y <match> (regex sobre el log) para ser
+  robustos. Si el ID padre cambia entre versiones de Wazuh, el <match>
+  sigue funcionando.
+  =============================================================================
+-->
+
+<group name="local,authentication_success,">
+
+  <!-- 57100: SSH login exitoso (password o key) - detecta por log de sshd -->
+  <rule id="57100" level="10">
+    <if_group>authentication_failed|sshd</if_group>
+    <match>^sshd[\d]+: Accepted </match>
+    <description>SSH login exitoso</description>
+    <group>authentication_success,sshd</group>
+  </rule>
+
+  <!-- 57101: SSH login con clave publica -->
+  <rule id="57101" level="10">
+    <if_sid>57100</if_sid>
+    <match>Accepted publickey</match>
+    <description>SSH login exitoso con clave publica</description>
+    <group>authentication_success,sshd,publickey</group>
+  </rule>
+
+  <!-- 57102: SSH login como root (CRITICO) -->
+  <rule id="57102" level="12">
+    <if_sid>57100</if_sid>
+    <match>for root from</match>
+    <description>SSH login exitoso como root (CRITICO)</description>
+    <group>authentication_success,sshd,root_login</group>
+  </rule>
+
+  <!-- 57103: su exitoso (cambio de usuario) -->
+  <rule id="57103" level="10">
+    <if_group>authentication</if_group>
+    <match>su:.+SUCCESS.+</match>
+    <description>Cambio de usuario (su) exitoso</description>
+    <group>authentication_success,su</group>
+  </rule>
+
+  <!-- 57104: sudo exitoso (comando ejecutado con privilegios) -->
+  <rule id="57104" level="8">
+    <if_group>authentication</if_group>
+    <match>sudo:.+COMMAND=</match>
+    <match>success</match>
+    <description>Comando sudo ejecutado con exito</description>
+    <group>authentication_success,sudo</group>
+  </rule>
+
+  <!-- 57105: Login local en TTY/consola (pam_unix) -->
+  <rule id="57105" level="8">
+    <if_group>authentication</if_group>
+    <match>pam_unix\(.+\): session opened</match>
+    <description>Login local (TTY/consola) exitoso</description>
+    <group>authentication_success,local</group>
+  </rule>
+
+  <!-- 57106: Logout / session closed -->
+  <rule id="57106" level="3">
+    <if_group>authentication</if_group>
+    <match>pam_unix\(.+\): session closed</match>
+    <description>Logout / sesion cerrada</description>
+    <group>authentication_success,session_close</group>
+  </rule>
+
+</group>

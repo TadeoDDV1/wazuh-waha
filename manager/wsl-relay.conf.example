@@ -1,0 +1,20 @@
+# Plantilla para el archivo de config del manager Wazuh.
+# Este archivo vive en /var/ossec/etc/wsl-relay.conf en el manager.
+# NO COMMITEAR el archivo real con valores (chmod 600, gitignored).
+#
+# Variables que el script whatsapp_alert.py lee de este archivo:
+#   WAZUH_RELAY_URL       URL del relay wazuh-waha
+#   WAZUH_RELAY_API_KEY   API key compartida con el relay
+#   WAZUH_RELAY_TIMEOUT   Timeout en segundos (default 5)
+#
+# Orden de busqueda: env var > este archivo > vacio.
+#
+# INSTALACION en el manager:
+#   1. Copiar a /var/ossec/etc/wsl-relay.conf
+#   2. Reemplazar REEMPLAZAR_RELAY_HOST y REEMPLAZAR_RELAY_API_KEY
+#   3. sudo chown root:wazuh /var/ossec/etc/wsl-relay.conf
+#   4. sudo chmod 640 /var/ossec/etc/wsl-relay.conf
+
+WAZUH_RELAY_URL=http://REEMPLAZAR_RELAY_HOST:8765/alerts
+WAZUH_RELAY_API_KEY=REEMPLAZAR_RELAY_API_KEY
+WAZUH_RELAY_TIMEOUT=5
