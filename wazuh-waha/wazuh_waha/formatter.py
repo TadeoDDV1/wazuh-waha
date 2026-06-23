@@ -6,6 +6,7 @@ Devuelve (mensaje_final, metadata).
 import time
 
 from . import templates
+from .config import settings
 from .dedup import deduper
 
 
@@ -36,6 +37,11 @@ async def format_alert(alert: dict) -> tuple[str, dict]:
         meta["decision"] = "template"
         return (msg, meta)
 
-    # 3) Plantilla generica (sin IA, sin red)
+    # 3) Sin template y level bajo el minimo → descartar
+    if level < settings.relay_min_level_unknown:
+        meta["decision"] = "below_threshold"
+        return ("", meta)
+
+    # 4) Plantilla generica (sin IA, sin red)
     meta["decision"] = "default"
     return (templates.render_default(alert), meta)

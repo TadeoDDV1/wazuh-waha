@@ -96,27 +96,39 @@ TEMPLATES: dict[str, TemplateFn] = {
         f"✅ *Login SSH exitoso*\n"
         f"Agente: `{_agent(a)}`\n"
         f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Origen: `{_field(a, 'srcip', default='local')}`\n"
+        f"Origen: `{_field(a, 'srcip', default='local')}:{_field(a, 'srcport', default='?')}`\n"
+        f"Proceso: `{_field(a, 'program_name', default='sshd')}`\n"
+        f"Ubicacion: `{a.get('location', '?')}`\n"
+        f"Log: `{a.get('full_log', '')[:160]}`\n"
         f"Hora: `{a.get('timestamp', '?')}`"
     ),
     "57101": lambda a: (
         f"🔑 *Login SSH con clave publica*\n"
         f"Agente: `{_agent(a)}`\n"
         f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Origen: `{_field(a, 'srcip', default='local')}`\n"
+        f"Origen: `{_field(a, 'srcip', default='local')}:{_field(a, 'srcport', default='?')}`\n"
+        f"Proceso: `{_field(a, 'program_name', default='sshd')}`\n"
+        f"Ubicacion: `{a.get('location', '?')}`\n"
+        f"Log: `{a.get('full_log', '')[:160]}`\n"
         f"Hora: `{a.get('timestamp', '?')}`"
     ),
     "57102": lambda a: (
         f"🚨 *ROOT LOGIN por SSH* (CRITICO)\n"
         f"Agente: `{_agent(a)}`\n"
-        f"Origen: `{_field(a, 'srcip', default='local')}`\n"
+        f"Origen: `{_field(a, 'srcip', default='local')}:{_field(a, 'srcport', default='?')}`\n"
+        f"Proceso: `{_field(a, 'program_name', default='sshd')}`\n"
+        f"Ubicacion: `{a.get('location', '?')}`\n"
+        f"Log: `{a.get('full_log', '')[:160]}`\n"
         f"Hora: `{a.get('timestamp', '?')}`\n"
         f"⚠️ Verificar si este acceso era esperado"
     ),
     "57103": lambda a: (
         f"🔄 *Cambio de usuario (su) exitoso*\n"
         f"Agente: `{_agent(a)}`\n"
+        f"Usuario origen: `{_field(a, 'srcuser', default='?')}`\n"
         f"Usuario destino: `{_field(a, 'dstuser', default='?')}`\n"
+        f"Proceso: `{_field(a, 'program_name', default='su')}`\n"
+        f"Log: `{a.get('full_log', '')[:160]}`\n"
         f"Hora: `{a.get('timestamp', '?')}`"
     ),
     "57104": lambda a: (
@@ -124,6 +136,9 @@ TEMPLATES: dict[str, TemplateFn] = {
         f"Agente: `{_agent(a)}`\n"
         f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
         f"Comando: `{_field(a, 'command', default='?')[:120]}`\n"
+        f"Directorio: `{_field(a, 'pwd', default='?')}`\n"
+        f"TTY: `{_field(a, 'tty', default='?')}`\n"
+        f"Proceso: `{_field(a, 'program_name', default='sudo')}`\n"
         f"Hora: `{a.get('timestamp', '?')}`"
     ),
     "57105": lambda a: (
@@ -131,12 +146,18 @@ TEMPLATES: dict[str, TemplateFn] = {
         f"Agente: `{_agent(a)}`\n"
         f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
         f"TTY: `{_field(a, 'tty', default='?')}`\n"
+        f"Proceso: `{_field(a, 'program_name', default='?')}`\n"
+        f"Ubicacion: `{a.get('location', '?')}`\n"
+        f"Log: `{a.get('full_log', '')[:160]}`\n"
         f"Hora: `{a.get('timestamp', '?')}`"
     ),
     "57106": lambda a: (
         f"👋 *Logout / sesion cerrada*\n"
         f"Agente: `{_agent(a)}`\n"
         f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
+        f"Proceso: `{_field(a, 'program_name', default='?')}`\n"
+        f"Duracion: `{_field(a, 'session_time', default='?')}`\n"
+        f"Log: `{a.get('full_log', '')[:160]}`\n"
         f"Hora: `{a.get('timestamp', '?')}`"
     ),
 }

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     relay_bind: str = "0.0.0.0"
     relay_api_key: str = "changeme"
     relay_dedup_ttl: int = 300
+    relay_min_level_unknown: int = 10
     relay_log_dir: str = "/var/log/wazuh-waha"
     relay_lib_dir: str = "/var/lib/wazuh-waha"
     relay_workers: int = 2
