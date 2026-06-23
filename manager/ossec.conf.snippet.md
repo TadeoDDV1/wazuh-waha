@@ -4,11 +4,37 @@ Este archivo complementa `ossec.conf.snippet.xml`. El `.xml` tiene **solo** el
 bloque ejecutable (lo que se pega dentro de `<ossec_config>`); este `.md` tiene
 las variantes y la documentación.
 
-## Cómo usar
+## Fuente de verdad de la IP del manager
+
+La IP del manager Wazuh vive en **una sola variable** del `.env` del repo:
+`WAZUH_SERVER_IP`. Cambiarla ahí y todos los scripts + el helper de renderizado
+la reflejan automáticamente.
+
+## Cómo usar el helper `scripts/render_manager_snippet.py`
+
+**Opción recomendada** (no editable a mano):
+
+```bash
+# 1. Asegurarse de que .env tiene WAZUH_SERVER_IP=...
+grep ^WAZUH_SERVER_IP .env
+
+# 2a. Modo commiteable: imprime el snippet con API key placeholder
+python3 scripts/render_manager_snippet.py
+
+# 2b. Modo deploy: inyecta la API key real del .env local
+python3 scripts/render_manager_snippet.py --with-key > /tmp/integration.xml
+
+# 3. Subir a la VM y pegar
+scp /tmp/integration.xml tadeou7@$(grep ^WAZUH_SERVER_IP .env | cut -d= -f2):/tmp/
+ssh tadeou7@$(grep ^WAZUH_SERVER_IP .env | cut -d= -f2) \
+  'sudo python3 scripts/insert-integration-block.py /var/ossec/etc/ossec.conf /tmp/integration.xml'
+```
+
+## Cómo usar (manual, sin helper)
 
 1. Abrir `ossec.conf.snippet.xml`.
 2. Reemplazar los placeholders:
-   - `REEMPLAZAR_RELAY_HOST` → IP del host donde corre `wazuh-waha` (ej `172.44.30.9`).
+   - `REEMPLAZAR_RELAY_HOST` → el valor de `WAZUH_SERVER_IP` del `.env` (ej `172.44.30.12`).
    - `REEMPLAZAR_RELAY_API_KEY` → el valor de `RELAY_API_KEY` en
      `/etc/wazuh-waha/relay.env` del host del relay.
 3. Pegar el bloque dentro de `<ossec_config>` en

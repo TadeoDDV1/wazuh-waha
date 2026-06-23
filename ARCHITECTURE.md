@@ -8,10 +8,11 @@ del código.
 ```
 ┌────────────────────┐
 │  Wazuh Manager     │
-│  (VM 172.44.30.11) │
+│  (ver WAZUH_SERVER │
+│   _IP en .env)     │
 │                    │
 │  regla matchea     │
-│  level >= 10       │
+│  level >= 8        │
 └─────────┬──────────┘
           │ ejecuta /var/ossec/integrations/custom/whatsapp_alert.py
           ▼

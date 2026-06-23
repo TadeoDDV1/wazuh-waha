@@ -3,8 +3,8 @@
 Pipeline para mandar **alertas de Wazuh** a **WhatsApp** vía **WAHA** (WhatsApp HTTP API).
 
 ```
-Wazuh manager (172.44.30.11)
-  └── regla matchea (level >= 10)
+Wazuh manager (ver WAZUH_SERVER_IP en .env)
+  └── regla matchea (level >= 8)
        └── <integration> ejecuta whatsapp_alert.py
             └── POST http://<relay-host>:8765/alerts
                  ├── dedup con fcntl.flock (multi-worker safe)
@@ -12,6 +12,10 @@ Wazuh manager (172.44.30.11)
                  └── POST http://localhost:3000/api/sendText (WAHA)
                       └── WhatsApp del admin
 ```
+
+> **Nota:** La IP del manager Wazuh vive en **una sola variable** del `.env`:
+> `WAZUH_SERVER_IP`. Cambiarla ahí y todos los scripts + el helper
+> `scripts/render_manager_snippet.py` la reflejan automáticamente.
 
 ## Estado actual (junio 2026)
 
