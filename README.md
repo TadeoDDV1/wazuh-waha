@@ -23,6 +23,9 @@ Wazuh manager (ver WAZUH_SERVER_IP en .env)
 - ✅ Relay `wazuh-waha` con FastAPI + dedup multi-worker + templates.
 - ✅ Manager Wazuh configurado con `<integration>` y reglas custom.
 - ✅ Pipeline end-to-end validado (alerta real → WhatsApp recibido).
+- ✅ Watchdog de sesión WAHA (`wazuh-waha-watchdog.timer` cada 5 min).
+- ✅ Watchdog de drift de IP del manager (`watch_manager_ip.timer` cada 5 min).
+- ✅ Heartbeat de boot (`wazuh-waha-boot-notify`): email + WhatsApp al iniciar el host.
 
 ## Quickstart (5 pasos para alguien nuevo)
 
@@ -31,6 +34,24 @@ Wazuh manager (ver WAZUH_SERVER_IP en .env)
 3. Instalar el relay: `bash scripts/install-wazuh-waha.sh` (necesita TTY con sudo).
 4. Instalar en la VM del manager: ver [`docs/deployment.md` §2](docs/deployment.md).
 5. Test: `bash scripts/diagnose.sh` para ver el estado de toda la stack.
+
+## Heartbeat de boot (email + WhatsApp al iniciar el host)
+
+Manda un email siempre, y un WhatsApp si WAHA responde, 90s después del
+boot. Útil para enterarte si el host arrancó bien o si la red cambió
+mientras estabas fuera.
+
+```bash
+sudo cp deploy/arch-host/wazuh-waha-boot-notify.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wazuh-waha-boot-notify.timer
+```
+
+Orden de notificación: **email primero, WhatsApp después** (no al revés),
+para que si WAHA está caido igual te enteres por correo.
+
+Ver [`docs/boot-notify.md`](docs/boot-notify.md) para detalle completo,
+testing y troubleshooting.
 
 ## Comandos frecuentes
 
@@ -61,18 +82,29 @@ bash scripts/diagnose.sh
 ## Estructura del proyecto
 
 ```
-wazuh-waha/
-├── README.md                # este archivo
-├── ARCHITECTURE.md          # decisiones técnicas, diagrama
-├── CHANGELOG.md             # historial de cambios
-├── PLAN.md                  # plan de mejora y reorganización
-├── .env.example             # plantilla de variables
-├── docker-compose.yml       # WAHA
-├── docs/                    # documentación larga
-├── scripts/                 # bash ejecutables
-├── wazuh-waha/              # servicio Python (el relay)
-├── manager/                 # archivos para la VM Wazuh
-└── deploy/                  # config específica por host
+wazuh-waha/                       ← repo root
+├── README.md                     # este archivo
+├── ARCHITECTURE.md               # decisiones técnicas, diagrama
+├── CHANGELOG.md                  # historial de cambios
+├── .env.example                  # plantilla de variables
+├── docker-compose.yml            # WAHA
+├── docs/                         # documentación larga
+├── scripts/                      # bash ejecutables
+├── relay/                        # servicio Python (el relay FastAPI)
+│   ├── pyproject.toml
+│   ├── systemd/                  # *.service + *.timer para relay + watchdog
+│   └── wazuh_waha/               # módulo Python (main, config, dedup, etc.)
+├── manager-side/                 # archivos para subir a la VM Wazuh
+│   ├── ossec.conf.snippet.xml
+│   ├── rules/local_rules.xml
+│   └── wsl-relay.conf.example
+├── deploy/                       # config específica por host
+│   ├── arch-host/                # systemd override + env file para este host
+│   └── vm-manager/               # scripts para la VM del manager
+├── tests/                        # tests del relay
+└── _archive/                     # código legacy (no se deploya)
+    ├── whatsapp_alert.py         # versión vieja del relay, reemplazada
+    └── wazuh-integration/         # carpeta del proyecto original (vacía)
 ```
 
 ## Documentación

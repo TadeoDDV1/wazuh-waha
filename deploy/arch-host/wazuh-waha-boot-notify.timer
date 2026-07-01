@@ -1,0 +1,29 @@
+# =============================================================================
+# wazuh-waha-boot-notify.timer - Dispara el heartbeat 90s despues del boot.
+# =============================================================================
+# Por que 90s:
+#   - network-online.target: la red levanta rapido (~5s en Arch con NetworkManager)
+#   - docker.service: ~10-20s en Arch
+#   - wazuh-waha.service: depende del venv y de fastapi (otro ~5-10s)
+#   - WAHA container: ~20-40s en escanear QR si es fresh install, ~5s si ya esta autenticado
+#   - 90s es margen prudente para que todo este settled antes de notificar
+#
+# Persistent=true: si el host estuvo apagado y systemd se inicia tarde,
+# el timer dispara apenas sea posible (no se pierde el evento).
+# =============================================================================
+
+[Unit]
+Description=wazuh-waha: heartbeat de boot (dispara 90s despues del arranque)
+Documentation=file:///home/tadeo/Desktop/wazuh-waha/docs/boot-notify.md
+
+[Timer]
+OnBootSec=90s
+# No se repite: este timer es one-shot (el unit service es Type=oneshot).
+# Si queremos reintento, lo hace el service Restart= (no lo seteamos porque
+# sino spamea WhatsApps en cada restart manual del unit).
+Persistent=true
+# AccuracySec chico: queremos disparar cerca del OnBootSec, no esperar 5 min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

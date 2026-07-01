@@ -1,0 +1,41 @@
+# =============================================================================
+# wazuh-waha-boot-notify.service - Heartbeat de boot del host Arch.
+# =============================================================================
+# Manda UN email (siempre) + UN WhatsApp (si WAHA responde) con el estado de
+# todo el stack al iniciar el host. Triggered por el .timer con OnBootSec=90s.
+#
+# Dependencias:
+#   - network-online.target: la red tiene que estar arriba
+#   - docker.service: WAHA (contenedor) tiene que existir (puede estar STARTING)
+#   - wazuh-waha.service: el relay tiene que estar healthy (sino no llega WA)
+#
+# NO es un watchdog periodico (eso son wazuh-waha-watchdog y watch_manager_ip).
+# Es one-shot at boot. Si el host no rebooteo, este unit no corre.
+# =============================================================================
+
+[Unit]
+Description=wazuh-waha: heartbeat de boot (email + WhatsApp)
+Documentation=file:///home/tadeo/Desktop/wazuh-waha/docs/boot-notify.md
+After=network-online.target docker.service wazuh-waha.service
+Wants=docker.service wazuh-waha.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/wazuh-waha/relay.env
+
+# Ejecutar bajo el python del venv del relay para que tenga las deps (httpx, fastapi, etc)
+ExecStart=/home/tadeo/Desktop/wazuh-waha/relay/.venv/bin/python /home/tadeo/Desktop/wazuh-waha/scripts/boot-notify.py
+
+# Timeouts: el SMTP puede tardar (TLS handshake + auth). 2 min alcanza.
+TimeoutStartSec=120
+
+# Logs al journal (los recoje systemd + el wrapper ya loguea a stderr)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wazuh-waha-boot-notify
+
+# Para que solo corra una vez al boot y no quede zombie
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
