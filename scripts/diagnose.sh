@@ -3,7 +3,7 @@
 # NO modifica nada. Solo lee.
 #
 # Variables opcionales (de .env o exportadas):
-#   WAZUH_SERVER_IP       IP del manager Wazuh. FUENTE DE VERDAD (default 172.44.30.12).
+#   WAZUH_SERVER_IP       IP del manager Wazuh. FUENTE DE VERDAD (default 172.44.30.14).
 #                         Si no esta, cae a WAZUH_MANAGER_HOST o WAZUH_VM_SSH_HOST
 #                         (aliases deprecated, mantendidos por compat).
 #   WAZUH_VM_SSH_USER     Usuario SSH (default tadeou7)
@@ -18,7 +18,7 @@
 set +e
 
 # Resolver IP del manager: prioridad WAZUH_SERVER_IP > WAZUH_MANAGER_HOST > WAZUH_VM_SSH_HOST
-WAZUH_SERVER_IP_RESOLVED="${WAZUH_SERVER_IP:-${WAZUH_MANAGER_HOST:-${WAZUH_VM_SSH_HOST:-172.44.30.12}}}"
+WAZUH_SERVER_IP_RESOLVED="${WAZUH_SERVER_IP:-${WAZUH_MANAGER_HOST:-${WAZUH_VM_SSH_HOST:-172.44.30.14}}}"
 
 # Defaults (aliases deprecated se mantienen por compat pero usan la IP resuelta)
 WAZUH_VM_SSH_HOST="${WAZUH_VM_SSH_HOST:-${WAZUH_SERVER_IP_RESOLVED}}"
@@ -37,6 +37,8 @@ warn() { echo -e "${YEL}[WARN]${NC} $1"; }
 sep()  { echo -e "\n${YEL}========== $1 ==========${NC}"; }
 
 # Cargar .env si existe en el cwd o ~/Desktop/wazuh-waha/.env
+# (PROJECT_ROOT se mantiene como ~/Desktop/wazuh-waha aunque el codigo
+#  viva en ~/Desktop/wazuh-waha/relay/, por compat con instalacion previa)
 if [ -f .env ]; then
   set -a; source .env; set +a
 elif [ -f ~/Desktop/wazuh-waha/.env ]; then
@@ -129,7 +131,7 @@ fi
 
 sep "12. Estructura del repo"
 ls -la ~/Desktop/wazuh-waha/ 2>&1 | head -15
-ls -la ~/Desktop/wazuh-waha/wazuh-waha/ 2>&1 | head -10
+ls -la ~/Desktop/wazuh-waha/relay/ 2>&1 | head -10
 
 echo
 echo -e "${GRN}========== FIN DIAGNOSTICO ==========${NC}"

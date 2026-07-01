@@ -21,7 +21,7 @@ Uso:
   python3 scripts/render_manager_snippet.py --with-key > /tmp/integration.xml
 
   # Redirigir directamente a la VM via scp:
-  python3 scripts/render_manager_snippet.py --with-key | ssh tadeou7@172.44.30.12 \
+  python3 scripts/render_manager_snippet.py --with-key | ssh tadeou7@172.44.30.14 \
     'cat > /tmp/integration.xml'
 
 Por que --with-key es opt-in:

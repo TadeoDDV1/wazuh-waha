@@ -34,7 +34,7 @@ ssh tadeou7@$(grep ^WAZUH_SERVER_IP .env | cut -d= -f2) \
 
 1. Abrir `ossec.conf.snippet.xml`.
 2. Reemplazar los placeholders:
-   - `REEMPLAZAR_RELAY_HOST` → el valor de `WAZUH_SERVER_IP` del `.env` (ej `172.44.30.12`).
+   - `REEMPLAZAR_RELAY_HOST` → el valor de `WAZUH_SERVER_IP` del `.env` (ej `172.44.30.14`).
    - `REEMPLAZAR_RELAY_API_KEY` → el valor de `RELAY_API_KEY` en
      `/etc/wazuh-waha/relay.env` del host del relay.
 3. Pegar el bloque dentro de `<ossec_config>` en

@@ -36,6 +36,34 @@ class Settings(BaseSettings):
     waha_host: str = "http://localhost:3000"
     waha_session: str = "default"
 
+    # --- Wazuh Manager API (para reportar health events) ---
+    wazuh_manager_host: str = ""
+    wazuh_manager_api_port: int = 55000
+    wazuh_manager_api_user: str = "wazuh"
+    wazuh_manager_api_pass: str = ""
+    wazuh_manager_api_verify_tls: bool = False
+
+    # --- Email backup (opcional, vacio = desactivado) ---
+    email_provider: str = "smtp"               # smtp | hyvor_relay
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_pass: str = ""
+    smtp_from: str = "wazuh-waha@localhost"
+    smtp_to: str = ""
+    smtp_tls: bool = True
+
+    # --- Hyvor Relay (email API auto-hosteada) ---
+    hyvor_base_url: str = ""                   # ej: http://localhost:8000 o https://relay.tudominio.com
+    hyvor_api_key: str = ""                    # API key con scope sends.send
+    hyvor_from: str = "wazuh-waha@localhost"   # debe ser dominio verificado en Hyvor
+    hyvor_to: str = ""                         # email destino
+
+    # --- Auto-recovery de sesion WAHA ---
+    waha_recovery_cooldown_sec: int = 300
+    waha_recovery_max_wait_sec: int = 60
+    waha_watchdog_interval_sec: int = 300
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",

@@ -28,6 +28,15 @@ if VENV_PY.exists() and Path(sys.executable).resolve() != VENV_PY.resolve():
 
 sys.path.insert(0, str(PROJECT_ROOT / "relay"))
 
+# Configurar logger basico para que notifier loguee a stderr cuando se llama
+# standalone (el main.py hace lo mismo pero no se importa aca).
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-7s] %(name)s :: %(message)s",
+    stream=sys.stderr,
+)
+
 from wazuh_waha import notifier  # noqa: E402
 
 

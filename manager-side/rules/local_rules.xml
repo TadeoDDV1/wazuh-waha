@@ -1,24 +1,32 @@
 <!--
   =============================================================================
-  Reglas locales para Wazuh - Login exitoso y eventos relacionados
+  Reglas locales para Wazuh - Login exitoso + Health events del pipeline
   =============================================================================
   Copiar a la VM en: /var/ossec/etc/rules/local_rules.xml
   Reiniciar manager:  sudo systemctl restart wazuh-manager
 
-  Estas reglas SUBEN el level de los eventos de "login exitoso" que por
-  defecto estan en level 3 (informational, debajo del umbral 10 del
-  integration) a level 8-12, para que disparen el WhatsApp.
+  Reglas 57100-57106 suben el level de los eventos de "login exitoso"
+  que por defecto estan en level 3 (informational, debajo del umbral 10
+  del integration) a level 8-12, para que disparen el WhatsApp.
 
-  IDs usados: 57100-57199 (rango custom, fuera de stock Wazuh).
+  Regla 999001 matchea alertas generadas por el relay wazuh-waha cuando
+  detecta problemas con la sesion WAHA. El relay las inyecta al manager
+  via la API REST (endpoint /alerts puerto 55000). El manager las procesa
+  y, si level >= 8, las manda al integration -> WhatsApp. Si WAHA esta
+  caido, la alerta queda encolada y sale apenas vuelva.
+
+  IDs usados:
+    - 57100-57106  : login success (SSH, su, sudo, TTY)
+    - 999001       : WAHA health event
 
   NOTA SOBRE if_sid: usamos una combinacion de <if_sid> (cuando estamos
-  seguros del ID padre) Y <match> (regex sobre el log) para ser
-  robustos. Si el ID padre cambia entre versiones de Wazuh, el <match>
-  sigue funcionando.
+  seguros del ID padre) Y <match> (regex sobre el log) para ser robustos.
+  Si el ID padre cambia entre versiones de Wazuh, el <match> sigue
+  funcionando.
   =============================================================================
 -->
 
-<group name="local,authentication_success,">
+<group name="local,authentication_success,waha_health,">
 
   <!-- 57100: SSH login exitoso - se cuelga de la regla stock 5715 (level 3 -> 10) -->
   <rule id="57100" level="10">
@@ -72,6 +80,17 @@
     <match>pam_unix(login:session): session closed for user</match>
     <description>Logout / sesion cerrada</description>
     <group>authentication_success,session_close</group>
+  </rule>
+
+  <!-- 999001: Health event de WAHA. El relay inyecta estas alertas via -->
+  <!-- POST al manager (puerto 55000 /alerts). El body trae descripcion con -->
+  <!-- "WAHA session ..." y level 10 (recovered) o 15 (failed). Esta regla -->
+  <!-- matchea por regex en la descripcion y etiqueta con grupos waha_health. -->
+  <rule id="999001" level="10">
+    <decoded_as>json</decoded_as>
+    <match>WAHA session</match>
+    <description>WAHA health event (relay)</description>
+    <group>waha_health,auto_recovery</group>
   </rule>
 
 </group>

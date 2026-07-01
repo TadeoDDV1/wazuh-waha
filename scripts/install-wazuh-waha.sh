@@ -15,7 +15,7 @@ if [ ! -d "$PROJECT_ROOT" ]; then
   exit 1
 fi
 
-UNIT_SRC="$PROJECT_ROOT/wazuh-waha/systemd/wazuh-waha.service"
+UNIT_SRC="$PROJECT_ROOT/relay/systemd/wazuh-waha.service"
 if [ ! -f "$UNIT_SRC" ]; then
   echo "ERROR: no encuentro $UNIT_SRC"
   exit 1
@@ -47,7 +47,21 @@ sudo systemctl enable wazuh-waha.service
 sudo systemctl restart wazuh-waha.service
 echo "OK"
 
-echo "=== 5. Verificar ==="
+echo "=== 5. Instalar watchdog (chequea sesion WAHA cada 5 min) ==="
+WATCHDOG_SERVICE="$PROJECT_ROOT/relay/systemd/wazuh-waha-watchdog.service"
+WATCHDOG_TIMER="$PROJECT_ROOT/relay/systemd/wazuh-waha-watchdog.timer"
+if [ -f "$WATCHDOG_SERVICE" ] && [ -f "$WATCHDOG_TIMER" ]; then
+  sudo cp "$WATCHDOG_SERVICE" /etc/systemd/system/wazuh-waha-watchdog.service
+  sudo cp "$WATCHDOG_TIMER" /etc/systemd/system/wazuh-waha-watchdog.timer
+  sudo systemctl daemon-reload
+  sudo systemctl enable wazuh-waha-watchdog.timer
+  sudo systemctl start wazuh-waha-watchdog.timer
+  echo "Watchdog instalado y habilitado (cada 5 min)"
+else
+  echo "WARN: no encuentro los unit files del watchdog, saltando"
+fi
+
+echo "=== 6. Verificar ==="
 sleep 2
 sudo systemctl status wazuh-waha.service --no-pager
 echo "---"
@@ -56,3 +70,4 @@ echo ""
 
 echo "=== Listo. Para ver logs: ==="
 echo "  journalctl -u wazuh-waha -f"
+echo "  journalctl -u wazuh-waha-watchdog -f"

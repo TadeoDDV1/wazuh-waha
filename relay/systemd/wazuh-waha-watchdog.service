@@ -1,0 +1,17 @@
+[Unit]
+Description=wazuh-waha watchdog (chequea sesion WAHA y recupera si cayo)
+Documentation=file:///home/tadeo/Desktop/wazuh-waha/README.md
+After=network-online.target docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/wazuh-waha/relay.env
+# scripts/waha-watchdog.sh vive en el repo root, NO en relay/
+ExecStart=/home/tadeo/Desktop/wazuh-waha/scripts/waha-watchdog.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
