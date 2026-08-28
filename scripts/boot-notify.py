@@ -45,7 +45,7 @@ logging.basicConfig(
 log = logging.getLogger("boot-notify")
 
 # Cargar notifier y waha_client del paquete del relay
-from wazuh_waha import notifier, waha_client  # noqa: E402
+from wazuh_waha.infrastructure import notifier, waha_client  # noqa: E402
 from wazuh_waha.config import settings  # noqa: E402
 
 BOOT_STACK_SCRIPT = PROJECT_ROOT / "scripts" / "boot_stack_status.sh"

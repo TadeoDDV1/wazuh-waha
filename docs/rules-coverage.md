@@ -23,6 +23,13 @@ Mapeo rule_id → plantilla de mensaje → level mínimo en el `<integration>`.
 | 57105 | Login local TTY (custom) | `templates.py:local_login` | 8 | authentication_success |
 | 57106 | Logout (custom) | `templates.py:logout` | 3 | authentication_success |
 
+| 23505 | CVE de severidad HIGH (stock) | `templates.py:vuln_high` | 10 | vulnerability_detector |
+| 23506 | CVE de severidad CRITICAL (stock) | `templates.py:vuln_critical` | 12 | vulnerability_detector |
+| 57107 | CVE de severidad MEDIUM (custom) | `templates.py:vuln_medium` | 8 | vulnerability_detector |
+| 57108 | CVE de severidad LOW (custom) | `templates.py:vuln_low` | 8 | vulnerability_detector |
+| 57109 | CVE resuelta (custom) | `templates.py:vuln_solved` | 8 | vulnerability_detector |
+| 57110 | Vulnerabilidades limpiadas (custom) | `templates.py:vuln_cleared` | 8 | vulnerability_detector |
+
 ## Cómo agregar un nuevo template
 
 1. Editar `wazuh-waha/wazuh_waha/templates.py`.

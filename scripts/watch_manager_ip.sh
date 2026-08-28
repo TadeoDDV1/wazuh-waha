@@ -42,7 +42,7 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 CURRENT_IP="${WAZUH_SERVER_IP:-}"
-FALLBACK_IPS="${WAZUH_SERVER_IP_FALLBACK:-}"  # ej: "192.168.1.82,172.44.30.14"
+FALLBACK_IPS="${WAZUH_SERVER_IP_FALLBACK:-}"  # ej: "192.168.1.82,172.44.30.5"
 
 # Estado anterior del IP (para detectar cambio)
 PREVIOUS_IP=""

@@ -26,7 +26,7 @@ del código.
           ▼
 ┌────────────────────────────────────────────────────────────┐
 │  wazuh-waha (FastAPI + uvicorn --workers 2)                │
-│  Host: 172.44.30.9:8765                                    │
+│  Host: 172.44.30.8:8765                                    │
 │                                                            │
 │  1) verify_api_key  (compara X-Api-Key con RELAY_API_KEY)  │
 │  2) format_alert:                                          │

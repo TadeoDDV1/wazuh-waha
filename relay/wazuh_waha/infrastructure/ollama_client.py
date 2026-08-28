@@ -1,11 +1,6 @@
-
-"""
-Cliente async para Ollama (IA local).
-Si Ollama esta caido, devuelve None y el caller cae a template default.
-"""
 import httpx
 
-from .config import settings
+from ..config import settings
 
 
 SYSTEM_PROMPT = (
@@ -16,7 +11,6 @@ SYSTEM_PROMPT = (
 
 
 async def summarize(alert, timeout=None):
-    """Devuelve un resumen de 2 oraciones, o None si Ollama falla."""
     rule = alert.get("rule", {}) or {}
     agent = alert.get("agent", {}) or {}
     rid = rule.get("id", "?")

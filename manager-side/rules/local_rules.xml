@@ -17,6 +17,7 @@
 
   IDs usados:
     - 57100-57106  : login success (SSH, su, sudo, TTY)
+    - 57107-57110  : vulnerability-detector (CVE)
     - 999001       : WAHA health event
 
   NOTA SOBRE if_sid: usamos una combinacion de <if_sid> (cuando estamos
@@ -80,6 +81,54 @@
     <match>pam_unix(login:session): session closed for user</match>
     <description>Logout / sesion cerrada</description>
     <group>authentication_success,session_close</group>
+  </rule>
+
+  <!-- =========================================================================
+    Reglas para Vulnerability Detector — CVE activas
+    =========================================================================
+    Los rule IDs stock del vulnerability-detector son:
+      23501: Vulnerability affects a software package (level 5, padre)
+      23503: Active LOW severity vulnerability (level 5)
+      23504: Active MEDIUM severity (level 7)
+      23505: Active HIGH severity (level 10)
+      23506: Active CRITICAL severity (level 12)
+      23502: Solved (level 3)
+      23507: Cleared (level 3)
+      23508: Awaiting CVE analysis (level 3)
+
+    La integracion de WhatsApp solo se dispara con level >= 8. Las reglas
+    stock 23505 (HIGH, level 10) y 23506 (CRITICAL, level 12) YA pasan el
+    umbral. Las reglas 23503 (LOW, level 5) y 23504 (MEDIUM, level 7) no.
+    Estas reglas custom elevan LOW y MEDIUM a level 8 para que tambien
+    disparen el WhatsApp.
+  -->
+
+  <!-- 57107: CVE de severidad MEDIUM -> sube de level 7 a 8 -->
+  <rule id="57107" level="8">
+    <if_sid>23504</if_sid>
+    <description>Vulnerabilidad MEDIA detectada</description>
+    <group>vulnerability_detector,cve</group>
+  </rule>
+
+  <!-- 57108: CVE de severidad LOW -> sube de level 5 a 8 -->
+  <rule id="57108" level="8">
+    <if_sid>23503</if_sid>
+    <description>Vulnerabilidad BAJA detectada</description>
+    <group>vulnerability_detector,cve</group>
+  </rule>
+
+  <!-- 57109: CVE resuelta (solved) -> sube de level 3 a 8 para informar -->
+  <rule id="57109" level="8">
+    <if_sid>23502</if_sid>
+    <description>Vulnerabilidad resuelta</description>
+    <group>vulnerability_detector,cve,solved</group>
+  </rule>
+
+  <!-- 57110: CVE con estado "Clear" (todas limpiadas) -> sube de level 3 a 8 -->
+  <rule id="57110" level="8">
+    <if_sid>23507</if_sid>
+    <description>Vulnerabilidades limpiadas</description>
+    <group>vulnerability_detector,cve,clear</group>
   </rule>
 
   <!-- 999001: Health event de WAHA. El relay inyecta estas alertas via -->

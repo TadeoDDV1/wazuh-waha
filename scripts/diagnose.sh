@@ -3,30 +3,30 @@
 # NO modifica nada. Solo lee.
 #
 # Variables opcionales (de .env o exportadas):
-#   WAZUH_SERVER_IP       IP del manager Wazuh. FUENTE DE VERDAD (default 172.44.30.14).
+#   WAZUH_SERVER_IP       IP del manager Wazuh. FUENTE DE VERDAD (default 172.44.30.5).
 #                         Si no esta, cae a WAZUH_MANAGER_HOST o WAZUH_VM_SSH_HOST
 #                         (aliases deprecated, mantendidos por compat).
 #   WAZUH_VM_SSH_USER     Usuario SSH (default tadeou7)
 #   WAZUH_VM_SSH_PORT     Puerto SSH (default 22)
 #   WAZUH_VM_SSH_PASS     Pass SSH. Si no esta seteada, se skipea el ssh test.
-#   WAHA_HOST             URL base de WAHA (default http://172.44.30.9:3000)
-#   RELAY_HOST            URL base del relay (default http://172.44.30.9:8765)
-#   OLLAMA_HOST           URL base de Ollama (default http://172.44.30.9:11434)
+#   WAHA_HOST             URL base de WAHA (default http://172.44.30.8:3000)
+#   RELAY_HOST            URL base del relay (default http://172.44.30.8:8765)
+#   OLLAMA_HOST           URL base de Ollama (default http://172.44.30.8:11434)
 #   WAZUH_MANAGER_API_USER (default wazuh)
 #   WAZUH_MANAGER_API_PASS Si no esta seteada, se skipea el test de la API.
 
 set +e
 
 # Resolver IP del manager: prioridad WAZUH_SERVER_IP > WAZUH_MANAGER_HOST > WAZUH_VM_SSH_HOST
-WAZUH_SERVER_IP_RESOLVED="${WAZUH_SERVER_IP:-${WAZUH_MANAGER_HOST:-${WAZUH_VM_SSH_HOST:-172.44.30.14}}}"
+WAZUH_SERVER_IP_RESOLVED="${WAZUH_SERVER_IP:-${WAZUH_MANAGER_HOST:-${WAZUH_VM_SSH_HOST:-172.44.30.5}}}"
 
 # Defaults (aliases deprecated se mantienen por compat pero usan la IP resuelta)
 WAZUH_VM_SSH_HOST="${WAZUH_VM_SSH_HOST:-${WAZUH_SERVER_IP_RESOLVED}}"
 WAZUH_VM_SSH_USER="${WAZUH_VM_SSH_USER:-tadeou7}"
 WAZUH_VM_SSH_PORT="${WAZUH_VM_SSH_PORT:-22}"
-WAHA_HOST="${WAHA_HOST:-http://172.44.30.9:3000}"
-RELAY_HOST="${RELAY_HOST:-http://172.44.30.9:8765}"
-OLLAMA_HOST="${OLLAMA_HOST:-http://172.44.30.9:11434}"
+WAHA_HOST="${WAHA_HOST:-http://172.44.30.8:3000}"
+RELAY_HOST="${RELAY_HOST:-http://172.44.30.8:8765}"
+OLLAMA_HOST="${OLLAMA_HOST:-http://172.44.30.8:11434}"
 WAZUH_MANAGER_API_HOST="${WAZUH_MANAGER_API_HOST:-${WAZUH_SERVER_IP_RESOLVED}}"
 WAZUH_MANAGER_API_USER="${WAZUH_MANAGER_API_USER:-wazuh}"
 

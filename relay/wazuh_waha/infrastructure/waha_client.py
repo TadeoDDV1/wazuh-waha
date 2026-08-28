@@ -1,8 +1,3 @@
-"""
-Cliente async para WAHA (WhatsApp HTTP API).
-Con logging detallado de cada paso del envio + counter de fallos +
-auto-recovery cuando la sesion esta STOPPED.
-"""
 import asyncio
 import logging
 import time
@@ -12,17 +7,15 @@ from threading import Lock
 import httpx
 
 from . import notifier
-from .config import settings
+from ..config import settings
 
 log = logging.getLogger("wazuh-waha.waha")
 
-# --- Counter de fallos para detectar sesion WAHA rota ---
 _fail_window: deque[float] = deque(maxlen=20)
 _fail_lock = Lock()
 FAIL_THRESHOLD = 5
 FAIL_WINDOW_SEC = 60
 
-# --- Auto-recovery: anti-loop entre requests concurrentes ---
 _recovery_lock = asyncio.Lock()
 _recovery_in_progress = False
 _recovery_last_attempt: float = 0.0
@@ -33,7 +26,6 @@ class WAHAError(Exception):
 
 
 def _record_failure() -> int:
-    """Registra un fallo y devuelve la cantidad en la ventana movil."""
     with _fail_lock:
         now = time.time()
         _fail_window.append(now)
@@ -48,7 +40,6 @@ def _reset_failures() -> None:
 
 
 def _check_failure_threshold(count: int) -> None:
-    """Si hay muchos fallos seguidos, log CRITICAL con sugerencia."""
     if count >= FAIL_THRESHOLD:
         log.critical(
             "waha_send_alerting_failures count=%d window=%ds "
@@ -59,7 +50,6 @@ def _check_failure_threshold(count: int) -> None:
 
 
 def _is_session_stopped_error(body_text: str) -> bool:
-    """Detecta si un 422 de WAHA indica sesion STOPPED (caso recuperable)."""
     if not body_text:
         return False
     low = body_text.lower()
@@ -67,7 +57,6 @@ def _is_session_stopped_error(body_text: str) -> bool:
 
 
 async def _stop_session(client: httpx.AsyncClient) -> None:
-    """POST /sessions/{name}/stop. Best-effort."""
     try:
         url = f"{settings.waha_host}/api/sessions/{settings.waha_session}/stop"
         r = await client.post(url, headers={"X-Api-Key": settings.waha_api_key})
@@ -78,7 +67,6 @@ async def _stop_session(client: httpx.AsyncClient) -> None:
 
 
 async def _start_session(client: httpx.AsyncClient) -> None:
-    """POST /sessions/{name}/start. Best-effort."""
     try:
         url = f"{settings.waha_host}/api/sessions/{settings.waha_session}/start"
         r = await client.post(url, headers={"X-Api-Key": settings.waha_api_key})
@@ -89,7 +77,6 @@ async def _start_session(client: httpx.AsyncClient) -> None:
 
 
 async def _get_session_status(client: httpx.AsyncClient) -> str:
-    """Devuelve el campo status de la sesion o 'unknown' si falla."""
     try:
         url = f"{settings.waha_host}/api/sessions/{settings.waha_session}"
         r = await client.get(url, headers={"X-Api-Key": settings.waha_api_key})
@@ -101,12 +88,6 @@ async def _get_session_status(client: httpx.AsyncClient) -> str:
 
 
 async def _auto_recover_session() -> None:
-    """
-    Intenta recuperar la sesion WAHA en background.
-    Secuencia: stop -> wait 5s -> start -> poll hasta WORKING (max wait).
-    Notifica el resultado por Wazuh API + email.
-    Anti-loop: cooldown global y lock para evitar N recoveries simultaneos.
-    """
     global _recovery_in_progress, _recovery_last_attempt
 
     async with _recovery_lock:
@@ -195,7 +176,6 @@ async def _auto_recover_session() -> None:
 
 
 async def send_text(text: str, chat_id: str | None = None, session: str | None = None) -> dict:
-    """Envia mensaje de texto. Devuelve respuesta cruda de WAHA."""
     final_chat = chat_id or settings.admin_chat_id
     final_session = session or settings.waha_session
     payload = {
@@ -243,7 +223,6 @@ async def send_text(text: str, chat_id: str | None = None, session: str | None =
             )
             _check_failure_threshold(fails)
 
-            # Branch especifico: sesion STOPPED -> auto-recovery en background.
             if r.status_code == 422 and _is_session_stopped_error(body_txt):
                 log.critical(
                     "waha_session_stopped_detected session=%s triggering_auto_recovery",

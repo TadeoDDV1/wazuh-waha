@@ -1,9 +1,3 @@
-
-"""
-Plantillas de mensaje preprogramadas por rule_id de Wazuh.
-Si el rule_id matchea, se usa esta plantilla (cero IA, cero latencia).
-Si no matchea, cae a IA o a _default.
-"""
 from typing import Callable
 
 TemplateFn = Callable[[dict], str]
@@ -15,7 +9,6 @@ def _agent(alert: dict) -> str:
 
 
 def _field(alert: dict, *path: str, default: str = "?") -> str:
-    """Busca recursivamente en data/agent/full_log."""
     candidates = [alert.get("data", {}) or {}, alert.get("agent", {}) or {}]
     for root in candidates:
         cur = root
@@ -26,14 +19,26 @@ def _field(alert: dict, *path: str, default: str = "?") -> str:
             cur = cur.get(k)
         if cur is not None:
             return str(cur)
-    # fallback a full_log
     log = alert.get("full_log", "") or ""
     return log[:80] + ("..." if len(log) > 80 else "")
 
 
-# Mapa: rule_id -> funcion que arma el mensaje
+def _vuln(alert: dict, *path: str, default: str = "?") -> str:
+    vuln = alert.get("data", {}).get("vulnerability") or {}
+    cur = vuln
+    for k in path:
+        if not isinstance(cur, dict):
+            return default
+        cur = cur.get(k, default)
+    return str(cur) if cur is not None else default
+
+
+def _cvss(alert: dict, version: str = "cvss3", default: str = "?") -> str:
+    return _vuln(alert, "cvss", version, "base_score", default=default)
+
+
 TEMPLATES: dict[str, TemplateFn] = {
-    # --- SSH / auth ---
+    # --- Seguridad existente ---
     "5710": lambda a: (
         f"🔐 *SSH fallido*\n"
         f"Agente: `{_agent(a)}`\n"
@@ -54,8 +59,6 @@ TEMPLATES: dict[str, TemplateFn] = {
         f"🔐 *sudo fallido*\n"
         f"Agente: `{_agent(a)}`"
     ),
-
-    # --- FIM (File Integrity Monitoring) ---
     "550": lambda a: (
         f"📁 *Archivo nuevo*\n"
         f"Agente: `{_agent(a)}`\n"
@@ -71,15 +74,11 @@ TEMPLATES: dict[str, TemplateFn] = {
         f"Agente: `{_agent(a)}`\n"
         f"Path: `{_field(a, 'path', default=_field(a, 'file', default='?'))}`"
     ),
-
-    # --- Permisos / SUID ---
     "520": lambda a: (
         f"⚠️ *Binario SUID*\n"
         f"Agente: `{_agent(a)}`\n"
         f"Path: `{_field(a, 'path', default='?')}`"
     ),
-
-    # --- Web / Descargas ---
     "2902": lambda a: (
         f"🌐 *Descarga web*\n"
         f"Agente: `{_agent(a)}`\n"
@@ -90,8 +89,7 @@ TEMPLATES: dict[str, TemplateFn] = {
         f"Agente: `{_agent(a)}`\n"
         f"URL: `{_field(a, 'url')}`"
     ),
-
-    # --- Login exitoso (reglas custom 57100-57106) ---
+    # --- Login exitoso (custom) ---
     "57100": lambda a: (
         f"✅ *Login SSH exitoso*\n"
         f"Agente: `{_agent(a)}`\n"
@@ -160,11 +158,55 @@ TEMPLATES: dict[str, TemplateFn] = {
         f"Log: `{a.get('full_log', '')[:160]}`\n"
         f"Hora: `{a.get('timestamp', '?')}`"
     ),
+    # --- Vulnerability Detector ---
+    "23505": lambda a: (
+        f"🛡️ *Vulnerabilidad ALTA*\n"
+        f"CVE: `{_vuln(a, 'cve')}`\n"
+        f"Paquete: `{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}`\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"CVSS: `{_cvss(a, 'cvss3')} / {_cvss(a, 'cvss2')}`\n"
+        f"Publicado: `{_vuln(a, 'published', default='?')[:10]}`"
+    ),
+    "23506": lambda a: (
+        f"🚨 *Vulnerabilidad CRITICA*\n"
+        f"CVE: `{_vuln(a, 'cve')}`\n"
+        f"Paquete: `{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}`\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"CVSS: `{_cvss(a, 'cvss3')} / {_cvss(a, 'cvss2')}`\n"
+        f"Severidad: `{_vuln(a, 'severity')}`\n"
+        f"Publicado: `{_vuln(a, 'published', default='?')[:10]}`"
+    ),
+    "57107": lambda a: (
+        f"🟡 *Vulnerabilidad MEDIA*\n"
+        f"CVE: `{_vuln(a, 'cve')}`\n"
+        f"Paquete: `{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}`\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"CVSS: `{_cvss(a, 'cvss3')} / {_cvss(a, 'cvss2')}`"
+    ),
+    "57108": lambda a: (
+        f"🟢 *Vulnerabilidad BAJA*\n"
+        f"CVE: `{_vuln(a, 'cve')}`\n"
+        f"Paquete: `{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}`\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"CVSS: `{_cvss(a, 'cvss3')} / {_cvss(a, 'cvss2')}`"
+    ),
+    "57109": lambda a: (
+        f"✅ *Vulnerabilidad RESUELTA*\n"
+        f"CVE: `{_vuln(a, 'cve')}`\n"
+        f"Paquete: `{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}`\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Severidad: `{_vuln(a, 'severity')}`\n"
+        f"CVSS: `{_cvss(a, 'cvss3')} / {_cvss(a, 'cvss2')}`"
+    ),
+    "57110": lambda a: (
+        f"🧹 *Vulnerabilidades limpiadas*\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Se limpiaron todas las vulnerabilidades del inventario"
+    ),
 }
 
 
 def render(rule_id: str, alert: dict) -> str | None:
-    """Devuelve mensaje formateado o None si no hay plantilla para esta regla."""
     fn = TEMPLATES.get(str(rule_id))
     if fn is None:
         return None
@@ -175,7 +217,6 @@ def render(rule_id: str, alert: dict) -> str | None:
 
 
 def render_default(alert: dict) -> str:
-    """Plantilla generica para alertas sin rule_id templatado (sin IA)."""
     return (
         f"🚨 *Alerta Wazuh*\n"
         f"Regla: `{alert.get('rule', {}).get('id', '?')} - "

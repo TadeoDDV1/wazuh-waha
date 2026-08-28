@@ -11,7 +11,7 @@ services:
     container_name: wazuh-waha
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3000"
     env_file:
       - .env
     environment:
@@ -20,11 +20,11 @@ services:
       NODE_OPTIONS: --max-old-space-size=2048
       PUPPETEER_ARGS: --no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu
       LOG_LEVEL: $${WAHA_LOG_LEVEL:-info}
-      WAHA_PRINT_QR: "false"
+      WAHA_PRINT_QR: "true"
     volumes:
       - waha_sessions:/app/.sessions
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/server/version"]
+      test: ["CMD", "wget", "-qO-", "--header=X-Api-Key: ${WAHA_API_KEY}", "http://localhost:3000/api/server/version"]
       interval: 15s
       timeout: 5s
       retries: 6

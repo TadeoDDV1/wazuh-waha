@@ -4,6 +4,10 @@ Este archivo complementa `ossec.conf.snippet.xml`. El `.xml` tiene **solo** el
 bloque ejecutable (lo que se pega dentro de `<ossec_config>`); este `.md` tiene
 las variantes y la documentación.
 
+> [!TIP]
+> Si queres habilitar **Vulnerability Detection** (CVE) en el manager, segui
+> las instrucciones en `vulnerability-detection.snippet.xml`.
+
 ## Fuente de verdad de la IP del manager
 
 La IP del manager Wazuh vive en **una sola variable** del `.env` del repo:
@@ -34,7 +38,7 @@ ssh tadeou7@$(grep ^WAZUH_SERVER_IP .env | cut -d= -f2) \
 
 1. Abrir `ossec.conf.snippet.xml`.
 2. Reemplazar los placeholders:
-   - `REEMPLAZAR_RELAY_HOST` → el valor de `WAZUH_SERVER_IP` del `.env` (ej `172.44.30.14`).
+   - `REEMPLAZAR_RELAY_HOST` → el valor de `WAZUH_SERVER_IP` del `.env` (ej `172.44.30.5`).
    - `REEMPLAZAR_RELAY_API_KEY` → el valor de `RELAY_API_KEY` en
      `/etc/wazuh-waha/relay.env` del host del relay.
 3. Pegar el bloque dentro de `<ossec_config>` en
@@ -74,7 +78,7 @@ Manda solo las reglas listadas. Útil si querés filtrar por tipo de evento.
   <name>custom-whatsapp-targeted</name>
   <hook_url>http://REEMPLAZAR_RELAY_HOST:8765/alerts</hook_url>
   <api_key>REEMPLAZAR_RELAY_API_KEY</api_key>
-  <rule_id>5710,5712,5715,550,553,554,520,2902,2903</rule_id>
+  <rule_id>5710,5712,5715,550,553,554,520,2902,2903,23505,23506,57107,57108,57109,57110</rule_id>
   <alert_format>json</alert_format>
   <options>--script /var/ossec/integrations/custom/whatsapp_alert.py --timeout 5</options>
 </integration>

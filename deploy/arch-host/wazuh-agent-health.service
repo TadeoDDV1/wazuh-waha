@@ -1,0 +1,28 @@
+# =============================================================================
+# wazuh-agent-health.{service,timer}
+# =============================================================================
+# Health-check periodico del agente Wazuh: cada 5 min chequea que haya una
+# conexion ESTAB al :1514 del manager. Si NO esta, notifica via email+WhatsApp.
+#
+# Complementa al OnFailure= de wazuh-agent (que solo dispara cuando systemd
+# desiste de reiniciar): este timer detecta el caso "el agente corre pero no
+# logra conectar al manager" (ej. IP cambio y nadie se entero).
+# =============================================================================
+
+[Unit]
+Description=wazuh-waha: chequea que wazuh-agent este conectado al manager
+Documentation=file:///home/tadeo/Desktop/wazuh-waha/docs/agent-restart-notifications.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/wazuh-waha/relay.env
+
+ExecStart=/home/tadeo/Desktop/wazuh-waha/scripts/check-agent-connected.sh
+
+# 30s alcanzan: ss + (si aplica) waha-notify.py con SMTP TLS.
+TimeoutStartSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wazuh-agent-health

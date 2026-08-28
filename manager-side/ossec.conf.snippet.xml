@@ -1,15 +1,14 @@
 <integration>
   <name>custom-whatsapp</name>
-  <hook_url>http://REEMPLAZAR_RELAY_HOST:8765/alerts</hook_url>
-  <api_key>REEMPLAZAR_RELAY_API_KEY</api_key>
   <level>8</level>
   <alert_format>json</alert_format>
-  <options>--timeout 5</options>
+  <options>--script /var/ossec/integrations/custom/whatsapp_alert.py --timeout 5</options>
 </integration>
 
 <!--
-  NOTA: Wazuh busca un ejecutable en /var/ossec/integrations/ con el mismo
-  nombre del <name> (custom-whatsapp). Crear un symlink al script real:
-    sudo ln -sf /var/ossec/integrations/custom/whatsapp_alert.py \
-                /var/ossec/integrations/custom-whatsapp
+  NOTA: Wazuh ejecuta el script via <options>--script ...</options>.
+  El script lee la URL del relay y API key desde /var/ossec/etc/wsl-relay.conf.
+  No usar <hook_url> ni <api_key> en este bloque -- Wazuh 4.x no las inyecta
+  como env vars al script.
+  Ver manager-side/wsl-relay.conf.example para la config requerida.
 -->

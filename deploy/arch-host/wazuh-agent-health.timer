@@ -1,0 +1,12 @@
+[Unit]
+Description=wazuh-waha: cada 5 min chequea conexion del agente al manager
+
+[Timer]
+# Igual cadencia que wazuh-waha-watchdog y watch_manager_ip (recurrente, no de boot).
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

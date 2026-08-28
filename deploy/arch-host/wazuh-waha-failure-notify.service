@@ -1,0 +1,29 @@
+# =============================================================================
+# wazuh-waha-failure-notify.service
+# =============================================================================
+# Target de OnFailure= para wazuh-waha.service (el relay HTTP).
+#
+# Configuracion necesaria en /etc/systemd/system/wazuh-waha.service.d/notify.conf:
+#   [Unit]
+#   OnFailure=wazuh-waha-failure-notify.service
+#
+# NO tiene [Install].
+# =============================================================================
+
+[Unit]
+Description=wazuh-waha: notifica cuando el relay falla
+Documentation=file:///home/tadeo/Desktop/wazuh-waha/docs/agent-restart-notifications.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/wazuh-waha/relay.env
+
+ExecStart=/home/tadeo/Desktop/wazuh-waha/scripts/notify-relay-failure.sh
+
+# 1 min alcanza.
+TimeoutStartSec=60
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wazuh-waha-failure-notify

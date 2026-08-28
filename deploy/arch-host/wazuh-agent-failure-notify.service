@@ -1,0 +1,30 @@
+# =============================================================================
+# wazuh-agent-failure-notify.service
+# =============================================================================
+# Target de OnFailure= para wazuh-agent.service. Cuando el agente entra en
+# failed state (despues de agotar StartLimitBurst), systemd dispara este unit.
+#
+# Configuracion necesaria en /etc/systemd/system/wazuh-agent.service.d/notify.conf:
+#   [Unit]
+#   OnFailure=wazuh-agent-failure-notify.service
+#
+# NO tiene [Install]. Solo se dispara via OnFailure=.
+# =============================================================================
+
+[Unit]
+Description=wazuh-waha: notifica cuando wazuh-agent falla
+Documentation=file:///home/tadeo/Desktop/wazuh-waha/docs/agent-restart-notifications.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/wazuh-waha/relay.env
+
+ExecStart=/home/tadeo/Desktop/wazuh-waha/scripts/notify-agent-failure.sh
+
+# 1 min alcanza: SMTP con TLS puede tardar.
+TimeoutStartSec=60
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wazuh-agent-failure-notify

@@ -34,7 +34,7 @@ cat > /tmp/test_wazuh_alert.json <<'JSON'
 JSON
 
 # Setear env vars y correr
-WAZUH_RELAY_URL="http://172.44.30.9:8765/alerts" \
+WAZUH_RELAY_URL="http://172.44.30.8:8765/alerts" \
 WAZUH_RELAY_API_KEY="$(grep ^RELAY_API_KEY= /etc/wazuh-waha/relay.env | cut -d= -f2)" \
 sudo -u wazuh /var/ossec/integrations/custom/whatsapp_alert.py /tmp/test_wazuh_alert.json
 ```
