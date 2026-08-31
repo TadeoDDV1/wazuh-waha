@@ -64,11 +64,10 @@ export const SettingsSection: React.FC = () => {
       SMTP_USER: form.smtp_user || '',
       SMTP_PASS: '',
       SMTP_FROM: form.smtp_from || '',
-      SMTP_TO: form.smtp_to || '',
+      ADMIN_EMAIL: form.admin_email || '',
       HYVOR_BASE_URL: form.hyvor_base_url || '',
       HYVOR_API_KEY: '',
       HYVOR_FROM: form.hyvor_from || '',
-      HYVOR_TO: form.hyvor_to || '',
       // AI
       OLLAMA_HOST: form.ollama_host || 'http://localhost:11434',
       OLLAMA_MODEL: form.ollama_model || 'qwen2.5:0.5b',
@@ -127,11 +126,10 @@ export const SettingsSection: React.FC = () => {
         SMTP_PORT: values.SMTP_PORT || '587',
         SMTP_USER: values.SMTP_USER || '',
         SMTP_FROM: values.SMTP_FROM || '',
-        SMTP_TO: values.SMTP_TO || '',
+        ADMIN_EMAIL: values.ADMIN_EMAIL || '',
         SMTP_TLS: smtpTls ? 'true' : 'false',
         HYVOR_BASE_URL: values.HYVOR_BASE_URL || '',
         HYVOR_FROM: values.HYVOR_FROM || '',
-        HYVOR_TO: values.HYVOR_TO || '',
 
         // AI
         OLLAMA_ENABLED: ollamaEnabled ? 'true' : 'false',
@@ -528,6 +526,18 @@ export const SettingsSection: React.FC = () => {
                 </select>
               </div>
 
+              <div className="field-group" style={{ marginTop: '15px', marginBottom: '15px' }}>
+                <label>Correo de Notificaciones (ADMIN_EMAIL)</label>
+                <input
+                  type="text"
+                  className="field-input"
+                  placeholder="admin@tudominio.com"
+                  value={values.ADMIN_EMAIL || ''}
+                  onChange={(e) => handleChange('ADMIN_EMAIL', e.target.value)}
+                />
+                <p className="field-hint" style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>A este correo llegarán todas las notificaciones, sin importar el proveedor que elijas arriba.</p>
+              </div>
+
               {provider === 'smtp' && (
                 <>
                   <div className="field-grid-2">
@@ -596,16 +606,7 @@ export const SettingsSection: React.FC = () => {
                         onChange={(e) => handleChange('SMTP_FROM', e.target.value)}
                       />
                     </div>
-                    <div className="field-group">
-                      <label>Email Destino (To)</label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        placeholder="admin@tudominio.com"
-                        value={values.SMTP_TO || ''}
-                        onChange={(e) => handleChange('SMTP_TO', e.target.value)}
-                      />
-                    </div>
+                    
                   </div>
 
                   <div className="checkbox-row">
@@ -671,8 +672,6 @@ export const SettingsSection: React.FC = () => {
                         type="text"
                         className="field-input"
                         placeholder="admin@tudominio.com"
-                        value={values.HYVOR_TO || ''}
-                        onChange={(e) => handleChange('HYVOR_TO', e.target.value)}
                       />
                     </div>
                   </div>

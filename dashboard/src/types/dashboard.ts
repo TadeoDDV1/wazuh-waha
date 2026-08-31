@@ -10,7 +10,6 @@ export interface Component {
   unit?: string;
   config_key?: string;
   rule_group?: string;
-  // Dynamic properties from status response
   current_state?: boolean | null;
   health?: 'healthy' | 'warning' | 'error' | 'disabled' | 'unknown';
   detail?: string;
@@ -29,7 +28,6 @@ export interface StatusResponse {
 }
 
 export interface FormConfig {
-  // Wazuh & Network
   wazuh_server_ip: string;
   wazuh_server_ip_fallback?: string;
   auto_reconcile?: boolean;
@@ -37,7 +35,6 @@ export interface FormConfig {
   wazuh_manager_api_user?: string;
   wazuh_manager_api_pass_set?: boolean;
   wazuh_manager_api_verify_tls?: boolean;
-  // WhatsApp & WAHA
   admin_phone: string;
   waha_host?: string;
   waha_session?: string;
@@ -47,25 +44,21 @@ export interface FormConfig {
   waha_recovery_cooldown_sec?: number;
   waha_recovery_max_wait_sec?: number;
   waha_watchdog_interval_sec?: number;
-  // Email Backup
   email_provider: string;
   smtp_host: string;
   smtp_port: number;
   smtp_user: string;
   smtp_from: string;
-  smtp_to: string;
+  admin_email: string;
   smtp_tls: boolean;
   smtp_pass_set: boolean;
   hyvor_base_url: string;
   hyvor_from: string;
-  hyvor_to: string;
   hyvor_api_key_set: boolean;
-  // Ollama AI
   ollama_enabled?: boolean;
   ollama_host?: string;
   ollama_model?: string;
   ollama_timeout?: number;
-  // Relay params
   relay_port?: number;
   relay_dedup_ttl?: number;
   relay_min_level_unknown?: number;
@@ -86,6 +79,7 @@ export interface ConfigResponse {
     relay_dedup_ttl: number;
   };
   form: FormConfig;
+  wazuh_rule_groups?: Record<string, boolean>;
 }
 
 export interface ToggleAction {
@@ -125,4 +119,3 @@ export interface RecentAlert {
   total_ms?: number;
   error?: string;
 }
-

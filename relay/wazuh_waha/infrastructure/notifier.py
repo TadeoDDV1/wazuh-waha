@@ -136,14 +136,14 @@ async def notify_wazuh_manager(description: str, level: int = 15, **fields) -> b
 
 
 def notify_email(subject: str, body: str) -> bool:
-    if not settings.smtp_host or not settings.smtp_to:
+    if not settings.smtp_host or not settings.admin_email:
         log.debug("notify_email disabled (smtp_host or smtp_to empty)")
         return False
 
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = settings.smtp_from
-    msg["To"] = settings.smtp_to
+    msg["To"] = settings.admin_email
     msg.set_content(body)
 
     try:
@@ -159,15 +159,15 @@ def notify_email(subject: str, body: str) -> bool:
                 if settings.smtp_user:
                     s.login(settings.smtp_user, settings.smtp_pass)
                 s.send_message(msg)
-        log.info("notify_email_ok to=%s subject=%r", settings.smtp_to, subject)
+        log.info("notify_email_ok to=%s subject=%r", settings.admin_email, subject)
         return True
     except Exception as e:
-        log.warning("notify_email_error to=%s err=%s", settings.smtp_to, e)
+        log.warning("notify_email_error to=%s err=%s", settings.admin_email, e)
         return False
 
 
 async def notify_email_hyvor(subject: str, body_text: str) -> bool:
-    if not settings.hyvor_base_url or not settings.hyvor_api_key or not settings.hyvor_to:
+    if not settings.hyvor_base_url or not settings.hyvor_api_key or not settings.admin_email:
         log.debug("notify_email_hyvor disabled (base_url/api_key/to empty)")
         return False
 
@@ -178,7 +178,7 @@ async def notify_email_hyvor(subject: str, body_text: str) -> bool:
     }
     payload = {
         "from": settings.hyvor_from,
-        "to": settings.hyvor_to,
+        "to": settings.admin_email,
         "subject": subject,
         "body_text": body_text,
     }
@@ -189,16 +189,16 @@ async def notify_email_hyvor(subject: str, body_text: str) -> bool:
         if r.is_success:
             log.info(
                 "notify_hyvor_ok to=%s subject=%r status=%d",
-                settings.hyvor_to, subject, r.status_code,
+                settings.admin_email, subject, r.status_code,
             )
             return True
         log.warning(
             "notify_hyvor_failed to=%s status=%d body=%r",
-            settings.hyvor_to, r.status_code, r.text[:300],
+            settings.admin_email, r.status_code, r.text[:300],
         )
         return False
     except Exception as e:
-        log.warning("notify_hyvor_error to=%s err=%s", settings.hyvor_to, e)
+        log.warning("notify_hyvor_error to=%s err=%s", settings.admin_email, e)
         return False
 
 

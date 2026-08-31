@@ -3,6 +3,8 @@ import './Dashboard.css';
 import { useDashboardContext } from '../context/DashboardContext';
 import ComponentCard from './ComponentCard';
 import WhatsappCard from './WhatsappCard';
+import { WazuhGroupsCard } from './WazuhGroupsCard';
+import { WazuhAgentsCard } from './WazuhAgentsCard';
 import CategoryNav from './CategoryNav';
 import type { Component } from '../types/dashboard';
 import {
@@ -119,6 +121,10 @@ export const Dashboard: React.FC = () => {
 
   return (
     <>
+      <WazuhGroupsCard />
+      <WazuhAgentsCard />
+
+
       <CategoryNav />
 
       <main className="dashboard-main">

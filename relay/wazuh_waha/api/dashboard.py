@@ -451,7 +451,21 @@ async def gather_status() -> dict[str, Any]:
                 "current_state": wa_health in ("healthy", "warning"),
                 "actions": comp["actions"],
                 "unit": comp.get("unit", ""),
-            })
+        
+        # Rule Groups Overrides
+        "wazuh_rule_groups": {
+            "authentication_success": _load_overrides().get("rule_group:authentication_success", True),
+            "fim": _load_overrides().get("rule_group:fim", True),
+            "vulnerability_detector": _load_overrides().get("rule_group:vulnerability_detector", True),
+            "network_threats": _load_overrides().get("rule_group:network_threats", True),
+            "active_response": _load_overrides().get("rule_group:active_response", True),
+            "suid": _load_overrides().get("rule_group:suid", True),
+            "sca": _load_overrides().get("rule_group:sca", True),
+            "rootcheck": _load_overrides().get("rule_group:rootcheck", True),
+            "syscollector": _load_overrides().get("rule_group:syscollector", True),
+        }
+    })
+
         else:
             result = _get_component_status_sync(comp)
             results.append(result)
@@ -569,7 +583,7 @@ def _load_overrides() -> dict:
     """Lee el archivo de overrides desde relay_lib_dir."""
     try:
         from ..config import load_overrides
-        return load_overrides()
+        return _load_overrides()
     except Exception:
         return {}
 
@@ -674,8 +688,8 @@ async def dashboard_config(request: Request):
         "WAZUH_MANAGER_HOST", "WAZUH_MANAGER_API_PORT", "WAZUH_MANAGER_API_USER", "WAZUH_MANAGER_API_VERIFY_TLS",
         "ADMIN_PHONE", "WAHA_HOST", "WAHA_SESSION", "WAHA_LOG_LEVEL", "WAHA_HOOK_URL",
         "RELAY_WORKERS", "RELAY_PORT", "RELAY_DEDUP_TTL", "RELAY_MIN_LEVEL_UNKNOWN",
-        "EMAIL_PROVIDER", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_FROM", "SMTP_TO", "SMTP_TLS",
-        "HYVOR_BASE_URL", "HYVOR_FROM", "HYVOR_TO",
+        "EMAIL_PROVIDER", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_FROM", "ADMIN_EMAIL", "SMTP_TLS",
+        "HYVOR_BASE_URL", "HYVOR_FROM", "ADMIN_EMAIL",
         "OLLAMA_ENABLED", "OLLAMA_HOST", "OLLAMA_MODEL", "OLLAMA_TIMEOUT",
         "WAHA_RECOVERY_COOLDOWN_SEC", "WAHA_RECOVERY_MAX_WAIT_SEC", "WAHA_WATCHDOG_INTERVAL_SEC",
     ]:
@@ -722,12 +736,11 @@ async def dashboard_config(request: Request):
             "smtp_port": settings.smtp_port,
             "smtp_user": settings.smtp_user,
             "smtp_from": settings.smtp_from,
-            "smtp_to": settings.smtp_to,
+            "admin_email": settings.admin_email,
             "smtp_tls": settings.smtp_tls,
             "smtp_pass_set": bool(settings.smtp_pass),
             "hyvor_base_url": settings.hyvor_base_url,
             "hyvor_from": settings.hyvor_from,
-            "hyvor_to": settings.hyvor_to,
             "hyvor_api_key_set": bool(settings.hyvor_api_key),
             # Ollama AI
             "ollama_enabled": settings.ollama_enabled,
@@ -740,7 +753,21 @@ async def dashboard_config(request: Request):
             "relay_min_level_unknown": settings.relay_min_level_unknown,
             "relay_workers": settings.relay_workers,
         },
+
+        # Rule Groups Overrides
+        "wazuh_rule_groups": {
+            "authentication_success": _load_overrides().get("rule_group:authentication_success", True),
+            "fim": _load_overrides().get("rule_group:fim", True),
+            "vulnerability_detector": _load_overrides().get("rule_group:vulnerability_detector", True),
+            "network_threats": _load_overrides().get("rule_group:network_threats", True),
+            "active_response": _load_overrides().get("rule_group:active_response", True),
+            "suid": _load_overrides().get("rule_group:suid", True),
+            "sca": _load_overrides().get("rule_group:sca", True),
+            "rootcheck": _load_overrides().get("rule_group:rootcheck", True),
+            "syscollector": _load_overrides().get("rule_group:syscollector", True),
+        }
     })
+
 
 
 # ──────────────────────────────────────────────
@@ -863,8 +890,8 @@ _EDITABLE_ENV_KEYS = {
     # Email backup
     "EMAIL_PROVIDER",
     "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS",
-    "SMTP_FROM", "SMTP_TO", "SMTP_TLS",
-    "HYVOR_BASE_URL", "HYVOR_API_KEY", "HYVOR_FROM", "HYVOR_TO",
+    "SMTP_FROM", "ADMIN_EMAIL", "SMTP_TLS",
+    "HYVOR_BASE_URL", "HYVOR_API_KEY", "HYVOR_FROM", "ADMIN_EMAIL",
     # Ollama
     "OLLAMA_ENABLED", "OLLAMA_HOST", "OLLAMA_MODEL", "OLLAMA_TIMEOUT",
     # Relay
@@ -1125,10 +1152,10 @@ async def dashboard_test_email(request: Request):
 
     if settings.email_provider == "hyvor_relay":
         ok = await notifier.notify_email_hyvor(subject, body_txt)
-        dest = settings.hyvor_to or "(HYVOR_TO vacio)"
+        dest = settings.admin_email or "(ADMIN_EMAIL vacio)"
     else:
         ok = await asyncio.to_thread(notifier.notify_email, subject, body_txt)
-        dest = settings.smtp_to or "(SMTP_TO vacio)"
+        dest = settings.admin_email or "(ADMIN_EMAIL vacio)"
 
     log.info("dashboard_test_email provider=%s ok=%s user=%s",
              settings.email_provider, ok,
@@ -1210,4 +1237,36 @@ async def waha_session_action(request: Request):
         return {"ok": False, "result": f"waha {r.status_code}: {r.text[:200]}"}
     except Exception as e:
         return {"ok": False, "result": f"waha unreachable: {e}"}
+
+
+
+@router.get("/api/v1/dashboard/wazuh/agents")
+async def get_wazuh_agents(request: Request, _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+
+    if not settings.wazuh_manager_host or not settings.wazuh_manager_api_pass:
+        return {"error": "Wazuh API no configurada (faltan credenciales)"}
+
+    base = f"https://{settings.wazuh_manager_host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return {"error": "Error de autenticación con Wazuh Manager API"}
+            
+            headers = {"Authorization": f"Bearer {token}"}
+            r = await client.get(f"{base}/agents", headers=headers)
+            
+            if r.is_success:
+                data = r.json()
+                agents = data.get("data", {}).get("affected_items", [])
+                return {"agents": agents}
+            else:
+                return {"error": f"Error de Wazuh API: {r.status_code} {r.text[:100]}"}
+    except Exception as e:
+        return {"error": str(e)}
 

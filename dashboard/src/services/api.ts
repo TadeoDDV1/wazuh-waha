@@ -64,6 +64,11 @@ export const dashboardService = {
     return response.data || { ok: false, agent_port_ok: false, api_port_ok: false, detail: 'Unknown error' };
   },
 
+  getWazuhAgents: async (): Promise<any> => {
+    const response = await api.get('/wazuh/agents');
+    return response.data;
+  },
+
   wahaSessionAction: async (action: 'create' | 'start' | 'stop' | 'logout'): Promise<ApiResponse> => {
     const response = await api.post('/waha/session', { action });
     return response.data || { ok: false, result: 'Unknown error' };
@@ -86,4 +91,3 @@ export const dashboardService = {
     }
   },
 };
-
