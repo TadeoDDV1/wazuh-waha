@@ -1,15 +1,16 @@
 """
 wazuh-waha: servicio HTTP que recibe alertas de Wazuh y las manda a WhatsApp via WAHA.
 """
-import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import __version__
 from .api.alerts import router as alerts_router
 from .api.dashboard import router as dashboard_router
 from .api.debug import router as debug_router
+from .common.context import WORKER_ID
 from .common.logging import log
 from .config import settings
 
@@ -33,7 +34,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="wazuh-waha Relay",
     description="Bridge service forwarding Wazuh alerts to WAHA (WhatsApp HTTP API)",
-    version="0.3.0",
+    version=__version__,
+    lifespan=lifespan,
 )
 
 # CORS middleware for dashboard

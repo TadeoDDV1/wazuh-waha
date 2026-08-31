@@ -1,2 +1,2 @@
 """wazuh-waha: puente entre Wazuh manager y WAHA (WhatsApp HTTP API)."""
-__version__ = "0.3.0"
+__version__ = "0.4.0"

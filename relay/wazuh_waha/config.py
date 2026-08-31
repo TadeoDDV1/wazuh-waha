@@ -2,25 +2,16 @@
 Configuracion: lee el .env del proyecto.
 Pydantic Settings valida tipos y reporta errores en el arranque.
 """
+import json as _json
+import logging
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
-import os
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ENV_FILE = PROJECT_ROOT / ".env"
-print(f"DEBUG: PROJECT_ROOT={PROJECT_ROOT}", flush=True)
-print(f"DEBUG: ENV_FILE={ENV_FILE}", flush=True)
-print(f"DEBUG: ENV_FILE exists={ENV_FILE.exists()}", flush=True)
-if ENV_FILE.exists():
-    import subprocess
-    result = subprocess.run(['grep', 'RELAY_API_KEY', str(ENV_FILE)], capture_output=True, text=True)
-    print(f"DEBUG: ENV_FILE contents (RELAY_API_KEY line): {result.stdout.strip() if result.stdout else 'Not found'}", flush=True)
-    
-# Debug: Check what's in os.environ for RELAY_API_KEY
-env_val = os.environ.get('RELAY_API_KEY')
-print(f"DEBUG: os.environ.get('RELAY_API_KEY'): '{env_val}'", flush=True)
+
+_log = logging.getLogger("wazuh-waha.config")
 
 
 class Settings(BaseSettings):
@@ -91,13 +82,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Validator to debug what value is being set for relay_api_key
-    @field_validator('relay_api_key')
-    @classmethod
-    def debug_relay_api_key(cls, v):
-        print(f"DEBUG: relay_api_key validator called with value: '{v}'", flush=True)
-        return v
-
     @property
     def admin_chat_id(self) -> str:
         return f"{self.admin_phone}@c.us"
@@ -108,7 +92,6 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-print(f"DEBUG: Settings relay_api_key after initialization: {settings.relay_api_key}", flush=True)
 
 # ──────────────────────────────────────────────────────
 # Runtime Config Overrides
@@ -117,38 +100,32 @@ print(f"DEBUG: Settings relay_api_key after initialization: {settings.relay_api_
 # (que contiene secrets y puede ser read-only). Los overrides viven en un
 # archivo JSON en relay_lib_dir, con permisos de escritura para el relay.
 # Se aplican sobre los valores base de .env al arranque.
-import json as _json
-from pathlib import Path as _Path
 
-_overrides_file = _Path(settings.relay_lib_dir) / "config_overrides.json"
-print(f"DEBUG: Overrides file path: {_overrides_file}", flush=True)
-print(f"DEBUG: Overrides file exists: {_overrides_file.exists()}", flush=True)
+_overrides_file = Path(settings.relay_lib_dir) / "config_overrides.json"
 if not _overrides_file.parent.exists():
     _overrides_file.parent.mkdir(parents=True, exist_ok=True)
 
+
 def load_overrides() -> dict:
+    """Lee overrides de config desde el archivo JSON."""
     if _overrides_file.exists():
         try:
-            data = _json.loads(_overrides_file.read_text())
-            print(f"DEBUG: Loaded overrides: {data}", flush=True)
-            return data
+            return _json.loads(_overrides_file.read_text())
         except Exception as e:
-            print(f"DEBUG: Error loading overrides: {e}", flush=True)
-            pass
+            _log.warning("config_overrides_load_error err=%s", e)
     return {}
 
+
 def save_overrides(data: dict) -> None:
+    """Persiste overrides de config al archivo JSON."""
     _overrides_file.write_text(_json.dumps(data, indent=2))
+
 
 # Aplicar overrides sobre settings (atributos mutables en Pydantic v2)
 _overrides = load_overrides()
-print(f"DEBUG: Overrides to apply: {_overrides}", flush=True)
 for _k, _v in _overrides.items():
     if hasattr(settings, _k):
         try:
-            print(f"DEBUG: Applying override {_k} = {_v}", flush=True)
             setattr(settings, _k, _v)
         except Exception:
             pass
-
-print(f"DEBUG: Final settings relay_api_key: {settings.relay_api_key}", flush=True)
