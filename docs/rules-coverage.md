@@ -35,7 +35,7 @@ Mapeo rule_id → plantilla de mensaje → level mínimo en el `<integration>`.
 1. Editar `wazuh-waha/wazuh_waha/templates.py`.
 2. Agregar el `rule_id` en el dict `TEMPLATES` con su función lambda.
 3. Si la regla es custom (fuera de stock Wazuh), agregar el bloque en
-   `manager/rules/local_rules.xml` y reiniciar el manager.
+   `manager-side/rules/local_rules.xml` y reiniciar el manager.
 4. Actualizar esta tabla.
 
 ## Cómo desactivar un template

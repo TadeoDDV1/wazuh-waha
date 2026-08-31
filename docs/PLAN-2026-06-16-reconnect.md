@@ -307,7 +307,7 @@ echo "=== Tu WhatsApp ===" && echo "Debería haber llegado un mensaje SSH fallid
 # Verificar después de loguearte:
 ssh tadeou7@172.44.30.11 'ls /var/ossec/etc/rules/local_rules.xml 2>&1'
 # Si no está, scp:
-#   scp ~/Desktop/wazuh-waha/manager/rules/local_rules.xml tadeou7@172.44.30.11:/tmp/
+#   scp ~/Desktop/wazuh-waha/manager-side/rules/local_rules.xml tadeou7@172.44.30.11:/tmp/
 #   ssh tadeou7@172.44.30.11 'sudo mv /tmp/local_rules.xml /var/ossec/etc/rules/ && sudo chown root:wazuh /var/ossec/etc/rules/local_rules.xml && sudo systemctl restart wazuh-manager'
 
 # Dispara el login

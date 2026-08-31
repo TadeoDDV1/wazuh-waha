@@ -9,13 +9,13 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `dedup.py`: `_locked_state` ahora crea el archivo de estado si no existe
   (`path.touch()` antes de `open()`), fixea `FileNotFoundError` en el primer
   arranque o en TTLs nuevos.
-- `manager/ossec.conf.snippet.xml`: dividido en `.xml` (solo bloque ejecutable)
+- `manager-side/ossec.conf.snippet.xml`: dividido en `.xml` (solo bloque ejecutable)
   + `.md` (variantes documentadas). El segundo `<integration>` adentro del
   comentario HTML rompía el parser XML.
-- `manager/custom/whatsapp_alert.py`: ahora lee `WAZUH_RELAY_API_KEY` de
+- `manager-side/custom/whatsapp_alert.py`: ahora lee `WAZUH_RELAY_API_KEY` de
   `/var/ossec/etc/wsl-relay.conf` además de env vars. Wazuh 4.x NO inyecta el
   `<api_key>` del bloque `<integration>` como env var automáticamente.
-- `manager/ossec.conf` (deploy): fusionados dos bloques `<ossec_config>`
+- `manager-side/ossec.conf` (deploy): fusionados dos bloques `<ossec_config>`
   duplicados que tenia el manager, despues se inserto el bloque
   `<integration>` antes del último `</ossec_config>`.
 
@@ -54,7 +54,7 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `docs/multi-worker.md` con consideraciones de concurrencia.
 - `docs/migration-from-wazuh-integration.md` para upgrades desde el proyecto viejo.
 - `deploy/arch-host/` con `relay.env.example` y `wazuh-waha.service.override.conf`.
-- `deploy/vm-manager/README.md` con mapping de archivos.
+- `deploy/vm-manager-side/README.md` con mapping de archivos.
 - `scripts/recover-waha.sh` para sesiones WAHA pegadas en STARTING.
 - `scripts/install-wazuh-waha.sh` actualizado con paths correctos.
 - `tests/README.md` con plan de tests (no implementados en este alcance).

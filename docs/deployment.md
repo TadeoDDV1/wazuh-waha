@@ -65,9 +65,9 @@ curl -m 3 http://127.0.0.1:8765/health
 
 Desde el host Arch:
 ```bash
-scp manager/custom/whatsapp_alert.py tadeou7@<VM_IP>:/tmp/
-scp manager/rules/local_rules.xml tadeou7@<VM_IP>:/tmp/
-scp manager/ossec.conf.snippet.xml tadeou7@<VM_IP>:/tmp/
+scp manager-side/custom/whatsapp_alert.py tadeou7@<VM_IP>:/tmp/
+scp manager-side/rules/local_rules.xml tadeou7@<VM_IP>:/tmp/
+scp manager-side/ossec.conf.snippet.xml tadeou7@<VM_IP>:/tmp/
 ```
 
 ### 2.2 Instalar en la VM (ssh + sudo con TTY)

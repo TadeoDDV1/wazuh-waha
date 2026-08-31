@@ -10,7 +10,7 @@ Estos son los archivos que tenés que llevar a la **VM del manager Wazuh**.
 | `manager-side/wsl-relay.conf.example` | `/var/ossec/etc/wsl-relay.conf` (con valores reales) | `0640 root:wazuh` |
 | `manager-side/ossec.conf.snippet.xml` | pegar bloque `<integration>` en `/var/ossec/etc/ossec.conf` | n/a |
 
-> **Nota:** el viejo script `manager/custom/whatsapp_alert.py` (versión legacy
+> **Nota:** el viejo script `manager-side/custom/whatsapp_alert.py` (versión legacy
 > del relay, reemplazada por `relay/`) está en `_archive/whatsapp_alert.py`
 > y ya **no se deploya**. El pipeline actual usa solo el relay Python.
 

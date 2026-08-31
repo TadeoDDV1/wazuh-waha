@@ -266,12 +266,12 @@ Ejecutables bash de primer nivel. No se commitean con sudo, ver nota en cada uno
 # Deploy
 
 Configuración específica por host. Cada host donde se corre este proyecto tiene
-su subcarpeta. El código de `wazuh-waha/` y `manager/` no se toca por deploys.
+su subcarpeta. El código de `wazuh-waha/` y `manager-side/` no se toca por deploys.
 
 | Subdir | Para qué sirve |
 |---|---|
 | `arch-host/` | Ejemplo: el host Arch donde corre el relay. |
-| `vm-manager/` | Ejemplo: la VM Wazuh 4.x que manda las alertas. |
+| `vm-manager-side/` | Ejemplo: la VM Wazuh 4.x que manda las alertas. |
 ```
 
 **`tests/README.md`:**
@@ -362,9 +362,9 @@ curl -m 3 http://127.0.0.1:8765/health
 
 Desde el host Arch:
 ```bash
-scp manager/custom/whatsapp_alert.py tadeou7@<VM_IP>:/tmp/
-scp manager/rules/local_rules.xml tadeou7@<VM_IP>:/tmp/
-scp manager/ossec.conf.snippet.xml tadeou7@<VM_IP>:/tmp/
+scp manager-side/custom/whatsapp_alert.py tadeou7@<VM_IP>:/tmp/
+scp manager-side/rules/local_rules.xml tadeou7@<VM_IP>:/tmp/
+scp manager-side/ossec.conf.snippet.xml tadeou7@<VM_IP>:/tmp/
 ```
 
 ### 2.2 Instalar en la VM (ssh + sudo con TTY)
@@ -585,7 +585,7 @@ Mapeo rule_id → plantilla de mensaje → level mínimo en el `<integration>`.
 1. Editar `wazuh-waha/wazuh_waha/templates.py`.
 2. Agregar el `rule_id` en el dict `TEMPLATES` con su función lambda.
 3. Si la regla es custom (fuera de stock Wazuh), agregar el bloque en
-   `manager/rules/local_rules.xml` y reiniciar el manager.
+   `manager-side/rules/local_rules.xml` y reiniciar el manager.
 4. Actualizar esta tabla.
 
 ## Cómo desactivar un template
@@ -961,7 +961,7 @@ if [ -z "$WAZUH_MANAGER_API_PASS" ]; then
   warn "WAZUH_MANAGER_API_PASS no seteada, saltando"
 else
   curl -sS -m 5 -k -u "$WAZUH_MANAGER_API_USER:$WAZUH_MANAGER_API_PASS" \
-    "https://$WAZUH_MANAGER_API_HOST:55000/manager/status" 2>&1 | head -c 400
+    "https://$WAZUH_MANAGER_API_HOST:55000/manager-side/status" 2>&1 | head -c 400
   echo
 fi
 
@@ -1342,24 +1342,24 @@ ExecStart=
 ExecStart=<REEMPLAZAR_PROYECTO>/wazuh-waha/.venv/bin/uvicorn wazuh_waha.main:app --host 0.0.0.0 --port 8765 --workers 2
 ```
 
-#### Task 19: `deploy/vm-manager/README.md`
+#### Task 19: `deploy/vm-manager-side/README.md`
 
-**Path:** `~/Desktop/wazuh-waha/deploy/vm-manager/README.md`
+**Path:** `~/Desktop/wazuh-waha/deploy/vm-manager-side/README.md`
 
 **Contenido completo:**
 
 ```markdown
 # Wazuh Manager VM - Deploy
 
-Qué archivos del proyecto `manager/` subir a la VM Wazuh y dónde van.
+Qué archivos del proyecto `manager-side/` subir a la VM Wazuh y dónde van.
 
 ## Tabla de mapping
 
 | Archivo en el repo | Destino en la VM | Permisos | Comando |
 |---|---|---|---|
-| `manager/custom/whatsapp_alert.py` | `/var/ossec/integrations/custom/whatsapp_alert.py` | `0750 root:wazuh` | `sudo mv` + `sudo chown` |
-| `manager/rules/local_rules.xml` | `/var/ossec/etc/rules/local_rules.xml` | `0640 root:wazuh` | `sudo mv` + `sudo chown` |
-| `manager/ossec.conf.snippet.xml` | (NO subir, copiar el bloque) | n/a | pegar en `ossec.conf` |
+| `manager-side/custom/whatsapp_alert.py` | `/var/ossec/integrations/custom/whatsapp_alert.py` | `0750 root:wazuh` | `sudo mv` + `sudo chown` |
+| `manager-side/rules/local_rules.xml` | `/var/ossec/etc/rules/local_rules.xml` | `0640 root:wazuh` | `sudo mv` + `sudo chown` |
+| `manager-side/ossec.conf.snippet.xml` | (NO subir, copiar el bloque) | n/a | pegar en `ossec.conf` |
 
 ## Pasos
 
@@ -1368,10 +1368,10 @@ Ver `docs/deployment.md` §2.
 ## Snippets específicos de este host
 
 Por ejemplo, si esta VM tiene un path distinto para `ossec.conf` o reglas
-custom propias, van en subcarpetas de `vm-manager/`:
+custom propias, van en subcarpetas de `vm-manager-side/`:
 
-- `vm-manager/extra-rules.xml` — reglas que no van en el repo principal.
-- `vm-manager/ossec.conf.patches.md` — diffs manuales aplicados a esta VM.
+- `vm-manager-side/extra-rules.xml` — reglas que no van en el repo principal.
+- `vm-manager-side/ossec.conf.patches.md` — diffs manuales aplicados a esta VM.
 ```
 
 ---
@@ -1940,9 +1940,9 @@ WantedBy=multi-user.target
 
 ### Fase 7 — Manager (archivos para la VM)
 
-#### Task 23: `manager/custom/whatsapp_alert.py` (rewrite, sin API key hardcoded)
+#### Task 23: `manager-side/custom/whatsapp_alert.py` (rewrite, sin API key hardcoded)
 
-**Path:** `~/Desktop/wazuh-waha/manager/custom/whatsapp_alert.py`
+**Path:** `~/Desktop/wazuh-waha/manager-side/custom/whatsapp_alert.py`
 
 **Contenido completo:**
 
@@ -2046,9 +2046,9 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-#### Task 24: `manager/ossec.conf.snippet.xml` (rewrite, sin secretos)
+#### Task 24: `manager-side/ossec.conf.snippet.xml` (rewrite, sin secretos)
 
-**Path:** `~/Desktop/wazuh-waha/manager/ossec.conf.snippet.xml`
+**Path:** `~/Desktop/wazuh-waha/manager-side/ossec.conf.snippet.xml`
 
 **Contenido completo:**
 
@@ -2109,13 +2109,13 @@ if __name__ == "__main__":
 -->
 ```
 
-#### Task 25: `manager/rules/local_rules.xml` (sin cambios, mover de lugar)
+#### Task 25: `manager-side/rules/local_rules.xml` (sin cambios, mover de lugar)
 
 (Copiar el contenido del archivo actual tal cual. No se renombra ni se modifica.)
 
-#### Task 26: `manager/README.md` (rewrite)
+#### Task 26: `manager-side/README.md` (rewrite)
 
-**Path:** `~/Desktop/wazuh-waha/manager/README.md`
+**Path:** `~/Desktop/wazuh-waha/manager-side/README.md`
 
 **Contenido completo:**
 
@@ -2128,9 +2128,9 @@ Estos son los archivos que tenés que llevar a la **VM del manager Wazuh**.
 
 | Archivo en el repo | Destino en la VM | Permisos |
 |---|---|---|
-| `manager/custom/whatsapp_alert.py` | `/var/ossec/integrations/custom/whatsapp_alert.py` | `0750 root:wazuh` |
-| `manager/rules/local_rules.xml` | `/var/ossec/etc/rules/local_rules.xml` | `0640 root:wazuh` |
-| `manager/ossec.conf.snippet.xml` | pegar bloque `<integration>` en `/var/ossec/etc/ossec.conf` | n/a |
+| `manager-side/custom/whatsapp_alert.py` | `/var/ossec/integrations/custom/whatsapp_alert.py` | `0750 root:wazuh` |
+| `manager-side/rules/local_rules.xml` | `/var/ossec/etc/rules/local_rules.xml` | `0640 root:wazuh` |
+| `manager-side/ossec.conf.snippet.xml` | pegar bloque `<integration>` en `/var/ossec/etc/ossec.conf` | n/a |
 
 ## Pasos de instalación
 
@@ -2262,7 +2262,7 @@ wazuh-waha/
 ├── docs/                    # documentación larga
 ├── scripts/                 # bash ejecutables
 ├── wazuh-waha/              # servicio Python (el relay)
-├── manager/                 # archivos para la VM Wazuh
+├── manager-side/                 # archivos para la VM Wazuh
 └── deploy/                  # config específica por host
 ```
 
@@ -2466,7 +2466,7 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `docs/multi-worker.md` con consideraciones de concurrencia.
 - `docs/migration-from-wazuh-integration.md` para upgrades desde el proyecto viejo.
 - `deploy/arch-host/` con `relay.env.example` y `wazuh-waha.service.override.conf`.
-- `deploy/vm-manager/README.md` con mapping de archivos.
+- `deploy/vm-manager-side/README.md` con mapping de archivos.
 - `scripts/recover-waha.sh` para sesiones WAHA pegadas en STARTING.
 - `scripts/install-wazuh-waha.sh` actualizado con paths correctos.
 - `tests/README.md` con plan de tests (no implementados en este alcance).
@@ -2506,7 +2506,7 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 | Categoría | Cantidad |
 |---|---|
 | Archivos nuevos | 24 (4 readmes de subdir, 6 docs, 5 scripts, 2 deploy files, 1 .env.example, 1 .gitignore, 1 ARCHITECTURE, 1 CHANGELOG, 1 unit, 1 pyproject, 1 main.py nuevo, 1 dedup.py nuevo) |
-| Archivos modificados | 4 (whatsapp_alert.py, ossec.conf.snippet.xml, manager/README.md, README.md raíz) |
+| Archivos modificados | 4 (whatsapp_alert.py, ossec.conf.snippet.xml, manager-side/README.md, README.md raíz) |
 | Archivos movidos/renombrados | 8 (carpetas + scripts) |
 | Archivos sin cambios | 3 (templates.py, waha_client.py, ollama_client.py, local_rules.xml) |
 
@@ -2520,7 +2520,7 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 # 1. Estructura correcta
 ls -1 ~/Desktop/wazuh-waha/
 # esperado: ARCHITECTURE.md CHANGELOG.md PLAN.md README.md .env.example .gitignore
-#          docker-compose.yml deploy/ docs/ manager/ scripts/ wazuh-waha/
+#          docker-compose.yml deploy/ docs/ manager-side/ scripts/ wazuh-waha/
 
 # 2. No hay secretos en código
 cd ~/Desktop/wazuh-waha
