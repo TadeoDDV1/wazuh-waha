@@ -4,9 +4,10 @@
 !.env.example
 deploy/**/relay.env
 deploy/**/*.env.local
-# El config del manager (con API key real) — solo commitear el .example
-manager/wsl-relay.conf
-!manager/wsl-relay.conf.example
+
+# Config del manager (con API key real) — solo commitear el .example
+manager-side/wsl-relay.conf
+!manager-side/wsl-relay.conf.example
 
 # Python
 __pycache__/
@@ -27,6 +28,15 @@ env/
 # Logs
 *.log
 logs/
+!logs/.gitkeep
+
+# Runtime state
+data/
+!data/.gitkeep
+
+# Backups manuales
+*.backup
+*.bak*
 
 # IDE
 .vscode/
@@ -37,6 +47,12 @@ logs/
 
 # OS
 Thumbs.db
+
+# Node (dashboard)
+node_modules/
+
+# Root artifacts accidentales
+package-lock.json
 
 # Cache local de Wazuh (no es parte del repo)
 .sixth/
