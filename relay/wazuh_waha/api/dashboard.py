@@ -757,6 +757,43 @@ async def dashboard_config(request: Request):
 
 
 
+@router.post("/api/v1/dashboard/auto-detect-phone")
+async def auto_detect_phone(request: Request):
+    """Detecta el número de teléfono del admin desde la sesión WAHA activa y lo guarda en .env."""
+    await verify_api_key(request)
+    if not settings.waha_host:
+        return {"ok": False, "result": "WAHA_HOST no configurado"}
+    try:
+        async with httpx.AsyncClient(timeout=5, verify=False) as client:
+            r = await client.get(
+                f"{settings.waha_host}/api/sessions/{settings.waha_session}",
+                headers={"X-Api-Key": settings.waha_api_key},
+            )
+            if not r.is_success:
+                return {"ok": False, "result": f"WAHA respondió HTTP {r.status_code}"}
+            data = r.json()
+            if data.get("status") != "WORKING":
+                return {"ok": False, "result": f"Sesión no está WORKING (estado: {data.get('status')})"}
+            me = data.get("me", {})
+            phone_id = me.get("id", "") if isinstance(me, dict) else ""
+            # phone_id viene como "5219214380943@c.us", extraer solo el número
+            phone = phone_id.split("@")[0] if "@" in phone_id else phone_id
+            if not phone or not phone.isdigit():
+                return {"ok": False, "result": f"No se pudo extraer número de la sesión (me.id={phone_id})"}
+            # Guardar en .env y en memoria
+            if not _write_env_batch({"ADMIN_PHONE": phone}):
+                return {"ok": False, "result": "Número detectado pero falló al escribir en .env"}
+            _apply_setting_in_memory("ADMIN_PHONE", phone)
+            _sync_relay_env()
+            name = me.get("name", "") if isinstance(me, dict) else ""
+            log.info("auto_detect_phone phone=%s name=%s", phone, name)
+            return {"ok": True, "phone": phone, "name": name, "result": f"Número detectado: {phone} ({name})"}
+    except httpx.ConnectError:
+        return {"ok": False, "result": "No se pudo conectar a WAHA"}
+    except Exception as e:
+        return {"ok": False, "result": str(e)[:200]}
+
+
 # ──────────────────────────────────────────────
 # Endpoints: POST (toggle + action) — Fase 2
 # ──────────────────────────────────────────────
