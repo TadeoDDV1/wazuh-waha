@@ -32,6 +32,18 @@ services:
     mem_limit: 3g
     cpus: "2.0"
 
+  dashboard:
+    build:
+      context: ./dashboard
+      args:
+        - VITE_API_URL=
+    container_name: wazuh-waha-dashboard
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   waha_sessions:
     name: wazuh_waha_sessions
