@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-PROJECT_ROOT="${PROJECT_ROOT:-$HOME/Desktop/wazuh-waha}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ENV_FILE="$PROJECT_ROOT/.env"
 
 echo -e "\n\033[1;36m====================================================\033[0m"

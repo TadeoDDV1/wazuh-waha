@@ -16,6 +16,7 @@ import {
   Server,
   Radio,
   Clock,
+  ExternalLink
 } from 'lucide-react';
 
 function formatUptime(sec: number): string {
@@ -39,6 +40,7 @@ export const Navbar: React.FC = () => {
     setShowSettings,
     setShowRecentAlerts,
     refresh,
+    config,
   } = useDashboardContext();
 
   const components = status?.components || [];
@@ -136,6 +138,32 @@ export const Navbar: React.FC = () => {
               <SettingsIcon size={15} />
               <span>Configuración</span>
             </button>
+
+            {/* Dashboards buttons */}
+            {config?.form?.wazuh_server_ip && (
+              <a
+                className="nav-btn"
+                style={{ textDecoration: 'none' }}
+                href={`https://${config.form.wazuh_server_ip}`}
+                target="_blank"
+                rel="noreferrer"
+                title="Abrir Dashboard de Wazuh"
+              >
+                <ExternalLink size={15} />
+                <span>Wazuh UI</span>
+              </a>
+            )}
+            <a
+              className="nav-btn"
+              style={{ textDecoration: 'none' }}
+              href={`${window.location.protocol}//${window.location.hostname}:3001/dashboard`}
+              target="_blank"
+              rel="noreferrer"
+              title="Abrir Dashboard de WAHA"
+            >
+              <ExternalLink size={15} />
+              <span>WAHA UI</span>
+            </a>
           </div>
         </div>
 

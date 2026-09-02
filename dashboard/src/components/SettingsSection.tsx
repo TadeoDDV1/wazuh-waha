@@ -26,15 +26,11 @@ export const SettingsSection: React.FC = () => {
   type TabType = 'wazuh' | 'whatsapp' | 'email' | 'ai' | 'relay';
   const [activeTab, setActiveTab] = useState<TabType>('wazuh');
   const [values, setValues] = useState<Record<string, string>>({});
-  const [provider, setProvider] = useState('smtp');
   const [autoReconcile, setAutoReconcile] = useState(false);
   const [ollamaEnabled, setOllamaEnabled] = useState(false);
   const [wazuhVerifyTls, setWazuhVerifyTls] = useState(false);
-  const [smtpTls, setSmtpTls] = useState(true);
-
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
-  const [testingEmail, setTestingEmail] = useState(false);
   const [testingWhatsApp, setTestingWhatsApp] = useState(false);
   const [testingWazuh, setTestingWazuh] = useState(false);
   const [needRestart, setNeedRestart] = useState(false);
@@ -79,12 +75,11 @@ export const SettingsSection: React.FC = () => {
       RELAY_WORKERS: String(form.relay_workers ?? '2'),
     });
 
-    setProvider(form.email_provider || 'smtp');
     setAutoReconcile(Boolean(form.auto_reconcile));
     setOllamaEnabled(Boolean(form.ollama_enabled));
     setWazuhVerifyTls(Boolean(form.wazuh_manager_api_verify_tls));
-    setSmtpTls(form.smtp_tls !== false);
-  }, [form]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form ? JSON.stringify(form) : null]);
 
   if (!showSettings) return null;
 
@@ -121,15 +116,7 @@ export const SettingsSection: React.FC = () => {
         WAHA_WATCHDOG_INTERVAL_SEC: values.WAHA_WATCHDOG_INTERVAL_SEC || '300',
 
         // Email
-        EMAIL_PROVIDER: provider,
-        SMTP_HOST: values.SMTP_HOST || '',
-        SMTP_PORT: values.SMTP_PORT || '587',
-        SMTP_USER: values.SMTP_USER || '',
-        SMTP_FROM: values.SMTP_FROM || '',
         ADMIN_EMAIL: values.ADMIN_EMAIL || '',
-        SMTP_TLS: smtpTls ? 'true' : 'false',
-        HYVOR_BASE_URL: values.HYVOR_BASE_URL || '',
-        HYVOR_FROM: values.HYVOR_FROM || '',
 
         // AI
         OLLAMA_ENABLED: ollamaEnabled ? 'true' : 'false',
@@ -147,8 +134,6 @@ export const SettingsSection: React.FC = () => {
       // Incluir contraseñas solo si se ingresó un nuevo valor
       if (values.WAZUH_MANAGER_API_PASS) payload.WAZUH_MANAGER_API_PASS = values.WAZUH_MANAGER_API_PASS;
       if (values.WAHA_API_KEY) payload.WAHA_API_KEY = values.WAHA_API_KEY;
-      if (values.SMTP_PASS) payload.SMTP_PASS = values.SMTP_PASS;
-      if (values.HYVOR_API_KEY) payload.HYVOR_API_KEY = values.HYVOR_API_KEY;
 
       const res = await dashboardService.updateConfigBatch(payload);
 
@@ -171,21 +156,7 @@ export const SettingsSection: React.FC = () => {
     }
   };
 
-  const handleTestEmail = async () => {
-    setTestingEmail(true);
-    try {
-      const res = await dashboardService.testEmail();
-      if (res.ok) {
-        toast.success(`Email de prueba enviado: ${res.detail}`);
-      } else {
-        toast.error(`Fallo envío de email: ${res.detail}`);
-      }
-    } catch {
-      toast.error('Error al conectar con el endpoint de test email');
-    } finally {
-      setTestingEmail(false);
-    }
-  };
+
 
   const handleTestWhatsApp = async () => {
     setTestingWhatsApp(true);
@@ -513,19 +484,6 @@ export const SettingsSection: React.FC = () => {
                 <span className="block-tag">Fallback</span>
               </div>
 
-              <div className="field-group">
-                <label>Proveedor de Email (EMAIL_PROVIDER)</label>
-                <select
-                  className="field-input"
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value)}
-                >
-                  <option value="smtp">SMTP Directo (Gmail, Outlook, SendGrid, etc.)</option>
-                  <option value="hyvor_relay">Hyvor Relay (API self-hosted)</option>
-                  <option value="none">Desactivado (Solo WhatsApp)</option>
-                </select>
-              </div>
-
               <div className="field-group" style={{ marginTop: '15px', marginBottom: '15px' }}>
                 <label>Correo de Notificaciones (ADMIN_EMAIL)</label>
                 <input
@@ -535,148 +493,9 @@ export const SettingsSection: React.FC = () => {
                   value={values.ADMIN_EMAIL || ''}
                   onChange={(e) => handleChange('ADMIN_EMAIL', e.target.value)}
                 />
-                <p className="field-hint" style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>A este correo llegarán todas las notificaciones, sin importar el proveedor que elijas arriba.</p>
+                <p className="field-hint" style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>A este correo llegarán todas las notificaciones.</p>
               </div>
 
-              {provider === 'smtp' && (
-                <>
-                  <div className="field-grid-2">
-                    <div className="field-group">
-                      <label>Servidor SMTP (Host)</label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        placeholder="smtp.gmail.com"
-                        value={values.SMTP_HOST || ''}
-                        onChange={(e) => handleChange('SMTP_HOST', e.target.value)}
-                      />
-                    </div>
-                    <div className="field-group">
-                      <label>Puerto SMTP</label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        placeholder="587"
-                        value={values.SMTP_PORT || ''}
-                        onChange={(e) => handleChange('SMTP_PORT', e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="field-grid-2">
-                    <div className="field-group">
-                      <label>Usuario SMTP</label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        placeholder="tu-correo@gmail.com"
-                        value={values.SMTP_USER || ''}
-                        onChange={(e) => handleChange('SMTP_USER', e.target.value)}
-                      />
-                    </div>
-                    <div className="field-group">
-                      <label>Contraseña / App Password</label>
-                      <div className="field-input-wrapper">
-                        <input
-                          type={showPasswords.SMTP_PASS ? 'text' : 'password'}
-                          className="field-input"
-                          placeholder={form?.smtp_pass_set ? '•••••••• (guardada)' : 'Contraseña de app'}
-                          value={values.SMTP_PASS || ''}
-                          onChange={(e) => handleChange('SMTP_PASS', e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="password-toggle-btn"
-                          onClick={() => togglePasswordVisibility('SMTP_PASS')}
-                        >
-                          {showPasswords.SMTP_PASS ? <EyeOff size={15} /> : <Eye size={15} />}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="field-grid-2">
-                    <div className="field-group">
-                      <label>Email Remitente (From)</label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        placeholder="wazuh-alerts@tudominio.com"
-                        value={values.SMTP_FROM || ''}
-                        onChange={(e) => handleChange('SMTP_FROM', e.target.value)}
-                      />
-                    </div>
-                    
-                  </div>
-
-                  <div className="checkbox-row">
-                    <input
-                      type="checkbox"
-                      id="smtp_tls"
-                      checked={smtpTls}
-                      onChange={(e) => setSmtpTls(e.target.checked)}
-                    />
-                    <label htmlFor="smtp_tls">Habilitar STARTTLS / TLS seguro (SMTP_TLS)</label>
-                  </div>
-                </>
-              )}
-
-              {provider === 'hyvor_relay' && (
-                <>
-                  <div className="field-grid-2">
-                    <div className="field-group">
-                      <label>Hyvor Base URL</label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        placeholder="https://relay.tudominio.com"
-                        value={values.HYVOR_BASE_URL || ''}
-                        onChange={(e) => handleChange('HYVOR_BASE_URL', e.target.value)}
-                      />
-                    </div>
-                    <div className="field-group">
-                      <label>Hyvor API Key</label>
-                      <div className="field-input-wrapper">
-                        <input
-                          type={showPasswords.HYVOR_API_KEY ? 'text' : 'password'}
-                          className="field-input"
-                          placeholder={form?.hyvor_api_key_set ? '•••••••• (guardada)' : 'API Key'}
-                          value={values.HYVOR_API_KEY || ''}
-                          onChange={(e) => handleChange('HYVOR_API_KEY', e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="password-toggle-btn"
-                          onClick={() => togglePasswordVisibility('HYVOR_API_KEY')}
-                        >
-                          {showPasswords.HYVOR_API_KEY ? <EyeOff size={15} /> : <Eye size={15} />}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="field-grid-2">
-                    <div className="field-group">
-                      <label>Hyvor Remitente (From)</label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        placeholder="alerts@tudominio.com"
-                        value={values.HYVOR_FROM || ''}
-                        onChange={(e) => handleChange('HYVOR_FROM', e.target.value)}
-                      />
-                    </div>
-                    <div className="field-group">
-                      <label>Hyvor Destino (To)</label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        placeholder="admin@tudominio.com"
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
           )}
 
@@ -831,18 +650,6 @@ export const SettingsSection: React.FC = () => {
                 </button>
               )}
 
-              {activeTab === 'email' && provider !== 'none' && (
-                <button
-                  type="button"
-                  className="nav-btn test-btn"
-                  onClick={handleTestEmail}
-                  disabled={testingEmail}
-                  title="Enviar email de prueba con los datos guardados"
-                >
-                  {testingEmail ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
-                  <span>{testingEmail ? 'Enviando...' : 'Test de Email'}</span>
-                </button>
-              )}
             </div>
 
             <div className="footer-actions-right">
