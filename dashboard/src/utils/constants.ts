@@ -6,6 +6,7 @@ export const CATEGORY_ORDER = [
   'whatsapp_gateway',
   'watchdogs',
   'notifications',
+  'compliance',
 ] as const;
 
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -16,6 +17,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   whatsapp_gateway: 'WhatsApp Gateway & Relay',
   watchdogs: 'Proactive Watchdogs & Health',
   notifications: 'Backup Channels & AI',
+  compliance: 'Regulatory Compliance & Standards',
 };
 
 export const CATEGORY_ICONS: Record<string, string> = {
@@ -26,6 +28,7 @@ export const CATEGORY_ICONS: Record<string, string> = {
   whatsapp_gateway: 'MessageSquare',
   watchdogs: 'Activity',
   notifications: 'BellRing',
+  compliance: 'Landmark',
 };
 
 export const CATEGORY_DESCRIPTIONS: Record<string, string> = {
@@ -36,5 +39,6 @@ export const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   whatsapp_gateway: 'Gateway WAHA para despacho de alertas a WhatsApp y daemon de integración',
   watchdogs: 'Timers de auto-recuperación, detección de drift de IP y monitor de salud',
   notifications: 'Canales de respaldo por email (SMTP / Hyvor Relay) y modelos de IA local',
+  compliance: 'Filtros para normativas PCI DSS, GDPR, HIPAA, NIST, TSC',
 };
 

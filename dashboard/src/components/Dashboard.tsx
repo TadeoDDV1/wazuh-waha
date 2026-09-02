@@ -24,6 +24,7 @@ import {
   Activity,
   BellRing,
   Layers,
+  Landmark,
 } from 'lucide-react';
 
 const CATEGORY_ICONS_MAP: Record<string, React.ReactNode> = {
@@ -34,6 +35,7 @@ const CATEGORY_ICONS_MAP: Record<string, React.ReactNode> = {
   whatsapp_gateway: <MessageSquare size={18} style={{ color: 'var(--green-healthy)' }} />,
   watchdogs: <Activity size={18} style={{ color: 'var(--cyan-accent)' }} />,
   notifications: <BellRing size={18} style={{ color: 'var(--wazuh-blue)' }} />,
+  compliance: <Landmark size={18} style={{ color: 'var(--yellow-warning)' }} />,
 };
 
 export const Dashboard: React.FC = () => {

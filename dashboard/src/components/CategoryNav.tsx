@@ -11,6 +11,7 @@ import {
   MessageSquare,
   Activity,
   BellRing,
+  Landmark,
 } from 'lucide-react';
 
 const TAB_ICONS: Record<string, React.ReactNode> = {
@@ -22,6 +23,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   whatsapp_gateway: <MessageSquare size={16} />,
   watchdogs: <Activity size={16} />,
   notifications: <BellRing size={16} />,
+  compliance: <Landmark size={16} />,
 };
 
 export const CategoryNav: React.FC = () => {
