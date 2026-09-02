@@ -451,20 +451,7 @@ async def gather_status() -> dict[str, Any]:
                 "current_state": wa_health in ("healthy", "warning"),
                 "actions": comp["actions"],
                 "unit": comp.get("unit", ""),
-        
-        # Rule Groups Overrides
-        "wazuh_rule_groups": {
-            "authentication_success": _load_overrides().get("rule_group:authentication_success", True),
-            "fim": _load_overrides().get("rule_group:fim", True),
-            "vulnerability_detector": _load_overrides().get("rule_group:vulnerability_detector", True),
-            "network_threats": _load_overrides().get("rule_group:network_threats", True),
-            "active_response": _load_overrides().get("rule_group:active_response", True),
-            "suid": _load_overrides().get("rule_group:suid", True),
-            "sca": _load_overrides().get("rule_group:sca", True),
-            "rootcheck": _load_overrides().get("rule_group:rootcheck", True),
-            "syscollector": _load_overrides().get("rule_group:syscollector", True),
-        }
-    })
+            })
 
         else:
             result = _get_component_status_sync(comp)
@@ -583,7 +570,7 @@ def _load_overrides() -> dict:
     """Lee el archivo de overrides desde relay_lib_dir."""
     try:
         from ..config import load_overrides
-        return _load_overrides()
+        return load_overrides()
     except Exception:
         return {}
 
