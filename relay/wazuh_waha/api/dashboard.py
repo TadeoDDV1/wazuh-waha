@@ -329,8 +329,8 @@ COMPONENTS: list[dict] = [
         "description": "Agente Wazuh local de monitoreo y telemetría de seguridad",
         "status_type": "systemd_service",
         "unit": "wazuh-agent.service",
-        "toggleable": False,
-        "actions": ["restart"],
+        "toggleable": True,
+        "actions": ["start", "stop", "restart"],
     },
 
     # ─── 6. Proactive Watchdogs & Self-Healing ───
@@ -1393,4 +1393,18 @@ async def get_wazuh_agents(request: Request, _: None = Depends(verify_api_key)):
                 return {"error": f"Error de Wazuh API: {r.status_code} {r.text[:100]}"}
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.get("/api/v1/dashboard/logs")
+async def get_dashboard_logs(request: Request, lines: int = 100):
+    """Obtiene los últimos logs del servicio systemd (journalctl)."""
+    await verify_api_key(request)
+    
+    # Obtenemos los logs del relay
+    code, out = _run_cmd(["journalctl", "-u", "wazuh-waha", "-n", str(lines), "--no-pager", "-q"])
+    
+    if code != 0:
+        return {"ok": False, "logs": f"Error leyendo logs: {out}"}
+        
+    return {"ok": True, "logs": out}
 

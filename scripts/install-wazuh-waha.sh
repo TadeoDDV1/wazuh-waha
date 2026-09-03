@@ -175,14 +175,33 @@ else
   echo "WARN: no encuentro los unit files de health-check, saltando"
 fi
 
-echo "=== 12. Verificar ==="
+echo "=== 12. Configurar permisos sudo para el Dashboard (API) ==="
+SUDOERS_FILE="/tmp/wazuh-waha-sudoers"
+cat << EOF > "$SUDOERS_FILE"
+${DETECTED_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl enable wazuh-waha-watchdog.timer --now
+${DETECTED_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl disable wazuh-waha-watchdog.timer --now
+${DETECTED_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl enable watch_manager_ip.timer --now
+${DETECTED_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl disable watch_manager_ip.timer --now
+${DETECTED_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl enable wazuh-waha-boot-notify.timer --now
+${DETECTED_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl disable wazuh-waha-boot-notify.timer --now
+${DETECTED_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl enable wazuh-agent-health.timer --now
+${DETECTED_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl disable wazuh-agent-health.timer --now
+${DETECTED_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart wazuh-waha.service
+${DETECTED_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart wazuh-agent.service
+EOF
+sudo cp "$SUDOERS_FILE" /etc/sudoers.d/wazuh-waha
+sudo chmod 440 /etc/sudoers.d/wazuh-waha
+rm -f "$SUDOERS_FILE"
+echo "Permisos configurados en /etc/sudoers.d/wazuh-waha"
+
+echo "=== 13. Verificar ==="
 sleep 2
 sudo systemctl status wazuh-waha.service --no-pager | head -5
 echo "---"
 curl -s http://localhost:8765/health || true
 echo ""
 
-echo "=== 13. Limpiar backups .shebak.bak (si quedo alguno) ==="
+echo "=== 14. Limpiar backups .shebak.bak (si quedo alguno) ==="
 # El script fix_venv_shebangs.sh deja backups *.shebak.bak. Despues de verificar
 # que todo arranca, se pueden borrar. Es seguro hacerlo automaticamente porque
 # si algo fallo en el paso 1b, los archivos originales seguirian en los backups.

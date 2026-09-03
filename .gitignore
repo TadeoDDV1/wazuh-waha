@@ -56,3 +56,4 @@ package-lock.json
 
 # Cache local de Wazuh (no es parte del repo)
 .sixth/
+*.deb

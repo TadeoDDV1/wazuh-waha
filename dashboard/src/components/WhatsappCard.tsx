@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { CATEGORY_LABELS } from '../utils/constants';
 
-const QR_REFRESH_MS = 20_000; // el QR rota aprox. cada 20s
+const QR_REFRESH_MS = 60_000; // el QR rota aprox. cada 60s
 
 export const WhatsappCard: React.FC<{ component: Component }> = ({ component }) => {
   const [qrUrl, setQrUrl] = useState<string | null>(null);
@@ -188,7 +188,7 @@ export const WhatsappCard: React.FC<{ component: Component }> = ({ component }) 
               <img src={qrUrl} alt="QR de vinculación de WhatsApp" className="qr-image" />
               <p className="qr-hint">
                 Escaneá con WhatsApp → Dispositivos vinculados → Vincular dispositivo.
-                El código rota cada ~20s.
+                El código rota cada ~60s.
               </p>
             </div>
           )}

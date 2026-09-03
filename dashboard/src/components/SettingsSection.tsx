@@ -17,13 +17,15 @@ import {
   Mail,
   Brain,
   Sliders,
+  Terminal,
+  Users,
 } from 'lucide-react';
 
 export const SettingsSection: React.FC = () => {
   const { config, showSettings, setShowSettings, refresh } = useDashboardContext();
   const form = config?.form;
 
-  type TabType = 'wazuh' | 'whatsapp' | 'email' | 'ai' | 'relay';
+  type TabType = 'wazuh' | 'whatsapp' | 'email' | 'ai' | 'relay' | 'logs' | 'wazuh_agents';
   const [activeTab, setActiveTab] = useState<TabType>('wazuh');
   const [values, setValues] = useState<Record<string, string>>({});
   const [autoReconcile, setAutoReconcile] = useState(false);
@@ -34,6 +36,14 @@ export const SettingsSection: React.FC = () => {
   const [testingWhatsApp, setTestingWhatsApp] = useState(false);
   const [testingWazuh, setTestingWazuh] = useState(false);
   const [needRestart, setNeedRestart] = useState(false);
+
+  const [logsOutput, setLogsOutput] = useState<string>('');
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [wazuhAgents, setWazuhAgents] = useState<any[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(false);
+  const [localServices, setLocalServices] = useState<any[]>([]);
+
+
 
   useEffect(() => {
     if (!form) return;
@@ -86,6 +96,49 @@ export const SettingsSection: React.FC = () => {
   const handleChange = (key: string, val: string) => {
     setValues((prev) => ({ ...prev, [key]: val }));
   };
+
+  useEffect(() => {
+    if (activeTab === 'logs') {
+      const fetchLogs = async () => {
+        setLoadingLogs(true);
+        try {
+          const res = await dashboardService.getLogs(100);
+          setLogsOutput(res.logs || 'No logs available');
+        } catch (err) {
+          setLogsOutput('Error fetching logs: ' + String(err));
+        } finally {
+          setLoadingLogs(false);
+        }
+      };
+      fetchLogs();
+      const interval = setInterval(fetchLogs, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
+
+
+  useEffect(() => {
+    if (activeTab === 'wazuh_agents') {
+      const fetchData = async () => {
+        setLoadingAgents(true);
+        try {
+          const agentsRes = await dashboardService.getWazuhAgents();
+          if (agentsRes && agentsRes.agents) {
+            setWazuhAgents(agentsRes.agents);
+          }
+          const statusRes = await dashboardService.getStatus();
+          if (statusRes && statusRes.components) {
+            setLocalServices(statusRes.components.filter(c => c.status_type === 'systemd_service' || c.status_type === 'systemd_timer'));
+          }
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoadingAgents(false);
+        }
+      };
+      fetchData();
+    }
+  }, [activeTab]);
 
   const togglePasswordVisibility = (field: string) => {
     setShowPasswords((prev) => ({ ...prev, [field]: !prev[field] }));
@@ -259,7 +312,25 @@ export const SettingsSection: React.FC = () => {
               <Sliders size={14} />
               <span>Relay & Daemon</span>
             </button>
+            <button
+              type="button"
+              className={`settings-tab-btn ${activeTab === 'logs' ? 'active' : ''}`}
+              onClick={() => setActiveTab('logs')}
+            >
+              <Terminal size={14} />
+              <span>Logs del Sistema</span>
+            </button>
+
+            <button
+              type="button"
+              className={`settings-tab-btn ${activeTab === 'wazuh_agents' ? 'active' : ''}`}
+              onClick={() => setActiveTab('wazuh_agents')}
+            >
+              <Users size={14} />
+              <span>Agentes & Procesos</span>
+            </button>
           </div>
+
 
           {/* Tab 1: Wazuh & Network */}
           {activeTab === 'wazuh' && (
@@ -621,7 +692,125 @@ export const SettingsSection: React.FC = () => {
             </div>
           )}
 
+          {/* Tab 6: Logs */}
+          {activeTab === 'logs' && (
+            <div className="settings-block">
+              <div className="block-header">
+                <h3>Logs del Servicio (wazuh-waha)</h3>
+                <span className="block-tag">Journalctl</span>
+              </div>
+              <div className="logs-container" style={{
+                backgroundColor: '#1e1e1e',
+                color: '#d4d4d4',
+                padding: '10px',
+                borderRadius: '6px',
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                whiteSpace: 'pre-wrap',
+                height: '400px',
+                overflowY: 'auto'
+              }}>
+                {loadingLogs && !logsOutput ? 'Cargando logs...' : logsOutput}
+              </div>
+            </div>
+          )}
+
+
+          {/* Tab 7: Wazuh Agents & Processes */}
+          {activeTab === 'wazuh_agents' && (
+            <div className="settings-block">
+              <div className="block-header">
+                <h3>Control de Agentes y Procesos Locales</h3>
+                <span className="block-tag">Wazuh API & Systemd</span>
+              </div>
+              
+              <h4 className="sub-title">Agentes Conectados al Manager</h4>
+              {loadingAgents ? (
+                <p>Cargando agentes...</p>
+              ) : (
+                <div style={{ overflowX: 'auto', marginBottom: '20px' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
+                        <th style={{ padding: '8px' }}>ID</th>
+                        <th style={{ padding: '8px' }}>Nombre</th>
+                        <th style={{ padding: '8px' }}>IP</th>
+                        <th style={{ padding: '8px' }}>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {wazuhAgents.length > 0 ? wazuhAgents.map(a => (
+                        <tr key={a.id} style={{ borderBottom: '1px solid var(--bg-card)' }}>
+                          <td style={{ padding: '8px' }}>{a.id}</td>
+                          <td style={{ padding: '8px', color: 'var(--cyan-accent)' }}>{a.name}</td>
+                          <td style={{ padding: '8px' }}>{a.ip || '-'}</td>
+                          <td style={{ padding: '8px' }}>
+                            <span style={{
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              background: a.status === 'active' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                              color: a.status === 'active' ? 'var(--green-healthy)' : 'var(--red-error)',
+                            }}>
+                              {a.status}
+                            </span>
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr><td colSpan={4} style={{ padding: '8px' }}>No hay agentes o hubo un error.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <h4 className="sub-title">Procesos Locales de Wazuh</h4>
+              <div className="field-grid-2">
+                {localServices.map(svc => (
+                  <div key={svc.id} className="field-group highlight-box" style={{ padding: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <strong>{svc.name}</strong>
+                      <span style={{ fontSize: '11px', color: svc.health === 'healthy' ? 'var(--green-healthy)' : 'var(--text-muted)' }}>
+                        {svc.health === 'healthy' ? 'En ejecución' : 'Detenido/Inactivo'}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>{svc.unit}</p>
+                    
+                    {svc.toggleable && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const action = { target: svc.id, enabled: !svc.current_state };
+                          await dashboardService.toggleComponent(action);
+                          toast.success(`Orden enviada a ${svc.name}`);
+                          // Refrescar para ver el estado real tras un breve retraso
+                          setTimeout(async () => {
+                             const statusRes = await dashboardService.getStatus();
+                             if (statusRes && statusRes.components) {
+                               setLocalServices(statusRes.components.filter(c => c.status_type === 'systemd_service' || c.status_type === 'systemd_timer'));
+                             }
+                          }, 1500);
+                        }}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          border: 'none',
+                          background: svc.current_state ? 'var(--red-error)' : 'var(--green-healthy)',
+                          color: 'white',
+                          cursor: 'pointer',
+                          fontSize: '12px'
+                        }}
+                      >
+                        {svc.current_state ? 'Deshabilitar Proceso' : 'Habilitar Proceso'}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Footer Actions */}
+
           <div className="settings-modal-footer">
             <div className="footer-actions-left">
               {activeTab === 'wazuh' && (
@@ -671,7 +860,8 @@ export const SettingsSection: React.FC = () => {
               </button>
             </div>
           </div>
-        </form>
+
+      </form>
       </div>
     </div>
   );

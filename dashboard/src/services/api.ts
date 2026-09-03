@@ -19,6 +19,11 @@ api.interceptors.request.use((config) => {
 });
 
 export const dashboardService = {
+  getLogs: async (lines = 100): Promise<{ok: boolean, logs: string}> => {
+    const response = await api.get('/logs', { params: { lines } });
+    return response.data;
+  },
+
   getStatus: async (): Promise<StatusResponse> => {
     const response = await api.get<StatusResponse>('/status');
     return response.data;
