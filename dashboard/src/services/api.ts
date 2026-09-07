@@ -1,7 +1,9 @@
 import axios from 'axios';
 import type { StatusResponse, ConfigResponse, ToggleAction, ActionRequest, ApiResponse } from '../types/dashboard';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8765';
+const API_URL = import.meta.env.VITE_API_URL !== undefined
+  ? import.meta.env.VITE_API_URL
+  : (import.meta.env.DEV ? 'http://localhost:8765' : '');
 const RELAY_API_KEY = import.meta.env.VITE_RELAY_API_KEY || '';
 
 const api = axios.create({
