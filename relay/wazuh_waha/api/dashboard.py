@@ -1370,10 +1370,10 @@ async def get_wazuh_agents(request: Request, _: None = Depends(verify_api_key)):
     from ..config import settings
     import httpx
 
-    if not settings.wazuh_manager_host or not settings.wazuh_manager_api_pass:
+    if not (settings.wazuh_manager_host or settings.wazuh_server_ip) or not settings.wazuh_manager_api_pass:
         return {"error": "Wazuh API no configurada (faltan credenciales)"}
 
-    base = f"https://{settings.wazuh_manager_host}:{settings.wazuh_manager_api_port}"
+    base = f"https://{(settings.wazuh_manager_host or settings.wazuh_server_ip)}:{settings.wazuh_manager_api_port}"
     verify = settings.wazuh_manager_api_verify_tls
 
     try:
@@ -1408,3 +1408,88 @@ async def get_dashboard_logs(request: Request, lines: int = 100):
         
     return {"ok": True, "logs": out}
 
+
+
+@router.get("/api/v1/dashboard/wazuh/vulnerabilities")
+async def get_wazuh_vulnerabilities(request: Request, _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+    
+    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
+    if not host or not settings.wazuh_manager_api_pass:
+        return {"error": "Wazuh API no configurada (faltan credenciales)"}
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return {"error": "Error de autenticación"}
+            
+            headers = {"Authorization": f"Bearer {token}"}
+            r = await client.get(f"{base}/vulnerability/000", headers=headers)
+            
+            if r.is_success:
+                return {"vulnerabilities": r.json().get("data", {}).get("affected_items", [])}
+            return {"error": str(r.text)}
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/api/v1/dashboard/wazuh/fim")
+async def get_wazuh_fim(request: Request, _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+    
+    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
+    if not host or not settings.wazuh_manager_api_pass:
+        return {"error": "Wazuh API no configurada"}
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return {"error": "Error de autenticación"}
+            
+            headers = {"Authorization": f"Bearer {token}"}
+            r = await client.get(f"{base}/syscheck/000", headers=headers)
+            
+            if r.is_success:
+                return {"fim": r.json().get("data", {}).get("affected_items", [])}
+            return {"error": str(r.text)}
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/api/v1/dashboard/wazuh/sca")
+async def get_wazuh_sca(request: Request, _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+    
+    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
+    if not host or not settings.wazuh_manager_api_pass:
+        return {"error": "Wazuh API no configurada"}
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return {"error": "Error de autenticación"}
+            
+            headers = {"Authorization": f"Bearer {token}"}
+            r = await client.get(f"{base}/sca/000", headers=headers)
+            
+            if r.is_success:
+                return {"sca": r.json().get("data", {}).get("affected_items", [])}
+            return {"error": str(r.text)}
+    except Exception as e:
+        return {"error": str(e)}

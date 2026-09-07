@@ -74,6 +74,21 @@ export const dashboardService = {
     return response.data;
   },
 
+  getWazuhVulnerabilities: async (): Promise<any> => {
+    const response = await api.get('/wazuh/vulnerabilities');
+    return response.data;
+  },
+
+  getWazuhFim: async (): Promise<any> => {
+    const response = await api.get('/wazuh/fim');
+    return response.data;
+  },
+
+  getWazuhSca: async (): Promise<any> => {
+    const response = await api.get('/wazuh/sca');
+    return response.data;
+  },
+
   wahaSessionAction: async (action: 'create' | 'start' | 'stop' | 'logout'): Promise<ApiResponse> => {
     const response = await api.post('/waha/session', { action });
     return response.data || { ok: false, result: 'Unknown error' };

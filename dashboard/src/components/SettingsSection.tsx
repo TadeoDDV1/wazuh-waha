@@ -19,13 +19,16 @@ import {
   Sliders,
   Terminal,
   Users,
+  ShieldAlert,
+  FileSearch,
+  CheckSquare,
 } from 'lucide-react';
 
 export const SettingsSection: React.FC = () => {
   const { config, showSettings, setShowSettings, refresh } = useDashboardContext();
   const form = config?.form;
 
-  type TabType = 'wazuh' | 'whatsapp' | 'email' | 'ai' | 'relay' | 'logs' | 'wazuh_agents';
+  type TabType = 'wazuh' | 'whatsapp' | 'email' | 'ai' | 'relay' | 'logs' | 'wazuh_agents' | 'wazuh_vuln' | 'wazuh_fim' | 'wazuh_sca';
   const [activeTab, setActiveTab] = useState<TabType>('wazuh');
   const [values, setValues] = useState<Record<string, string>>({});
   const [autoReconcile, setAutoReconcile] = useState(false);
@@ -39,9 +42,18 @@ export const SettingsSection: React.FC = () => {
 
   const [logsOutput, setLogsOutput] = useState<string>('');
   const [loadingLogs, setLoadingLogs] = useState(false);
+
   const [wazuhAgents, setWazuhAgents] = useState<any[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [localServices, setLocalServices] = useState<any[]>([]);
+  
+  const [vulnerabilities, setVulnerabilities] = useState<any[]>([]);
+  const [loadingVuln, setLoadingVuln] = useState(false);
+  const [fimEvents, setFimEvents] = useState<any[]>([]);
+  const [loadingFim, setLoadingFim] = useState(false);
+  const [scaEvents, setScaEvents] = useState<any[]>([]);
+  const [loadingSca, setLoadingSca] = useState(false);
+
 
 
 
@@ -140,7 +152,40 @@ export const SettingsSection: React.FC = () => {
     }
   }, [activeTab]);
 
+
+  useEffect(() => {
+    if (activeTab === 'wazuh_vuln') {
+      const fetchVuln = async () => {
+        setLoadingVuln(true);
+        try {
+          const res = await dashboardService.getWazuhVulnerabilities();
+          if (res && res.vulnerabilities) setVulnerabilities(res.vulnerabilities);
+        } catch (err) { console.error(err); } finally { setLoadingVuln(false); }
+      };
+      fetchVuln();
+    } else if (activeTab === 'wazuh_fim') {
+      const fetchFim = async () => {
+        setLoadingFim(true);
+        try {
+          const res = await dashboardService.getWazuhFim();
+          if (res && res.fim) setFimEvents(res.fim);
+        } catch (err) { console.error(err); } finally { setLoadingFim(false); }
+      };
+      fetchFim();
+    } else if (activeTab === 'wazuh_sca') {
+      const fetchSca = async () => {
+        setLoadingSca(true);
+        try {
+          const res = await dashboardService.getWazuhSca();
+          if (res && res.sca) setScaEvents(res.sca);
+        } catch (err) { console.error(err); } finally { setLoadingSca(false); }
+      };
+      fetchSca();
+    }
+  }, [activeTab]);
+
   const togglePasswordVisibility = (field: string) => {
+
     setShowPasswords((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
@@ -321,6 +366,7 @@ export const SettingsSection: React.FC = () => {
               <span>Logs del Sistema</span>
             </button>
 
+
             <button
               type="button"
               className={`settings-tab-btn ${activeTab === 'wazuh_agents' ? 'active' : ''}`}
@@ -329,6 +375,31 @@ export const SettingsSection: React.FC = () => {
               <Users size={14} />
               <span>Agentes & Procesos</span>
             </button>
+            <button
+              type="button"
+              className={`settings-tab-btn ${activeTab === 'wazuh_vuln' ? 'active' : ''}`}
+              onClick={() => setActiveTab('wazuh_vuln')}
+            >
+              <ShieldAlert size={14} />
+              <span>Vulnerabilidades</span>
+            </button>
+            <button
+              type="button"
+              className={`settings-tab-btn ${activeTab === 'wazuh_fim' ? 'active' : ''}`}
+              onClick={() => setActiveTab('wazuh_fim')}
+            >
+              <FileSearch size={14} />
+              <span>Integridad (FIM)</span>
+            </button>
+            <button
+              type="button"
+              className={`settings-tab-btn ${activeTab === 'wazuh_sca' ? 'active' : ''}`}
+              onClick={() => setActiveTab('wazuh_sca')}
+            >
+              <CheckSquare size={14} />
+              <span>Auditoría (SCA)</span>
+            </button>
+
           </div>
 
 
@@ -809,7 +880,109 @@ export const SettingsSection: React.FC = () => {
             </div>
           )}
 
+
+          {/* Tab 8: Vulnerabilities */}
+          {activeTab === 'wazuh_vuln' && (
+            <div className="settings-block">
+              <div className="block-header">
+                <h3>Vulnerabilidades (Agente Local)</h3>
+                <span className="block-tag">Vulnerability Detector</span>
+              </div>
+              {loadingVuln ? <p>Cargando vulnerabilidades...</p> : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
+                        <th style={{ padding: '8px' }}>CVE</th>
+                        <th style={{ padding: '8px' }}>Paquete</th>
+                        <th style={{ padding: '8px' }}>Severidad</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vulnerabilities.length > 0 ? vulnerabilities.map((v, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--bg-card)' }}>
+                          <td style={{ padding: '8px', color: 'var(--cyan-accent)' }}>{v.cve}</td>
+                          <td style={{ padding: '8px' }}>{v.name} {v.version}</td>
+                          <td style={{ padding: '8px' }}>
+                            <span style={{ color: v.severity === 'High' || v.severity === 'Critical' ? 'var(--red-error)' : (v.severity === 'Medium' ? 'orange' : 'var(--text-muted)') }}>
+                              {v.severity}
+                            </span>
+                          </td>
+                        </tr>
+                      )) : <tr><td colSpan={3} style={{ padding: '8px' }}>No se encontraron vulnerabilidades.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab 9: FIM */}
+          {activeTab === 'wazuh_fim' && (
+            <div className="settings-block">
+              <div className="block-header">
+                <h3>Monitor de Integridad de Archivos</h3>
+                <span className="block-tag">FIM / Syscheck</span>
+              </div>
+              {loadingFim ? <p>Cargando FIM...</p> : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
+                        <th style={{ padding: '8px' }}>Archivo</th>
+                        <th style={{ padding: '8px' }}>Evento</th>
+                        <th style={{ padding: '8px' }}>Fecha</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fimEvents.length > 0 ? fimEvents.map((f, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--bg-card)' }}>
+                          <td style={{ padding: '8px', wordBreak: 'break-all' }}>{f.file}</td>
+                          <td style={{ padding: '8px', color: f.type === 'modified' ? 'orange' : (f.type === 'deleted' ? 'var(--red-error)' : 'var(--green-healthy)') }}>{f.type}</td>
+                          <td style={{ padding: '8px' }}>{new Date(f.date).toLocaleString()}</td>
+                        </tr>
+                      )) : <tr><td colSpan={3} style={{ padding: '8px' }}>No hay eventos FIM recientes.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab 10: SCA */}
+          {activeTab === 'wazuh_sca' && (
+            <div className="settings-block">
+              <div className="block-header">
+                <h3>Security Configuration Assessment</h3>
+                <span className="block-tag">SCA / Auditoría</span>
+              </div>
+              {loadingSca ? <p>Cargando SCA...</p> : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
+                        <th style={{ padding: '8px' }}>Política</th>
+                        <th style={{ padding: '8px' }}>Puntuación</th>
+                        <th style={{ padding: '8px' }}>Fallas</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scaEvents.length > 0 ? scaEvents.map((s, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--bg-card)' }}>
+                          <td style={{ padding: '8px' }}>{s.name}</td>
+                          <td style={{ padding: '8px', color: s.score < 80 ? 'orange' : 'var(--green-healthy)' }}>{s.score}%</td>
+                          <td style={{ padding: '8px', color: s.fail > 0 ? 'var(--red-error)' : 'var(--text-muted)' }}>{s.fail}</td>
+                        </tr>
+                      )) : <tr><td colSpan={3} style={{ padding: '8px' }}>No hay reportes SCA disponibles.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Footer Actions */}
+
 
           <div className="settings-modal-footer">
             <div className="footer-actions-left">

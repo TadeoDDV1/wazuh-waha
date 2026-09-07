@@ -26,10 +26,10 @@ async def _get_token(client: httpx.AsyncClient) -> str | None:
     if _cached_token and _cached_token_expires_at > now:
         return _cached_token
 
-    if not settings.wazuh_manager_host or not settings.wazuh_manager_api_pass:
+    if not (settings.wazuh_manager_host or settings.wazuh_server_ip) or not settings.wazuh_manager_api_pass:
         return None
 
-    base = f"https://{settings.wazuh_manager_host}:{settings.wazuh_manager_api_port}"
+    base = f"https://{(settings.wazuh_manager_host or settings.wazuh_server_ip)}:{settings.wazuh_manager_api_port}"
     try:
         # El Wazuh API acepta HTTP Basic auth en /security/user/authenticate
         # (el cuerpo JSON {"username":..,"password":..} no lo acepta en todas
@@ -81,11 +81,11 @@ def _build_alert_payload(description: str, level: int, **fields) -> dict:
 
 
 async def notify_wazuh_manager(description: str, level: int = 15, **fields) -> bool:
-    if not settings.wazuh_manager_host or not settings.wazuh_manager_api_pass:
+    if not (settings.wazuh_manager_host or settings.wazuh_server_ip) or not settings.wazuh_manager_api_pass:
         log.debug("notify_wazuh_manager disabled (no host/pass configured)")
         return False
 
-    base = f"https://{settings.wazuh_manager_host}:{settings.wazuh_manager_api_port}"
+    base = f"https://{(settings.wazuh_manager_host or settings.wazuh_server_ip)}:{settings.wazuh_manager_api_port}"
     payload = _build_alert_payload(description, level, **fields)
     verify = settings.wazuh_manager_api_verify_tls
 
