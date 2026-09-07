@@ -21,7 +21,7 @@ NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/var/log/wazuh-waha /var/lib/wazuh-waha
+ReadWritePaths=/var/log/wazuh-waha /var/lib/wazuh-waha <REEMPLAZAR_PROYECTO>/backups
 
 [Install]
 WantedBy=multi-user.target

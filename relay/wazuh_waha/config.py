@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     relay_min_level_unknown: int = 10
     relay_log_dir: str = "/var/log/wazuh-waha"
     relay_lib_dir: str = "/var/lib/wazuh-waha"
+    relay_backup_dir: str = str(PROJECT_ROOT / "backups")
+    relay_backup_enabled: bool = True
     relay_workers: int = 2
     relay_lifespan_timeout: int = 10
 

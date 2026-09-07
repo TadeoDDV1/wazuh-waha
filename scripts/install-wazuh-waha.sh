@@ -69,9 +69,9 @@ else
   echo "WARN: no encuentro scripts/fix_venv_shebangs.sh"
 fi
 
-echo "=== 2. Crear directorios de log y state ==="
-sudo mkdir -p /var/log/wazuh-waha /var/lib/wazuh-waha
-sudo chown -R "$USER:$USER" /var/log/wazuh-waha /var/lib/wazuh-waha
+echo "=== 2. Crear directorios de log, state y backups ==="
+sudo mkdir -p /var/log/wazuh-waha /var/lib/wazuh-waha "$PROJECT_ROOT/backups"
+sudo chown -R "$USER:$USER" /var/log/wazuh-waha /var/lib/wazuh-waha "$PROJECT_ROOT/backups"
 echo "OK"
 
 echo "=== 3. Si hay override.conf de deploy/, instalarlo ==="

@@ -4,12 +4,19 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from ..common.backup import save_alert_backup
 from ..common.context import WORKER_ID, record_recent
 from ..common.logging import log
 from ..config import settings
 from ..domain.pipeline import format_alert
 from ..infrastructure import waha_client
 from .deps import verify_api_key
+
+
+def _finish_record(record: dict, raw_alert: dict | None = None) -> None:
+    record_recent(record)
+    save_alert_backup(record, raw_alert=raw_alert)
+
 
 
 router = APIRouter(tags=["alerts"])
@@ -64,7 +71,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         log.exception("format_error rule=%s agent=%s err=%s", rule_id, agent_id, e)
         record["decision"] = "format_error"
         record["error"] = str(e)
-        record_recent(record)
+        _finish_record(record, alert)
         raise HTTPException(status_code=500, detail="format error")
 
     record["decision"] = meta.get("decision", "?")
@@ -75,7 +82,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
             rule_id, agent_id, meta.get("decision"), settings.relay_dedup_ttl,
         )
         record["result"] = "deduped"
-        record_recent(record)
+        _finish_record(record, alert)
         return JSONResponse(status_code=200, content={"status": "deduped", "meta": meta})
 
     log.info(
@@ -91,7 +98,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         log.exception("waha_send_failed rule=%s agent=%s err=%s", rule_id, agent_id, e)
         record["result"] = "waha_error"
         record["error"] = str(e)
-        record_recent(record)
+        _finish_record(record, alert)
         raise HTTPException(status_code=502, detail=f"waha error: {e}")
 
     elapsed_ms = int((time.time() - t_start) * 1000)
@@ -103,7 +110,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
     record["result"] = "sent"
     record["waha_id"] = msg_id
     record["total_ms"] = elapsed_ms
-    record_recent(record)
+    _finish_record(record, alert)
 
     return {
         "status": "sent",
