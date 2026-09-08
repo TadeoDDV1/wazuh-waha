@@ -76,18 +76,28 @@ export const dashboardService = {
     return response.data;
   },
 
-  getWazuhVulnerabilities: async (): Promise<any> => {
-    const response = await api.get('/wazuh/vulnerabilities');
+  getWazuhVulnerabilities: async (agentId: string = '000'): Promise<any> => {
+    const response = await api.get('/wazuh/vulnerabilities', { params: { agent_id: agentId } });
     return response.data;
   },
 
-  getWazuhFim: async (): Promise<any> => {
-    const response = await api.get('/wazuh/fim');
+  getWazuhFim: async (agentId: string = '000'): Promise<any> => {
+    const response = await api.get('/wazuh/fim', { params: { agent_id: agentId } });
     return response.data;
   },
 
-  getWazuhSca: async (): Promise<any> => {
-    const response = await api.get('/wazuh/sca');
+  getWazuhSca: async (agentId: string = '000'): Promise<any> => {
+    const response = await api.get('/wazuh/sca', { params: { agent_id: agentId } });
+    return response.data;
+  },
+
+  getWazuhMitre: async (): Promise<any> => {
+    const response = await api.get('/wazuh/mitre');
+    return response.data;
+  },
+
+  getWazuhOverview: async (): Promise<any> => {
+    const response = await api.get('/wazuh/overview');
     return response.data;
   },
 

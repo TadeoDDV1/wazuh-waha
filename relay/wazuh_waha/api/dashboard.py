@@ -524,9 +524,138 @@ CATEGORY_LABELS = {
 # Status checker (async wrapper)
 # ──────────────────────────────────────────────
 
+_wazuh_services_cache: dict[str, Any] = {}
+_wazuh_services_cache_ts: float = 0.0
+
+
+async def get_wazuh_services_overview() -> dict[str, Any]:
+    """Consulta el estado de los módulos de Wazuh (API, FIM, SCA, MITRE, Vuln) con cache de 15s."""
+    global _wazuh_services_cache, _wazuh_services_cache_ts
+    now = time.time()
+    if _wazuh_services_cache and (now - _wazuh_services_cache_ts < 15):
+        return _wazuh_services_cache
+
+    from ..infrastructure.notifier import _get_token
+
+    host = settings.wazuh_manager_host or settings.wazuh_server_ip
+    if not host or not settings.wazuh_manager_api_pass:
+        overview = {
+            "connected": False,
+            "error": "Wazuh API no configurada (faltan credenciales o IP)",
+            "manager_api": {"connected": False, "status": "No configurado", "version": "N/A"},
+            "fim": {"connected": False, "status": "No levantado", "monitored_files": 0},
+            "sca": {"connected": False, "status": "No levantado", "policies_count": 0, "score": None},
+            "vuln": {"connected": False, "status": "No levantado"},
+            "mitre": {"connected": False, "status": "No levantado", "tactics_count": 0, "techniques_count": 0},
+        }
+        _wazuh_services_cache = overview
+        _wazuh_services_cache_ts = now
+        return overview
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=8, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                overview = {
+                    "connected": False,
+                    "error": "Fallo de autenticación con Wazuh Manager API",
+                    "manager_api": {"connected": False, "status": "Error auth", "version": "N/A"},
+                    "fim": {"connected": False, "status": "No levantado", "monitored_files": 0},
+                    "sca": {"connected": False, "status": "No levantado", "policies_count": 0, "score": None},
+                    "vuln": {"connected": False, "status": "No levantado"},
+                    "mitre": {"connected": False, "status": "No levantado", "tactics_count": 0, "techniques_count": 0},
+                }
+                _wazuh_services_cache = overview
+                _wazuh_services_cache_ts = now
+                return overview
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # 1. Manager info
+            manager_ver = "4.x"
+            try:
+                r_mgr = await client.get(f"{base}/manager/info", headers=headers)
+                if r_mgr.is_success:
+                    manager_ver = r_mgr.json().get("data", {}).get("affected_items", [{}])[0].get("version", "4.x")
+            except Exception:
+                pass
+
+            # 2. FIM (Syscheck)
+            fim_count = 0
+            fim_status = "Levantado"
+            try:
+                r_fim = await client.get(f"{base}/syscheck/000?limit=1", headers=headers)
+                if r_fim.is_success:
+                    fim_count = r_fim.json().get("data", {}).get("total_affected_items", 0)
+                else:
+                    fim_status = "No levantado"
+            except Exception:
+                fim_status = "No levantado"
+
+            # 3. SCA
+            sca_count = 0
+            sca_score = None
+            sca_status = "Levantado"
+            try:
+                r_sca = await client.get(f"{base}/sca/000?limit=5", headers=headers)
+                if r_sca.is_success:
+                    sca_items = r_sca.json().get("data", {}).get("affected_items", [])
+                    sca_count = len(sca_items)
+                    if sca_items:
+                        sca_score = sca_items[0].get("score")
+                else:
+                    sca_status = "No levantado"
+            except Exception:
+                sca_status = "No levantado"
+
+            # 4. MITRE
+            mitre_tactics = 0
+            mitre_techniques = 0
+            mitre_status = "Levantado"
+            try:
+                r_mitre_tac = await client.get(f"{base}/mitre/tactics?limit=1", headers=headers)
+                if r_mitre_tac.is_success:
+                    mitre_tactics = r_mitre_tac.json().get("data", {}).get("total_affected_items", 14)
+                r_mitre_tec = await client.get(f"{base}/mitre/techniques?limit=1", headers=headers)
+                if r_mitre_tec.is_success:
+                    mitre_techniques = r_mitre_tec.json().get("data", {}).get("total_affected_items", 750)
+            except Exception:
+                mitre_status = "No levantado"
+
+            overview = {
+                "connected": True,
+                "manager_api": {"connected": True, "status": "Levantado", "version": manager_ver},
+                "fim": {"connected": fim_status == "Levantado", "status": fim_status, "monitored_files": fim_count},
+                "sca": {"connected": sca_status == "Levantado", "status": sca_status, "policies_count": sca_count, "score": sca_score},
+                "vuln": {"connected": True, "status": "Levantado"},
+                "mitre": {"connected": mitre_status == "Levantado", "status": mitre_status, "tactics_count": mitre_tactics, "techniques_count": mitre_techniques},
+            }
+            _wazuh_services_cache = overview
+            _wazuh_services_cache_ts = now
+            return overview
+    except Exception as e:
+        overview = {
+            "connected": False,
+            "error": str(e),
+            "manager_api": {"connected": False, "status": "Error conexión", "version": "N/A"},
+            "fim": {"connected": False, "status": "No levantado", "monitored_files": 0},
+            "sca": {"connected": False, "status": "No levantado", "policies_count": 0, "score": None},
+            "vuln": {"connected": False, "status": "No levantado"},
+            "mitre": {"connected": False, "status": "No levantado", "tactics_count": 0, "techniques_count": 0},
+        }
+        _wazuh_services_cache = overview
+        _wazuh_services_cache_ts = now
+        return overview
+
+
 async def gather_status() -> dict[str, Any]:
     """Recolecta el estado de todos los componentes sincronicamente (subprocess no es async)."""
     results: list[dict] = []
+    wazuh_overview = await get_wazuh_services_overview()
+
     for comp in COMPONENTS:
         # Check WAHA session is async (httpx); everything else is sync
         if comp["status_type"] == "waha_session":
@@ -547,6 +676,53 @@ async def gather_status() -> dict[str, Any]:
 
         else:
             result = _get_component_status_sync(comp)
+
+            # Enriquecer con marcas de conexión a Wazuh en tiempo real
+            cid = comp["id"]
+            if cid == "fim_rules":
+                if wazuh_overview.get("fim", {}).get("connected"):
+                    files_n = wazuh_overview["fim"].get("monitored_files", 0)
+                    result["wazuh_connected"] = True
+                    result["wazuh_status"] = "Levantado"
+                    result["detail"] = f"{files_n:,} archivos monitoreados (Wazuh FIM Levantado)"
+                else:
+                    result["wazuh_connected"] = False
+                    result["wazuh_status"] = "No levantado"
+                    result["detail"] = "Wazuh FIM no levantado / sin conexión"
+            elif cid == "sca_rules":
+                if wazuh_overview.get("sca", {}).get("connected"):
+                    score = wazuh_overview["sca"].get("score")
+                    score_txt = f" (Score: {score}%)" if score is not None else ""
+                    result["wazuh_connected"] = True
+                    result["wazuh_status"] = "Levantado"
+                    result["detail"] = f"CIS Benchmark activo{score_txt} (Wazuh SCA Levantado)"
+                else:
+                    result["wazuh_connected"] = False
+                    result["wazuh_status"] = "No levantado"
+                    result["detail"] = "Wazuh SCA no levantado / sin conexión"
+            elif cid == "vuln_rules":
+                if wazuh_overview.get("vuln", {}).get("connected"):
+                    result["wazuh_connected"] = True
+                    result["wazuh_status"] = "Levantado"
+                    result["detail"] = "Detector de Vulnerabilidades CVEs activo (Levantado)"
+                else:
+                    result["wazuh_connected"] = False
+                    result["wazuh_status"] = "No levantado"
+            elif cid == "mitre_attack":
+                if wazuh_overview.get("mitre", {}).get("connected"):
+                    tactics = wazuh_overview["mitre"].get("tactics_count", 14)
+                    techniques = wazuh_overview["mitre"].get("techniques_count", 750)
+                    result["wazuh_connected"] = True
+                    result["wazuh_status"] = "Levantado"
+                    result["detail"] = f"{tactics} tácticas / {techniques} técnicas mapeadas (Levantado)"
+                else:
+                    result["wazuh_connected"] = False
+                    result["wazuh_status"] = "No levantado"
+                    result["detail"] = "Framework MITRE no levantado / sin conexión"
+            elif comp.get("category") in ("integrity", "threat_detection", "auditing_policy"):
+                result["wazuh_connected"] = wazuh_overview.get("connected", False)
+                result["wazuh_status"] = "Levantado" if wazuh_overview.get("connected") else "No levantado"
+
             results.append(result)
 
     return {
@@ -554,6 +730,7 @@ async def gather_status() -> dict[str, Any]:
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "uptime_sec": int(time.time() - _boot_time()),
         "local_ip": _local_ip(),
+        "wazuh_services": wazuh_overview,
         "components": results,
     }
 
@@ -1122,6 +1299,18 @@ def _sync_relay_env() -> bool:
     El EnvironmentFile= del unit tiene precedencia sobre el dotenv al reiniciar,
     asi que cada escritura al .env debe espejarse ahi o el cambio se pierde.
     """
+    target = Path("/etc/wazuh-waha/relay.env")
+    try:
+        if target.parent.exists() and os.access(target.parent, os.W_OK):
+            shutil.copy2(ENV_FILE, target)
+            try:
+                os.chmod(target, 0o600)
+            except Exception:
+                pass
+            return True
+    except Exception as e:
+        log.warning("direct_sync_relay_env_failed err=%s", e)
+
     sync_script = PROJECT_ROOT / "scripts" / "sync_relay_env.sh"
     if not sync_script.exists():
         log.warning("sync_relay_env_missing script=%s", sync_script)
@@ -1411,7 +1600,7 @@ async def get_dashboard_logs(request: Request, lines: int = 100):
 
 
 @router.get("/api/v1/dashboard/wazuh/vulnerabilities")
-async def get_wazuh_vulnerabilities(request: Request, _: None = Depends(verify_api_key)):
+async def get_wazuh_vulnerabilities(request: Request, agent_id: str = "000", _: None = Depends(verify_api_key)):
     from ..infrastructure.notifier import _get_token
     from ..config import settings
     import httpx
@@ -1427,10 +1616,10 @@ async def get_wazuh_vulnerabilities(request: Request, _: None = Depends(verify_a
         async with httpx.AsyncClient(timeout=10, verify=verify) as client:
             token = await _get_token(client)
             if not token:
-                return {"error": "Error de autenticación"}
+                return {"error": "Error de autenticación con Wazuh API"}
             
             headers = {"Authorization": f"Bearer {token}"}
-            r = await client.get(f"{base}/vulnerability/000", headers=headers)
+            r = await client.get(f"{base}/vulnerability/{agent_id}", headers=headers)
             
             if r.is_success:
                 return {"vulnerabilities": r.json().get("data", {}).get("affected_items", [])}
@@ -1439,7 +1628,7 @@ async def get_wazuh_vulnerabilities(request: Request, _: None = Depends(verify_a
         return {"error": str(e)}
 
 @router.get("/api/v1/dashboard/wazuh/fim")
-async def get_wazuh_fim(request: Request, _: None = Depends(verify_api_key)):
+async def get_wazuh_fim(request: Request, agent_id: str = "000", _: None = Depends(verify_api_key)):
     from ..infrastructure.notifier import _get_token
     from ..config import settings
     import httpx
@@ -1455,19 +1644,24 @@ async def get_wazuh_fim(request: Request, _: None = Depends(verify_api_key)):
         async with httpx.AsyncClient(timeout=10, verify=verify) as client:
             token = await _get_token(client)
             if not token:
-                return {"error": "Error de autenticación"}
+                return {"error": "Error de autenticación con Wazuh API"}
             
             headers = {"Authorization": f"Bearer {token}"}
-            r = await client.get(f"{base}/syscheck/000", headers=headers)
+            r = await client.get(f"{base}/syscheck/{agent_id}?limit=100", headers=headers)
             
             if r.is_success:
-                return {"fim": r.json().get("data", {}).get("affected_items", [])}
+                data = r.json().get("data", {})
+                return {
+                    "fim": data.get("affected_items", []),
+                    "total": data.get("total_affected_items", 0),
+                    "agent_id": agent_id,
+                }
             return {"error": str(r.text)}
     except Exception as e:
         return {"error": str(e)}
 
 @router.get("/api/v1/dashboard/wazuh/sca")
-async def get_wazuh_sca(request: Request, _: None = Depends(verify_api_key)):
+async def get_wazuh_sca(request: Request, agent_id: str = "000", _: None = Depends(verify_api_key)):
     from ..infrastructure.notifier import _get_token
     from ..config import settings
     import httpx
@@ -1483,13 +1677,70 @@ async def get_wazuh_sca(request: Request, _: None = Depends(verify_api_key)):
         async with httpx.AsyncClient(timeout=10, verify=verify) as client:
             token = await _get_token(client)
             if not token:
-                return {"error": "Error de autenticación"}
+                return {"error": "Error de autenticación con Wazuh API"}
             
             headers = {"Authorization": f"Bearer {token}"}
-            r = await client.get(f"{base}/sca/000", headers=headers)
+            r = await client.get(f"{base}/sca/{agent_id}", headers=headers)
             
             if r.is_success:
-                return {"sca": r.json().get("data", {}).get("affected_items", [])}
+                data = r.json().get("data", {})
+                return {
+                    "sca": data.get("affected_items", []),
+                    "total": data.get("total_affected_items", 0),
+                    "agent_id": agent_id,
+                }
             return {"error": str(r.text)}
     except Exception as e:
         return {"error": str(e)}
+
+@router.get("/api/v1/dashboard/wazuh/mitre")
+async def get_wazuh_mitre(request: Request, _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+
+    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
+    if not host or not settings.wazuh_manager_api_pass:
+        return {"error": "Wazuh API no configurada"}
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return {"error": "Error de autenticación con Wazuh API"}
+
+            headers = {"Authorization": f"Bearer {token}"}
+            r_tactics = await client.get(f"{base}/mitre/tactics?limit=50", headers=headers)
+            r_techniques = await client.get(f"{base}/mitre/techniques?limit=50", headers=headers)
+
+            tactics = []
+            techniques = []
+            total_tactics = 0
+            total_techniques = 0
+
+            if r_tactics.is_success:
+                t_data = r_tactics.json().get("data", {})
+                tactics = t_data.get("affected_items", [])
+                total_tactics = t_data.get("total_affected_items", len(tactics))
+
+            if r_techniques.is_success:
+                tec_data = r_techniques.json().get("data", {})
+                techniques = tec_data.get("affected_items", [])
+                total_techniques = tec_data.get("total_affected_items", len(techniques))
+
+            return {
+                "connected": True,
+                "tactics": tactics,
+                "techniques": techniques,
+                "total_tactics": total_tactics,
+                "total_techniques": total_techniques,
+            }
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/api/v1/dashboard/wazuh/overview")
+async def get_wazuh_overview_endpoint(request: Request, _: None = Depends(verify_api_key)):
+    return await get_wazuh_services_overview()

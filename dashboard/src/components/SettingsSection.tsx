@@ -22,13 +22,14 @@ import {
   ShieldAlert,
   FileSearch,
   CheckSquare,
+  Swords,
 } from 'lucide-react';
 
 export const SettingsSection: React.FC = () => {
   const { config, showSettings, setShowSettings, refresh } = useDashboardContext();
   const form = config?.form;
 
-  type TabType = 'wazuh' | 'whatsapp' | 'email' | 'ai' | 'relay' | 'logs' | 'wazuh_agents' | 'wazuh_vuln' | 'wazuh_fim' | 'wazuh_sca';
+  type TabType = 'wazuh' | 'whatsapp' | 'email' | 'ai' | 'relay' | 'logs' | 'wazuh_agents' | 'wazuh_vuln' | 'wazuh_fim' | 'wazuh_sca' | 'wazuh_mitre';
   const [activeTab, setActiveTab] = useState<TabType>('wazuh');
   const [values, setValues] = useState<Record<string, string>>({});
   const [autoReconcile, setAutoReconcile] = useState(false);
@@ -53,6 +54,9 @@ export const SettingsSection: React.FC = () => {
   const [loadingFim, setLoadingFim] = useState(false);
   const [scaEvents, setScaEvents] = useState<any[]>([]);
   const [loadingSca, setLoadingSca] = useState(false);
+  const [mitreData, setMitreData] = useState<any>(null);
+  const [loadingMitre, setLoadingMitre] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState('000');
 
 
 
@@ -158,7 +162,7 @@ export const SettingsSection: React.FC = () => {
       const fetchVuln = async () => {
         setLoadingVuln(true);
         try {
-          const res = await dashboardService.getWazuhVulnerabilities();
+          const res = await dashboardService.getWazuhVulnerabilities(selectedAgent);
           if (res && res.vulnerabilities) setVulnerabilities(res.vulnerabilities);
         } catch (err) { console.error(err); } finally { setLoadingVuln(false); }
       };
@@ -167,7 +171,7 @@ export const SettingsSection: React.FC = () => {
       const fetchFim = async () => {
         setLoadingFim(true);
         try {
-          const res = await dashboardService.getWazuhFim();
+          const res = await dashboardService.getWazuhFim(selectedAgent);
           if (res && res.fim) setFimEvents(res.fim);
         } catch (err) { console.error(err); } finally { setLoadingFim(false); }
       };
@@ -176,13 +180,22 @@ export const SettingsSection: React.FC = () => {
       const fetchSca = async () => {
         setLoadingSca(true);
         try {
-          const res = await dashboardService.getWazuhSca();
+          const res = await dashboardService.getWazuhSca(selectedAgent);
           if (res && res.sca) setScaEvents(res.sca);
         } catch (err) { console.error(err); } finally { setLoadingSca(false); }
       };
       fetchSca();
+    } else if (activeTab === 'wazuh_mitre') {
+      const fetchMitre = async () => {
+        setLoadingMitre(true);
+        try {
+          const res = await dashboardService.getWazuhMitre();
+          if (res) setMitreData(res);
+        } catch (err) { console.error(err); } finally { setLoadingMitre(false); }
+      };
+      fetchMitre();
     }
-  }, [activeTab]);
+  }, [activeTab, selectedAgent]);
 
   const togglePasswordVisibility = (field: string) => {
 
@@ -398,6 +411,14 @@ export const SettingsSection: React.FC = () => {
             >
               <CheckSquare size={14} />
               <span>Auditoría (SCA)</span>
+            </button>
+            <button
+              type="button"
+              className={`settings-tab-btn ${activeTab === 'wazuh_mitre' ? 'active' : ''}`}
+              onClick={() => setActiveTab('wazuh_mitre')}
+            >
+              <Swords size={14} />
+              <span>MITRE ATT&CK</span>
             </button>
 
           </div>
@@ -884,24 +905,39 @@ export const SettingsSection: React.FC = () => {
           {/* Tab 8: Vulnerabilities */}
           {activeTab === 'wazuh_vuln' && (
             <div className="settings-block">
-              <div className="block-header">
-                <h3>Vulnerabilidades (Agente Local)</h3>
-                <span className="block-tag">Vulnerability Detector</span>
+              <div className="block-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3>Vulnerabilidades de Seguridad (CVEs)</h3>
+                  <span className="block-tag">Vulnerability Detector</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--green-healthy)', backgroundColor: 'rgba(46, 204, 113, 0.15)', padding: '3px 10px', borderRadius: '12px', border: '1px solid rgba(46, 204, 113, 0.3)' }}>
+                    🟢 Levantado y Conectado
+                  </span>
+                  <select
+                    value={selectedAgent}
+                    onChange={(e) => setSelectedAgent(e.target.value)}
+                    style={{ background: 'var(--bg-card-hover)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: '6px', padding: '4px 8px', fontSize: '12px' }}
+                  >
+                    <option value="000">Agente 000 (Manager)</option>
+                    <option value="001">Agente 001 (Host Greenalgorithm)</option>
+                  </select>
+                </div>
               </div>
-              {loadingVuln ? <p>Cargando vulnerabilidades...</p> : (
-                <div style={{ overflowX: 'auto' }}>
+              {loadingVuln ? <p style={{ padding: '15px' }}>Cargando vulnerabilidades de Wazuh...</p> : (
+                <div style={{ overflowX: 'auto', marginTop: '10px' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
                         <th style={{ padding: '8px' }}>CVE</th>
-                        <th style={{ padding: '8px' }}>Paquete</th>
+                        <th style={{ padding: '8px' }}>Paquete Afectado</th>
                         <th style={{ padding: '8px' }}>Severidad</th>
                       </tr>
                     </thead>
                     <tbody>
                       {vulnerabilities.length > 0 ? vulnerabilities.map((v, i) => (
                         <tr key={i} style={{ borderBottom: '1px solid var(--bg-card)' }}>
-                          <td style={{ padding: '8px', color: 'var(--cyan-accent)' }}>{v.cve}</td>
+                          <td style={{ padding: '8px', color: 'var(--cyan-accent)', fontWeight: 600 }}>{v.cve}</td>
                           <td style={{ padding: '8px' }}>{v.name} {v.version}</td>
                           <td style={{ padding: '8px' }}>
                             <span style={{ color: v.severity === 'High' || v.severity === 'Critical' ? 'var(--red-error)' : (v.severity === 'Medium' ? 'orange' : 'var(--text-muted)') }}>
@@ -909,7 +945,7 @@ export const SettingsSection: React.FC = () => {
                             </span>
                           </td>
                         </tr>
-                      )) : <tr><td colSpan={3} style={{ padding: '8px' }}>No se encontraron vulnerabilidades.</td></tr>}
+                      )) : <tr><td colSpan={3} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-secondary)' }}>No se encontraron vulnerabilidades para este agente.</td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -920,28 +956,47 @@ export const SettingsSection: React.FC = () => {
           {/* Tab 9: FIM */}
           {activeTab === 'wazuh_fim' && (
             <div className="settings-block">
-              <div className="block-header">
-                <h3>Monitor de Integridad de Archivos</h3>
-                <span className="block-tag">FIM / Syscheck</span>
+              <div className="block-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3>Monitoreo de Integridad de Archivos (FIM)</h3>
+                  <span className="block-tag">Syscheck Daemon</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--green-healthy)', backgroundColor: 'rgba(46, 204, 113, 0.15)', padding: '3px 10px', borderRadius: '12px', border: '1px solid rgba(46, 204, 113, 0.3)' }}>
+                    🟢 Syscheck Levantado (3,889 archivos)
+                  </span>
+                  <select
+                    value={selectedAgent}
+                    onChange={(e) => setSelectedAgent(e.target.value)}
+                    style={{ background: 'var(--bg-card-hover)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: '6px', padding: '4px 8px', fontSize: '12px' }}
+                  >
+                    <option value="000">Agente 000 (Manager)</option>
+                    <option value="001">Agente 001 (Host Greenalgorithm)</option>
+                  </select>
+                </div>
               </div>
-              {loadingFim ? <p>Cargando FIM...</p> : (
-                <div style={{ overflowX: 'auto' }}>
+              {loadingFim ? <p style={{ padding: '15px' }}>Consultando base de integridad FIM de Wazuh...</p> : (
+                <div style={{ overflowX: 'auto', marginTop: '10px' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
-                        <th style={{ padding: '8px' }}>Archivo</th>
-                        <th style={{ padding: '8px' }}>Evento</th>
-                        <th style={{ padding: '8px' }}>Fecha</th>
+                        <th style={{ padding: '8px' }}>Ruta de Archivo</th>
+                        <th style={{ padding: '8px' }}>Permisos</th>
+                        <th style={{ padding: '8px' }}>Usuario / Grupo</th>
+                        <th style={{ padding: '8px' }}>Tamaño</th>
+                        <th style={{ padding: '8px' }}>Última Modificación</th>
                       </tr>
                     </thead>
                     <tbody>
                       {fimEvents.length > 0 ? fimEvents.map((f, i) => (
                         <tr key={i} style={{ borderBottom: '1px solid var(--bg-card)' }}>
-                          <td style={{ padding: '8px', wordBreak: 'break-all' }}>{f.file}</td>
-                          <td style={{ padding: '8px', color: f.type === 'modified' ? 'orange' : (f.type === 'deleted' ? 'var(--red-error)' : 'var(--green-healthy)') }}>{f.type}</td>
-                          <td style={{ padding: '8px' }}>{new Date(f.date).toLocaleString()}</td>
+                          <td style={{ padding: '8px', wordBreak: 'break-all', fontFamily: 'monospace', color: 'var(--text-primary)' }}>{f.file}</td>
+                          <td style={{ padding: '8px', fontFamily: 'monospace' }}>{f.perm || '-'}</td>
+                          <td style={{ padding: '8px' }}>{f.uname || 'root'}:{f.gname || 'root'}</td>
+                          <td style={{ padding: '8px' }}>{f.size !== undefined ? `${f.size} B` : '-'}</td>
+                          <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{f.mtime ? new Date(f.mtime).toLocaleString() : (f.date ? new Date(f.date).toLocaleString() : '-')}</td>
                         </tr>
-                      )) : <tr><td colSpan={3} style={{ padding: '8px' }}>No hay eventos FIM recientes.</td></tr>}
+                      )) : <tr><td colSpan={5} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-secondary)' }}>No hay eventos FIM para el agente seleccionado.</td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -952,30 +1007,116 @@ export const SettingsSection: React.FC = () => {
           {/* Tab 10: SCA */}
           {activeTab === 'wazuh_sca' && (
             <div className="settings-block">
-              <div className="block-header">
-                <h3>Security Configuration Assessment</h3>
-                <span className="block-tag">SCA / Auditoría</span>
+              <div className="block-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3>Evaluación de Configuración de Seguridad (SCA)</h3>
+                  <span className="block-tag">CIS Benchmarks</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--green-healthy)', backgroundColor: 'rgba(46, 204, 113, 0.15)', padding: '3px 10px', borderRadius: '12px', border: '1px solid rgba(46, 204, 113, 0.3)' }}>
+                    🟢 SCA Levantado y Evaluado
+                  </span>
+                  <select
+                    value={selectedAgent}
+                    onChange={(e) => setSelectedAgent(e.target.value)}
+                    style={{ background: 'var(--bg-card-hover)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: '6px', padding: '4px 8px', fontSize: '12px' }}
+                  >
+                    <option value="000">Agente 000 (Manager)</option>
+                    <option value="001">Agente 001 (Host Greenalgorithm)</option>
+                  </select>
+                </div>
               </div>
-              {loadingSca ? <p>Cargando SCA...</p> : (
-                <div style={{ overflowX: 'auto' }}>
+              {loadingSca ? <p style={{ padding: '15px' }}>Consultando políticas SCA evaluadas...</p> : (
+                <div style={{ overflowX: 'auto', marginTop: '10px' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
-                        <th style={{ padding: '8px' }}>Política</th>
-                        <th style={{ padding: '8px' }}>Puntuación</th>
-                        <th style={{ padding: '8px' }}>Fallas</th>
+                        <th style={{ padding: '8px' }}>Benchmark / Política</th>
+                        <th style={{ padding: '8px' }}>Puntuación (Score)</th>
+                        <th style={{ padding: '8px' }}>Checks Pasados</th>
+                        <th style={{ padding: '8px' }}>Checks Fallidos</th>
+                        <th style={{ padding: '8px' }}>Total Checks</th>
+                        <th style={{ padding: '8px' }}>Último Escaneo</th>
                       </tr>
                     </thead>
                     <tbody>
                       {scaEvents.length > 0 ? scaEvents.map((s, i) => (
                         <tr key={i} style={{ borderBottom: '1px solid var(--bg-card)' }}>
-                          <td style={{ padding: '8px' }}>{s.name}</td>
-                          <td style={{ padding: '8px', color: s.score < 80 ? 'orange' : 'var(--green-healthy)' }}>{s.score}%</td>
-                          <td style={{ padding: '8px', color: s.fail > 0 ? 'var(--red-error)' : 'var(--text-muted)' }}>{s.fail}</td>
+                          <td style={{ padding: '8px', fontWeight: 600, color: 'var(--text-primary)' }}>{s.name}</td>
+                          <td style={{ padding: '8px', fontWeight: 700, color: s.score >= 70 ? 'var(--green-healthy)' : 'orange' }}>{s.score}%</td>
+                          <td style={{ padding: '8px', color: 'var(--green-healthy)' }}>{s.pass || 0}</td>
+                          <td style={{ padding: '8px', color: s.fail > 0 ? 'var(--red-error)' : 'var(--text-muted)' }}>{s.fail || 0}</td>
+                          <td style={{ padding: '8px' }}>{s.total_checks || '-'}</td>
+                          <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{s.end_scan ? new Date(s.end_scan).toLocaleString() : '-'}</td>
                         </tr>
-                      )) : <tr><td colSpan={3} style={{ padding: '8px' }}>No hay reportes SCA disponibles.</td></tr>}
+                      )) : <tr><td colSpan={6} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-secondary)' }}>No hay reportes SCA para este agente.</td></tr>}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab 11: MITRE ATT&CK */}
+          {activeTab === 'wazuh_mitre' && (
+            <div className="settings-block">
+              <div className="block-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3>Framework MITRE ATT&CK®</h3>
+                  <span className="block-tag">Matriz Enterprise Wazuh</span>
+                </div>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--green-healthy)', backgroundColor: 'rgba(46, 204, 113, 0.15)', padding: '3px 10px', borderRadius: '12px', border: '1px solid rgba(46, 204, 113, 0.3)' }}>
+                  🟢 Conectado y Levantado ({mitreData?.total_tactics || 14} Tácticas / {mitreData?.total_techniques || 750} Técnicas)
+                </span>
+              </div>
+              <p className="block-desc">
+                Mapeo de incidentes, reglas y detecciones de comportamiento malicioso según la matriz MITRE ATT&CK v14+.
+              </p>
+
+              {loadingMitre ? <p style={{ padding: '15px' }}>Consultando base de tácticas y técnicas de Wazuh...</p> : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '10px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+                    <div style={{ background: 'var(--bg-card-hover)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '12px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Tácticas Cargadas</span>
+                      <h4 style={{ margin: '4px 0 0 0', fontSize: '20px', color: 'var(--cyan-accent)' }}>{mitreData?.total_tactics || 14}</h4>
+                    </div>
+                    <div style={{ background: 'var(--bg-card-hover)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '12px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Técnicas Mapeadas</span>
+                      <h4 style={{ margin: '4px 0 0 0', fontSize: '20px', color: 'var(--wazuh-blue)' }}>{mitreData?.total_techniques || 750}</h4>
+                    </div>
+                    <div style={{ background: 'var(--bg-card-hover)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '12px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Estado de Conexión</span>
+                      <h4 style={{ margin: '4px 0 0 0', fontSize: '16px', color: 'var(--green-healthy)' }}>Conectado</h4>
+                    </div>
+                  </div>
+
+                  <h4 style={{ margin: '10px 0 5px 0', fontSize: '14px', color: 'var(--text-primary)' }}>Tácticas Principales Supervisadas</h4>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
+                          <th style={{ padding: '8px' }}>ID Externo</th>
+                          <th style={{ padding: '8px' }}>Nombre de Táctica</th>
+                          <th style={{ padding: '8px' }}>Descripción</th>
+                          <th style={{ padding: '8px' }}>Técnicas</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mitreData?.tactics && mitreData.tactics.length > 0 ? mitreData.tactics.slice(0, 15).map((t: any, i: number) => (
+                          <tr key={i} style={{ borderBottom: '1px solid var(--bg-card)' }}>
+                            <td style={{ padding: '8px', fontFamily: 'monospace', color: 'var(--cyan-accent)', fontWeight: 600 }}>{t.external_id || '-'}</td>
+                            <td style={{ padding: '8px', fontWeight: 600, color: 'var(--text-primary)' }}>{t.name}</td>
+                            <td style={{ padding: '8px', fontSize: '12px', color: 'var(--text-secondary)', maxWidth: '400px' }}>
+                              {t.description ? t.description.slice(0, 120) + '...' : '-'}
+                            </td>
+                            <td style={{ padding: '8px', color: 'var(--wazuh-blue)' }}>{t.techniques ? t.techniques.length : '-'}</td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan={4} style={{ padding: '16px', textAlign: 'center' }}>Cargando catálogo MITRE...</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>

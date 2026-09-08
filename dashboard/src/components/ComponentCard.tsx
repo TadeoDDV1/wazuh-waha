@@ -74,10 +74,28 @@ export const ComponentCard: React.FC<Props> = ({ component }) => {
           </div>
         </div>
 
-        {/* Status Badge */}
-        <div className={`status-badge-chip ${health}`}>
-          <span className="status-dot" />
-          <span>{health}</span>
+        {/* Status Badge & Wazuh Mark */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px' }}>
+          <div className={`status-badge-chip ${health}`}>
+            <span className="status-dot" />
+            <span>{health}</span>
+          </div>
+          {component.wazuh_status && (
+            <span
+              style={{
+                fontSize: '10px',
+                fontWeight: 600,
+                padding: '2px 7px',
+                borderRadius: '6px',
+                backgroundColor: component.wazuh_connected ? 'rgba(46, 204, 113, 0.15)' : 'rgba(231, 76, 60, 0.15)',
+                color: component.wazuh_connected ? 'var(--green-healthy)' : 'var(--red-error)',
+                border: `1px solid ${component.wazuh_connected ? 'rgba(46, 204, 113, 0.3)' : 'rgba(231, 76, 60, 0.3)'}`,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {component.wazuh_connected ? '🟢 Wazuh: Levantado' : '🔴 Wazuh: Desconectado'}
+            </span>
+          )}
         </div>
       </div>
 

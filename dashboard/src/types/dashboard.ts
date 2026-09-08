@@ -13,6 +13,39 @@ export interface Component {
   current_state?: boolean | null;
   health?: 'healthy' | 'warning' | 'error' | 'disabled' | 'unknown';
   detail?: string;
+  wazuh_connected?: boolean;
+  wazuh_status?: string;
+}
+
+export interface WazuhOverview {
+  connected: boolean;
+  error?: string;
+  manager_api: {
+    connected: boolean;
+    status: string;
+    version?: string;
+  };
+  fim: {
+    connected: boolean;
+    status: string;
+    monitored_files?: number;
+  };
+  sca: {
+    connected: boolean;
+    status: string;
+    policies_count?: number;
+    score?: number | null;
+  };
+  vuln: {
+    connected: boolean;
+    status: string;
+  };
+  mitre: {
+    connected: boolean;
+    status: string;
+    tactics_count?: number;
+    techniques_count?: number;
+  };
 }
 
 export interface CategoryLabel {
@@ -24,6 +57,7 @@ export interface StatusResponse {
   timestamp: string;
   uptime_sec: number;
   local_ip: string;
+  wazuh_services?: WazuhOverview;
   components: Component[];
 }
 

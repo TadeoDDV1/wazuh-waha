@@ -5,6 +5,7 @@ import ComponentCard from './ComponentCard';
 import WhatsappCard from './WhatsappCard';
 import { WazuhGroupsCard } from './WazuhGroupsCard';
 import { WazuhAgentsCard } from './WazuhAgentsCard';
+import { WazuhServicesCard } from './WazuhServicesCard';
 import CategoryNav from './CategoryNav';
 import type { Component } from '../types/dashboard';
 import {
@@ -123,6 +124,7 @@ export const Dashboard: React.FC = () => {
 
   return (
     <>
+      <WazuhServicesCard />
       <WazuhGroupsCard />
       <WazuhAgentsCard />
 
