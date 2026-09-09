@@ -1,0 +1,1 @@
+administrador-wazuh-waha.sh
