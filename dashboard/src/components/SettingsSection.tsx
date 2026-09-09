@@ -1,35 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './SettingsSection.css';
 import { useDashboardContext } from '../context/DashboardContext';
 import { dashboardService } from '../services/api';
 import { toast } from 'sonner';
 import {
   Settings,
-  X,
-  Send,
-  Save,
-  AlertTriangle,
-  Loader2,
-  Eye,
-  EyeOff,
   Server,
   MessageSquare,
   Mail,
   Brain,
-  Sliders,
   Terminal,
-  Users,
-  ShieldAlert,
-  FileSearch,
-  CheckSquare,
-  Swords,
+  X,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  Loader2,
+  Save,
+  Info,
 } from 'lucide-react';
 
 export const SettingsSection: React.FC = () => {
-  const { config, showSettings, setShowSettings, refresh } = useDashboardContext();
+  const { config, setShowSettings, refresh } = useDashboardContext();
   const form = config?.form;
 
-  type TabType = 'wazuh' | 'whatsapp' | 'email' | 'ai' | 'relay' | 'logs' | 'wazuh_agents' | 'wazuh_vuln' | 'wazuh_fim' | 'wazuh_sca' | 'wazuh_mitre';
+  type TabType = 'wazuh' | 'whatsapp' | 'email' | 'ai' | 'logs';
   const [activeTab, setActiveTab] = useState<TabType>('wazuh');
   const [values, setValues] = useState<Record<string, string>>({});
   const [autoReconcile, setAutoReconcile] = useState(false);
@@ -37,29 +31,12 @@ export const SettingsSection: React.FC = () => {
   const [wazuhVerifyTls, setWazuhVerifyTls] = useState(false);
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
-  const [testingWhatsApp, setTestingWhatsApp] = useState(false);
   const [testingWazuh, setTestingWazuh] = useState(false);
+  const [testingEmail, setTestingEmail] = useState(false);
   const [needRestart, setNeedRestart] = useState(false);
 
   const [logsOutput, setLogsOutput] = useState<string>('');
   const [loadingLogs, setLoadingLogs] = useState(false);
-
-  const [wazuhAgents, setWazuhAgents] = useState<any[]>([]);
-  const [loadingAgents, setLoadingAgents] = useState(false);
-  const [localServices, setLocalServices] = useState<any[]>([]);
-  
-  const [vulnerabilities, setVulnerabilities] = useState<any[]>([]);
-  const [loadingVuln, setLoadingVuln] = useState(false);
-  const [fimEvents, setFimEvents] = useState<any[]>([]);
-  const [loadingFim, setLoadingFim] = useState(false);
-  const [scaEvents, setScaEvents] = useState<any[]>([]);
-  const [loadingSca, setLoadingSca] = useState(false);
-  const [mitreData, setMitreData] = useState<any>(null);
-  const [loadingMitre, setLoadingMitre] = useState(false);
-  const [selectedAgent, setSelectedAgent] = useState('000');
-
-
-
 
   useEffect(() => {
     if (!form) return;
@@ -70,35 +47,19 @@ export const SettingsSection: React.FC = () => {
       WAZUH_MANAGER_API_PORT: String(form.wazuh_manager_api_port ?? '55000'),
       WAZUH_MANAGER_API_USER: form.wazuh_manager_api_user || 'wazuh',
       WAZUH_MANAGER_API_PASS: '',
-      // WhatsApp & WAHA
-      ADMIN_PHONE: form.admin_phone || '',
-      WAHA_HOST: form.waha_host || 'http://localhost:3000',
-      WAHA_SESSION: form.waha_session || 'default',
-      WAHA_API_KEY: '',
-      WAHA_LOG_LEVEL: form.waha_log_level || 'info',
-      WAHA_HOOK_URL: form.waha_hook_url || '',
+
+      // WhatsApp & WAHA (solo watchdog y autorecuperación)
       WAHA_RECOVERY_COOLDOWN_SEC: String(form.waha_recovery_cooldown_sec ?? '300'),
       WAHA_RECOVERY_MAX_WAIT_SEC: String(form.waha_recovery_max_wait_sec ?? '60'),
       WAHA_WATCHDOG_INTERVAL_SEC: String(form.waha_watchdog_interval_sec ?? '300'),
-      // Email
-      SMTP_HOST: form.smtp_host || '',
-      SMTP_PORT: String(form.smtp_port ?? '587'),
-      SMTP_USER: form.smtp_user || '',
-      SMTP_PASS: '',
-      SMTP_FROM: form.smtp_from || '',
+
+      // Email (solo destinatario)
       ADMIN_EMAIL: form.admin_email || '',
-      HYVOR_BASE_URL: form.hyvor_base_url || '',
-      HYVOR_API_KEY: '',
-      HYVOR_FROM: form.hyvor_from || '',
+
       // AI
       OLLAMA_HOST: form.ollama_host || 'http://localhost:11434',
       OLLAMA_MODEL: form.ollama_model || 'qwen2.5:0.5b',
       OLLAMA_TIMEOUT: String(form.ollama_timeout ?? '10'),
-      // Relay
-      RELAY_PORT: String(form.relay_port ?? '8765'),
-      RELAY_DEDUP_TTL: String(form.relay_dedup_ttl ?? '300'),
-      RELAY_MIN_LEVEL_UNKNOWN: String(form.relay_min_level_unknown ?? '10'),
-      RELAY_WORKERS: String(form.relay_workers ?? '2'),
     });
 
     setAutoReconcile(Boolean(form.auto_reconcile));
@@ -106,12 +67,6 @@ export const SettingsSection: React.FC = () => {
     setWazuhVerifyTls(Boolean(form.wazuh_manager_api_verify_tls));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form ? JSON.stringify(form) : null]);
-
-  if (!showSettings) return null;
-
-  const handleChange = (key: string, val: string) => {
-    setValues((prev) => ({ ...prev, [key]: val }));
-  };
 
   useEffect(() => {
     if (activeTab === 'logs') {
@@ -121,7 +76,7 @@ export const SettingsSection: React.FC = () => {
           const res = await dashboardService.getLogs(100);
           setLogsOutput(res.logs || 'No logs available');
         } catch (err) {
-          setLogsOutput('Error fetching logs: ' + String(err));
+          setLogsOutput('Error al consultar logs: ' + String(err));
         } finally {
           setLoadingLogs(false);
         }
@@ -132,83 +87,20 @@ export const SettingsSection: React.FC = () => {
     }
   }, [activeTab]);
 
-
-  useEffect(() => {
-    if (activeTab === 'wazuh_agents') {
-      const fetchData = async () => {
-        setLoadingAgents(true);
-        try {
-          const agentsRes = await dashboardService.getWazuhAgents();
-          if (agentsRes && agentsRes.agents) {
-            setWazuhAgents(agentsRes.agents);
-          }
-          const statusRes = await dashboardService.getStatus();
-          if (statusRes && statusRes.components) {
-            setLocalServices(statusRes.components.filter(c => c.status_type === 'systemd_service' || c.status_type === 'systemd_timer'));
-          }
-        } catch (err) {
-          console.error(err);
-        } finally {
-          setLoadingAgents(false);
-        }
-      };
-      fetchData();
-    }
-  }, [activeTab]);
-
-
-  useEffect(() => {
-    if (activeTab === 'wazuh_vuln') {
-      const fetchVuln = async () => {
-        setLoadingVuln(true);
-        try {
-          const res = await dashboardService.getWazuhVulnerabilities(selectedAgent);
-          if (res && res.vulnerabilities) setVulnerabilities(res.vulnerabilities);
-        } catch (err) { console.error(err); } finally { setLoadingVuln(false); }
-      };
-      fetchVuln();
-    } else if (activeTab === 'wazuh_fim') {
-      const fetchFim = async () => {
-        setLoadingFim(true);
-        try {
-          const res = await dashboardService.getWazuhFim(selectedAgent);
-          if (res && res.fim) setFimEvents(res.fim);
-        } catch (err) { console.error(err); } finally { setLoadingFim(false); }
-      };
-      fetchFim();
-    } else if (activeTab === 'wazuh_sca') {
-      const fetchSca = async () => {
-        setLoadingSca(true);
-        try {
-          const res = await dashboardService.getWazuhSca(selectedAgent);
-          if (res && res.sca) setScaEvents(res.sca);
-        } catch (err) { console.error(err); } finally { setLoadingSca(false); }
-      };
-      fetchSca();
-    } else if (activeTab === 'wazuh_mitre') {
-      const fetchMitre = async () => {
-        setLoadingMitre(true);
-        try {
-          const res = await dashboardService.getWazuhMitre();
-          if (res) setMitreData(res);
-        } catch (err) { console.error(err); } finally { setLoadingMitre(false); }
-      };
-      fetchMitre();
-    }
-  }, [activeTab, selectedAgent]);
-
   const togglePasswordVisibility = (field: string) => {
-
     setShowPasswords((prev) => ({ ...prev, [field]: !prev[field] }));
+  };
+
+  const handleChange = (field: string, val: string) => {
+    setValues((prev) => ({ ...prev, [field]: val }));
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-
     try {
-      const payload: Record<string, string> = {
-        // Wazuh
+      const payload: Record<string, any> = {
+        // Wazuh & Network
         WAZUH_SERVER_IP: values.WAZUH_SERVER_IP || '',
         WAZUH_SERVER_IP_FALLBACK: values.WAZUH_SERVER_IP_FALLBACK || '',
         AUTO_RECONCILE: autoReconcile ? '1' : '0',
@@ -216,17 +108,12 @@ export const SettingsSection: React.FC = () => {
         WAZUH_MANAGER_API_USER: values.WAZUH_MANAGER_API_USER || 'wazuh',
         WAZUH_MANAGER_API_VERIFY_TLS: wazuhVerifyTls ? 'true' : 'false',
 
-        // WhatsApp & WAHA
-        ADMIN_PHONE: values.ADMIN_PHONE || '',
-        WAHA_HOST: values.WAHA_HOST || 'http://localhost:3000',
-        WAHA_SESSION: values.WAHA_SESSION || 'default',
-        WAHA_LOG_LEVEL: values.WAHA_LOG_LEVEL || 'info',
-        WAHA_HOOK_URL: values.WAHA_HOOK_URL || '',
+        // WhatsApp Watchdog / Recovery
+        WAHA_WATCHDOG_INTERVAL_SEC: values.WAHA_WATCHDOG_INTERVAL_SEC || '300',
         WAHA_RECOVERY_COOLDOWN_SEC: values.WAHA_RECOVERY_COOLDOWN_SEC || '300',
         WAHA_RECOVERY_MAX_WAIT_SEC: values.WAHA_RECOVERY_MAX_WAIT_SEC || '60',
-        WAHA_WATCHDOG_INTERVAL_SEC: values.WAHA_WATCHDOG_INTERVAL_SEC || '300',
 
-        // Email
+        // Email Destinatario
         ADMIN_EMAIL: values.ADMIN_EMAIL || '',
 
         // AI
@@ -234,17 +121,9 @@ export const SettingsSection: React.FC = () => {
         OLLAMA_HOST: values.OLLAMA_HOST || 'http://localhost:11434',
         OLLAMA_MODEL: values.OLLAMA_MODEL || 'qwen2.5:0.5b',
         OLLAMA_TIMEOUT: values.OLLAMA_TIMEOUT || '10',
-
-        // Relay
-        RELAY_PORT: values.RELAY_PORT || '8765',
-        RELAY_DEDUP_TTL: values.RELAY_DEDUP_TTL || '300',
-        RELAY_MIN_LEVEL_UNKNOWN: values.RELAY_MIN_LEVEL_UNKNOWN || '10',
-        RELAY_WORKERS: values.RELAY_WORKERS || '2',
       };
 
-      // Incluir contraseñas solo si se ingresó un nuevo valor
       if (values.WAZUH_MANAGER_API_PASS) payload.WAZUH_MANAGER_API_PASS = values.WAZUH_MANAGER_API_PASS;
-      if (values.WAHA_API_KEY) payload.WAHA_API_KEY = values.WAHA_API_KEY;
 
       const res = await dashboardService.updateConfigBatch(payload);
 
@@ -267,37 +146,37 @@ export const SettingsSection: React.FC = () => {
     }
   };
 
-
-
-  const handleTestWhatsApp = async () => {
-    setTestingWhatsApp(true);
-    try {
-      const res = await dashboardService.testWhatsApp();
-      if (res.ok) {
-        toast.success(`WhatsApp de prueba enviado: ${res.detail}`);
-      } else {
-        toast.error(`Fallo WhatsApp: ${res.detail}`);
-      }
-    } catch {
-      toast.error('Error al conectar con el endpoint de test WhatsApp');
-    } finally {
-      setTestingWhatsApp(false);
-    }
-  };
-
   const handleTestWazuh = async () => {
     setTestingWazuh(true);
     try {
       const res = await dashboardService.testWazuh();
       if (res.ok) {
-        toast.success(`Wazuh alcanzable: ${res.detail}`);
+        toast.success(
+          `Conexión Wazuh OK. API (${res.api_port_ok ? '55000 ✓' : '55000 ✗'}), Agent (${res.agent_port_ok ? '1514 ✓' : '1514 ✗'})`
+        );
       } else {
-        toast.warning(`Verificación Wazuh: ${res.detail}`);
+        toast.error(`Fallo al probar puertos Wazuh: ${res.detail}`);
       }
     } catch {
-      toast.error('Error al probar conexión con el Manager Wazuh');
+      toast.error('Error al conectar con el endpoint de test Wazuh');
     } finally {
       setTestingWazuh(false);
+    }
+  };
+
+  const handleTestEmail = async () => {
+    setTestingEmail(true);
+    try {
+      const res = await dashboardService.testEmail();
+      if (res.ok) {
+        toast.success(`Correo enviado: ${res.detail}`);
+      } else {
+        toast.error(`Fallo al enviar correo: ${res.detail}`);
+      }
+    } catch {
+      toast.error('Error al conectar con el endpoint de test de correo');
+    } finally {
+      setTestingEmail(false);
     }
   };
 
@@ -324,7 +203,7 @@ export const SettingsSection: React.FC = () => {
           {needRestart && (
             <div className="restart-alert-box">
               <AlertTriangle size={16} />
-              <span>Se modificaron puertos o parámetros de workers. Es recomendable reiniciar el servicio relay.</span>
+              <span>Se modificaron parámetros del stack. Es recomendable reiniciar el servicio relay.</span>
             </div>
           )}
 
@@ -364,75 +243,23 @@ export const SettingsSection: React.FC = () => {
             </button>
             <button
               type="button"
-              className={`settings-tab-btn ${activeTab === 'relay' ? 'active' : ''}`}
-              onClick={() => setActiveTab('relay')}
-            >
-              <Sliders size={14} />
-              <span>Relay & Daemon</span>
-            </button>
-            <button
-              type="button"
               className={`settings-tab-btn ${activeTab === 'logs' ? 'active' : ''}`}
               onClick={() => setActiveTab('logs')}
             >
               <Terminal size={14} />
               <span>Logs del Sistema</span>
             </button>
-
-
-            <button
-              type="button"
-              className={`settings-tab-btn ${activeTab === 'wazuh_agents' ? 'active' : ''}`}
-              onClick={() => setActiveTab('wazuh_agents')}
-            >
-              <Users size={14} />
-              <span>Agentes & Procesos</span>
-            </button>
-            <button
-              type="button"
-              className={`settings-tab-btn ${activeTab === 'wazuh_vuln' ? 'active' : ''}`}
-              onClick={() => setActiveTab('wazuh_vuln')}
-            >
-              <ShieldAlert size={14} />
-              <span>Vulnerabilidades</span>
-            </button>
-            <button
-              type="button"
-              className={`settings-tab-btn ${activeTab === 'wazuh_fim' ? 'active' : ''}`}
-              onClick={() => setActiveTab('wazuh_fim')}
-            >
-              <FileSearch size={14} />
-              <span>Integridad (FIM)</span>
-            </button>
-            <button
-              type="button"
-              className={`settings-tab-btn ${activeTab === 'wazuh_sca' ? 'active' : ''}`}
-              onClick={() => setActiveTab('wazuh_sca')}
-            >
-              <CheckSquare size={14} />
-              <span>Auditoría (SCA)</span>
-            </button>
-            <button
-              type="button"
-              className={`settings-tab-btn ${activeTab === 'wazuh_mitre' ? 'active' : ''}`}
-              onClick={() => setActiveTab('wazuh_mitre')}
-            >
-              <Swords size={14} />
-              <span>MITRE ATT&CK</span>
-            </button>
-
           </div>
-
 
           {/* Tab 1: Wazuh & Network */}
           {activeTab === 'wazuh' && (
             <div className="settings-block">
               <div className="block-header">
-                <h3>Servidor Manager Wazuh</h3>
-                <span className="block-tag">Fuente de Verdad (.env)</span>
+                <h3>Servidor Wazuh Manager & API</h3>
+                <span className="block-tag">Core</span>
               </div>
               <p className="block-desc">
-                Define las direcciones IP y credenciales de comunicación entre los agentes locales y el servidor Wazuh.
+                Dirección IP y credenciales de acceso para el Manager Wazuh y el registro de agentes.
               </p>
 
               <div className="field-grid-2">
@@ -441,23 +268,23 @@ export const SettingsSection: React.FC = () => {
                   <input
                     type="text"
                     className="field-input"
-                    placeholder="Ej. 192.168.1.72"
+                    placeholder="192.168.1.100"
                     value={values.WAZUH_SERVER_IP || ''}
                     onChange={(e) => handleChange('WAZUH_SERVER_IP', e.target.value)}
                   />
-                  <span className="field-hint">IP única donde corre el Wazuh Manager</span>
+                  <span className="field-hint">IP donde escucha el demonio del Manager Wazuh</span>
                 </div>
 
                 <div className="field-group">
-                  <label>IPs Candidatas Fallback (WAZUH_SERVER_IP_FALLBACK)</label>
+                  <label>IP Fallback (WAZUH_SERVER_IP_FALLBACK)</label>
                   <input
                     type="text"
                     className="field-input"
-                    placeholder="Ej. 172.44.30.5, 192.168.1.80"
+                    placeholder="192.168.1.101,10.0.0.5"
                     value={values.WAZUH_SERVER_IP_FALLBACK || ''}
                     onChange={(e) => handleChange('WAZUH_SERVER_IP_FALLBACK', e.target.value)}
                   />
-                  <span className="field-hint">Separadas por coma si la IP principal cambia</span>
+                  <span className="field-hint">IPs candidatas si la principal no responde</span>
                 </div>
               </div>
 
@@ -469,15 +296,12 @@ export const SettingsSection: React.FC = () => {
                   onChange={(e) => setAutoReconcile(e.target.checked)}
                 />
                 <label htmlFor="auto_reconcile">
-                  <strong>Auto-reconciliación de IP (AUTO_RECONCILE)</strong>
-                  <br />
-                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                    Actualiza automáticamente <code>ossec.conf</code> del agente cuando el watchdog detecte cambio de IP.
-                  </span>
+                  Auto-reconciliar IP si se detecta drift (AUTO_RECONCILE)
+                  <span className="field-hint">Actualiza ossec.conf automáticamente ante cambio de IP</span>
                 </label>
               </div>
 
-              <h4 className="sub-title">API REST del Manager (Reporte de Eventos)</h4>
+              <h4 className="sub-title">Credenciales API de Wazuh</h4>
               <div className="field-grid-3">
                 <div className="field-group">
                   <label>Puerto API</label>
@@ -489,6 +313,7 @@ export const SettingsSection: React.FC = () => {
                     onChange={(e) => handleChange('WAZUH_MANAGER_API_PORT', e.target.value)}
                   />
                 </div>
+
                 <div className="field-group">
                   <label>Usuario API</label>
                   <input
@@ -499,13 +324,14 @@ export const SettingsSection: React.FC = () => {
                     onChange={(e) => handleChange('WAZUH_MANAGER_API_USER', e.target.value)}
                   />
                 </div>
+
                 <div className="field-group">
                   <label>Contraseña API</label>
                   <div className="field-input-wrapper">
                     <input
                       type={showPasswords.WAZUH_MANAGER_API_PASS ? 'text' : 'password'}
                       className="field-input"
-                      placeholder={form?.wazuh_manager_api_pass_set ? '•••••••• (guardada)' : 'Pass API'}
+                      placeholder={form?.wazuh_manager_api_pass_set ? '•••••••• (guardada)' : 'Nueva contraseña'}
                       value={values.WAZUH_MANAGER_API_PASS || ''}
                       onChange={(e) => handleChange('WAZUH_MANAGER_API_PASS', e.target.value)}
                     />
@@ -536,104 +362,53 @@ export const SettingsSection: React.FC = () => {
           {activeTab === 'whatsapp' && (
             <div className="settings-block">
               <div className="block-header">
-                <h3>Integración con WhatsApp (WAHA)</h3>
-                <span className="block-tag">Gateway</span>
+                <h3>Auto-Recuperación y Watchdog de WhatsApp (WAHA)</h3>
+                <span className="block-tag">Watchdog</span>
               </div>
-              <p className="block-desc">
-                Configura el número destinatario de las alertas de seguridad y la conexión con el contenedor WAHA.
-              </p>
-
-              <div className="field-group">
-                <label>Número WhatsApp Destino (ADMIN_PHONE)</label>
-                <div className="field-input-wrapper">
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder="Ej. 5219991234567 (código de país + número, sin +)"
-                    value={values.ADMIN_PHONE || ''}
-                    onChange={(e) => handleChange('ADMIN_PHONE', e.target.value)}
-                  />
-                </div>
-                <span className="field-hint">
-                  Formato E.164 sin el signo +. Ejemplo para México: <code>521</code> + 10 dígitos.
-                </span>
-              </div>
-
-              <div className="field-grid-2">
-                <div className="field-group">
-                  <label>Host WAHA (WAHA_HOST)</label>
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder="http://localhost:3000"
-                    value={values.WAHA_HOST || ''}
-                    onChange={(e) => handleChange('WAHA_HOST', e.target.value)}
-                  />
-                </div>
-
-                <div className="field-group">
-                  <label>Nombre de Sesión (WAHA_SESSION)</label>
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder="default"
-                    value={values.WAHA_SESSION || ''}
-                    onChange={(e) => handleChange('WAHA_SESSION', e.target.value)}
-                  />
+              
+              <div className="highlight-box" style={{ padding: '14px', marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                <Info size={18} style={{ color: 'var(--cyan-accent)', flexShrink: 0, marginTop: '2px' }} />
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  <strong style={{ color: 'var(--text-primary)' }}>Control de Sesión Centralizado:</strong> El inicio, detención y escaneo del código QR de vinculación se gestionan de forma interactiva directamente desde la tarjeta de <strong style={{ color: 'var(--cyan-accent)' }}>WAHA en el panel principal</strong>.
                 </div>
               </div>
 
-              <div className="field-group">
-                <label>WAHA API Key (WAHA_API_KEY)</label>
-                <div className="field-input-wrapper">
-                  <input
-                    type={showPasswords.WAHA_API_KEY ? 'text' : 'password'}
-                    className="field-input"
-                    placeholder={form?.waha_api_key_set ? '•••••••• (guardada)' : 'API Key de WAHA'}
-                    value={values.WAHA_API_KEY || ''}
-                    onChange={(e) => handleChange('WAHA_API_KEY', e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="password-toggle-btn"
-                    onClick={() => togglePasswordVisibility('WAHA_API_KEY')}
-                  >
-                    {showPasswords.WAHA_API_KEY ? <EyeOff size={15} /> : <Eye size={15} />}
-                  </button>
-                </div>
-              </div>
-
-              <h4 className="sub-title">Watchdog & Auto-recuperación de Sesión</h4>
+              <h4 className="sub-title">Tiempos de Supervisión Automática</h4>
               <div className="field-grid-3">
                 <div className="field-group">
-                  <label>Intervalo Watchdog (seg)</label>
+                  <label>Intervalo de Watchdog (segundos)</label>
                   <input
-                    type="text"
+                    type="number"
                     className="field-input"
                     placeholder="300"
                     value={values.WAHA_WATCHDOG_INTERVAL_SEC || ''}
                     onChange={(e) => handleChange('WAHA_WATCHDOG_INTERVAL_SEC', e.target.value)}
                   />
+                  <span className="field-hint">Frecuencia del chequeo de salud de la sesión</span>
                 </div>
+
                 <div className="field-group">
-                  <label>Cooldown Recovery (seg)</label>
+                  <label>Cooldown de Recuperación (segundos)</label>
                   <input
-                    type="text"
+                    type="number"
                     className="field-input"
                     placeholder="300"
                     value={values.WAHA_RECOVERY_COOLDOWN_SEC || ''}
                     onChange={(e) => handleChange('WAHA_RECOVERY_COOLDOWN_SEC', e.target.value)}
                   />
+                  <span className="field-hint">Espera mínima entre intentos de reinicio</span>
                 </div>
+
                 <div className="field-group">
-                  <label>Max Wait Recovery (seg)</label>
+                  <label>Tiempo Máximo de Espera (segundos)</label>
                   <input
-                    type="text"
+                    type="number"
                     className="field-input"
                     placeholder="60"
                     value={values.WAHA_RECOVERY_MAX_WAIT_SEC || ''}
                     onChange={(e) => handleChange('WAHA_RECOVERY_MAX_WAIT_SEC', e.target.value)}
                   />
+                  <span className="field-hint">Límite para que la sesión pase a STARTING</span>
                 </div>
               </div>
             </div>
@@ -643,22 +418,42 @@ export const SettingsSection: React.FC = () => {
           {activeTab === 'email' && (
             <div className="settings-block">
               <div className="block-header">
-                <h3>Canal de Respaldo por Correo Electrónico</h3>
-                <span className="block-tag">Fallback</span>
+                <h3>Canal de Notificaciones por Correo</h3>
+                <span className="block-tag">Destinatario</span>
               </div>
+              <p className="block-desc">
+                Ingresa la dirección de correo a la cual se despacharán los reportes, alertas de seguridad e incidentes de salud del stack.
+              </p>
 
-              <div className="field-group" style={{ marginTop: '15px', marginBottom: '15px' }}>
-                <label>Correo de Notificaciones (ADMIN_EMAIL)</label>
+              <div className="field-group highlight-box" style={{ padding: '16px', marginBottom: '20px' }}>
+                <label style={{ fontWeight: 700, color: 'var(--cyan-accent)', fontSize: '13px' }}>
+                  Correo Destinatario del Administrador (ADMIN_EMAIL)
+                </label>
                 <input
-                  type="text"
+                  type="email"
                   className="field-input"
-                  placeholder="admin@tudominio.com"
+                  placeholder="ejemplo@midominio.com"
+                  style={{ marginTop: '8px', fontSize: '14px' }}
                   value={values.ADMIN_EMAIL || ''}
                   onChange={(e) => handleChange('ADMIN_EMAIL', e.target.value)}
                 />
-                <p className="field-hint" style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>A este correo llegarán todas las notificaciones.</p>
+                <p className="field-hint" style={{ marginTop: '6px', fontSize: '12px' }}>
+                  A esta dirección llegarán las alertas críticas y los mensajes de prueba del sistema.
+                </p>
               </div>
 
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <button
+                  type="button"
+                  className="nav-btn test-btn"
+                  onClick={handleTestEmail}
+                  disabled={testingEmail}
+                  style={{ width: 'auto', padding: '8px 18px', fontWeight: 600 }}
+                >
+                  {testingEmail ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
+                  <span>{testingEmail ? 'Enviando correo de prueba...' : '📨 Enviar Correo de Prueba'}</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -681,17 +476,14 @@ export const SettingsSection: React.FC = () => {
                   onChange={(e) => setOllamaEnabled(e.target.checked)}
                 />
                 <label htmlFor="ollama_enabled">
-                  <strong>Activar Enriquecimiento con Ollama AI (OLLAMA_ENABLED)</strong>
-                  <br />
-                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                    Desactivado por defecto para garantizar despacho en sub-segundo sin depender de GPU/CPU local.
-                  </span>
+                  Habilitar resumen de alertas con IA Local (OLLAMA_ENABLED)
+                  <span className="field-hint">Enriquece el mensaje de WhatsApp con un diagnóstico del incidente</span>
                 </label>
               </div>
 
               <div className="field-grid-2">
                 <div className="field-group">
-                  <label>Host de Ollama (OLLAMA_HOST)</label>
+                  <label>Host Ollama (OLLAMA_HOST)</label>
                   <input
                     type="text"
                     className="field-input"
@@ -700,6 +492,7 @@ export const SettingsSection: React.FC = () => {
                     onChange={(e) => handleChange('OLLAMA_HOST', e.target.value)}
                   />
                 </div>
+
                 <div className="field-group">
                   <label>Modelo LLM (OLLAMA_MODEL)</label>
                   <input
@@ -726,405 +519,36 @@ export const SettingsSection: React.FC = () => {
             </div>
           )}
 
-          {/* Tab 5: Relay & Daemon */}
-          {activeTab === 'relay' && (
-            <div className="settings-block">
-              <div className="block-header">
-                <h3>Parámetros del Servicio Relay</h3>
-                <span className="block-tag">FastAPI Core</span>
-              </div>
-
-              <div className="field-grid-2">
-                <div className="field-group">
-                  <label>Puerto HTTP de Escucha (RELAY_PORT)</label>
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder="8765"
-                    value={values.RELAY_PORT || ''}
-                    onChange={(e) => handleChange('RELAY_PORT', e.target.value)}
-                  />
-                </div>
-                <div className="field-group">
-                  <label>Workers Uvicorn (RELAY_WORKERS)</label>
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder="2"
-                    value={values.RELAY_WORKERS || ''}
-                    onChange={(e) => handleChange('RELAY_WORKERS', e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="field-grid-2">
-                <div className="field-group">
-                  <label>TTL Deduplicación (RELAY_DEDUP_TTL seg)</label>
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder="300"
-                    value={values.RELAY_DEDUP_TTL || ''}
-                    onChange={(e) => handleChange('RELAY_DEDUP_TTL', e.target.value)}
-                  />
-                  <span className="field-hint">Ventana de tiempo para evitar alertas repetidas de la misma regla</span>
-                </div>
-                <div className="field-group">
-                  <label>Nivel Mínimo Alertas Sin Plantilla</label>
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder="10"
-                    value={values.RELAY_MIN_LEVEL_UNKNOWN || ''}
-                    onChange={(e) => handleChange('RELAY_MIN_LEVEL_UNKNOWN', e.target.value)}
-                  />
-                  <span className="field-hint">Descarta alertas de bajo nivel si no tienen formato específico</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Tab 6: Logs */}
+          {/* Tab 5: Logs */}
           {activeTab === 'logs' && (
             <div className="settings-block">
               <div className="block-header">
-                <h3>Logs del Servicio (wazuh-waha)</h3>
-                <span className="block-tag">Journalctl</span>
+                <h3>Registros en Vivo del Servicio (journalctl)</h3>
+                <span className="block-tag">Logs</span>
               </div>
-              <div className="logs-container" style={{
-                backgroundColor: '#1e1e1e',
-                color: '#d4d4d4',
-                padding: '10px',
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Últimas 100 líneas del servicio wazuh-waha</span>
+                {loadingLogs && <span style={{ fontSize: '12px', color: 'var(--cyan-accent)' }}>Actualizando...</span>}
+              </div>
+              <pre className="logs-terminal" style={{
+                background: '#090d16',
+                padding: '12px',
                 borderRadius: '6px',
+                border: '1px solid var(--border-subtle)',
+                color: '#a5b4fc',
+                fontSize: '11px',
                 fontFamily: 'monospace',
-                fontSize: '12px',
+                maxHeight: '380px',
+                overflowY: 'auto',
                 whiteSpace: 'pre-wrap',
-                height: '400px',
-                overflowY: 'auto'
+                wordBreak: 'break-all'
               }}>
-                {loadingLogs && !logsOutput ? 'Cargando logs...' : logsOutput}
-              </div>
-            </div>
-          )}
-
-
-          {/* Tab 7: Wazuh Agents & Processes */}
-          {activeTab === 'wazuh_agents' && (
-            <div className="settings-block">
-              <div className="block-header">
-                <h3>Control de Agentes y Procesos Locales</h3>
-                <span className="block-tag">Wazuh API & Systemd</span>
-              </div>
-              
-              <h4 className="sub-title">Agentes Conectados al Manager</h4>
-              {loadingAgents ? (
-                <p>Cargando agentes...</p>
-              ) : (
-                <div style={{ overflowX: 'auto', marginBottom: '20px' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
-                        <th style={{ padding: '8px' }}>ID</th>
-                        <th style={{ padding: '8px' }}>Nombre</th>
-                        <th style={{ padding: '8px' }}>IP</th>
-                        <th style={{ padding: '8px' }}>Estado</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {wazuhAgents.length > 0 ? wazuhAgents.map(a => (
-                        <tr key={a.id} style={{ borderBottom: '1px solid var(--bg-card)' }}>
-                          <td style={{ padding: '8px' }}>{a.id}</td>
-                          <td style={{ padding: '8px', color: 'var(--cyan-accent)' }}>{a.name}</td>
-                          <td style={{ padding: '8px' }}>{a.ip || '-'}</td>
-                          <td style={{ padding: '8px' }}>
-                            <span style={{
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              background: a.status === 'active' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                              color: a.status === 'active' ? 'var(--green-healthy)' : 'var(--red-error)',
-                            }}>
-                              {a.status}
-                            </span>
-                          </td>
-                        </tr>
-                      )) : (
-                        <tr><td colSpan={4} style={{ padding: '8px' }}>No hay agentes o hubo un error.</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              <h4 className="sub-title">Procesos Locales de Wazuh</h4>
-              <div className="field-grid-2">
-                {localServices.map(svc => (
-                  <div key={svc.id} className="field-group highlight-box" style={{ padding: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <strong>{svc.name}</strong>
-                      <span style={{ fontSize: '11px', color: svc.health === 'healthy' ? 'var(--green-healthy)' : 'var(--text-muted)' }}>
-                        {svc.health === 'healthy' ? 'En ejecución' : 'Detenido/Inactivo'}
-                      </span>
-                    </div>
-                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>{svc.unit}</p>
-                    
-                    {svc.toggleable && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const action = { target: svc.id, enabled: !svc.current_state };
-                          await dashboardService.toggleComponent(action);
-                          toast.success(`Orden enviada a ${svc.name}`);
-                          // Refrescar para ver el estado real tras un breve retraso
-                          setTimeout(async () => {
-                             const statusRes = await dashboardService.getStatus();
-                             if (statusRes && statusRes.components) {
-                               setLocalServices(statusRes.components.filter(c => c.status_type === 'systemd_service' || c.status_type === 'systemd_timer'));
-                             }
-                          }, 1500);
-                        }}
-                        style={{
-                          padding: '6px 12px',
-                          borderRadius: '4px',
-                          border: 'none',
-                          background: svc.current_state ? 'var(--red-error)' : 'var(--green-healthy)',
-                          color: 'white',
-                          cursor: 'pointer',
-                          fontSize: '12px'
-                        }}
-                      >
-                        {svc.current_state ? 'Deshabilitar Proceso' : 'Habilitar Proceso'}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-
-          {/* Tab 8: Vulnerabilities */}
-          {activeTab === 'wazuh_vuln' && (
-            <div className="settings-block">
-              <div className="block-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                <div>
-                  <h3>Vulnerabilidades de Seguridad (CVEs)</h3>
-                  <span className="block-tag">Vulnerability Detector</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--green-healthy)', backgroundColor: 'rgba(46, 204, 113, 0.15)', padding: '3px 10px', borderRadius: '12px', border: '1px solid rgba(46, 204, 113, 0.3)' }}>
-                    🟢 Levantado y Conectado
-                  </span>
-                  <select
-                    value={selectedAgent}
-                    onChange={(e) => setSelectedAgent(e.target.value)}
-                    style={{ background: 'var(--bg-card-hover)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: '6px', padding: '4px 8px', fontSize: '12px' }}
-                  >
-                    <option value="000">Agente 000 (Manager)</option>
-                    <option value="001">Agente 001 (Host Greenalgorithm)</option>
-                  </select>
-                </div>
-              </div>
-              {loadingVuln ? <p style={{ padding: '15px' }}>Cargando vulnerabilidades de Wazuh...</p> : (
-                <div style={{ overflowX: 'auto', marginTop: '10px' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
-                        <th style={{ padding: '8px' }}>CVE</th>
-                        <th style={{ padding: '8px' }}>Paquete Afectado</th>
-                        <th style={{ padding: '8px' }}>Severidad</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {vulnerabilities.length > 0 ? vulnerabilities.map((v, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--bg-card)' }}>
-                          <td style={{ padding: '8px', color: 'var(--cyan-accent)', fontWeight: 600 }}>{v.cve}</td>
-                          <td style={{ padding: '8px' }}>{v.name} {v.version}</td>
-                          <td style={{ padding: '8px' }}>
-                            <span style={{ color: v.severity === 'High' || v.severity === 'Critical' ? 'var(--red-error)' : (v.severity === 'Medium' ? 'orange' : 'var(--text-muted)') }}>
-                              {v.severity}
-                            </span>
-                          </td>
-                        </tr>
-                      )) : <tr><td colSpan={3} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-secondary)' }}>No se encontraron vulnerabilidades para este agente.</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Tab 9: FIM */}
-          {activeTab === 'wazuh_fim' && (
-            <div className="settings-block">
-              <div className="block-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                <div>
-                  <h3>Monitoreo de Integridad de Archivos (FIM)</h3>
-                  <span className="block-tag">Syscheck Daemon</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--green-healthy)', backgroundColor: 'rgba(46, 204, 113, 0.15)', padding: '3px 10px', borderRadius: '12px', border: '1px solid rgba(46, 204, 113, 0.3)' }}>
-                    🟢 Syscheck Levantado (3,889 archivos)
-                  </span>
-                  <select
-                    value={selectedAgent}
-                    onChange={(e) => setSelectedAgent(e.target.value)}
-                    style={{ background: 'var(--bg-card-hover)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: '6px', padding: '4px 8px', fontSize: '12px' }}
-                  >
-                    <option value="000">Agente 000 (Manager)</option>
-                    <option value="001">Agente 001 (Host Greenalgorithm)</option>
-                  </select>
-                </div>
-              </div>
-              {loadingFim ? <p style={{ padding: '15px' }}>Consultando base de integridad FIM de Wazuh...</p> : (
-                <div style={{ overflowX: 'auto', marginTop: '10px' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
-                        <th style={{ padding: '8px' }}>Ruta de Archivo</th>
-                        <th style={{ padding: '8px' }}>Permisos</th>
-                        <th style={{ padding: '8px' }}>Usuario / Grupo</th>
-                        <th style={{ padding: '8px' }}>Tamaño</th>
-                        <th style={{ padding: '8px' }}>Última Modificación</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {fimEvents.length > 0 ? fimEvents.map((f, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--bg-card)' }}>
-                          <td style={{ padding: '8px', wordBreak: 'break-all', fontFamily: 'monospace', color: 'var(--text-primary)' }}>{f.file}</td>
-                          <td style={{ padding: '8px', fontFamily: 'monospace' }}>{f.perm || '-'}</td>
-                          <td style={{ padding: '8px' }}>{f.uname || 'root'}:{f.gname || 'root'}</td>
-                          <td style={{ padding: '8px' }}>{f.size !== undefined ? `${f.size} B` : '-'}</td>
-                          <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{f.mtime ? new Date(f.mtime).toLocaleString() : (f.date ? new Date(f.date).toLocaleString() : '-')}</td>
-                        </tr>
-                      )) : <tr><td colSpan={5} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-secondary)' }}>No hay eventos FIM para el agente seleccionado.</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Tab 10: SCA */}
-          {activeTab === 'wazuh_sca' && (
-            <div className="settings-block">
-              <div className="block-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                <div>
-                  <h3>Evaluación de Configuración de Seguridad (SCA)</h3>
-                  <span className="block-tag">CIS Benchmarks</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--green-healthy)', backgroundColor: 'rgba(46, 204, 113, 0.15)', padding: '3px 10px', borderRadius: '12px', border: '1px solid rgba(46, 204, 113, 0.3)' }}>
-                    🟢 SCA Levantado y Evaluado
-                  </span>
-                  <select
-                    value={selectedAgent}
-                    onChange={(e) => setSelectedAgent(e.target.value)}
-                    style={{ background: 'var(--bg-card-hover)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: '6px', padding: '4px 8px', fontSize: '12px' }}
-                  >
-                    <option value="000">Agente 000 (Manager)</option>
-                    <option value="001">Agente 001 (Host Greenalgorithm)</option>
-                  </select>
-                </div>
-              </div>
-              {loadingSca ? <p style={{ padding: '15px' }}>Consultando políticas SCA evaluadas...</p> : (
-                <div style={{ overflowX: 'auto', marginTop: '10px' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
-                        <th style={{ padding: '8px' }}>Benchmark / Política</th>
-                        <th style={{ padding: '8px' }}>Puntuación (Score)</th>
-                        <th style={{ padding: '8px' }}>Checks Pasados</th>
-                        <th style={{ padding: '8px' }}>Checks Fallidos</th>
-                        <th style={{ padding: '8px' }}>Total Checks</th>
-                        <th style={{ padding: '8px' }}>Último Escaneo</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {scaEvents.length > 0 ? scaEvents.map((s, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--bg-card)' }}>
-                          <td style={{ padding: '8px', fontWeight: 600, color: 'var(--text-primary)' }}>{s.name}</td>
-                          <td style={{ padding: '8px', fontWeight: 700, color: s.score >= 70 ? 'var(--green-healthy)' : 'orange' }}>{s.score}%</td>
-                          <td style={{ padding: '8px', color: 'var(--green-healthy)' }}>{s.pass || 0}</td>
-                          <td style={{ padding: '8px', color: s.fail > 0 ? 'var(--red-error)' : 'var(--text-muted)' }}>{s.fail || 0}</td>
-                          <td style={{ padding: '8px' }}>{s.total_checks || '-'}</td>
-                          <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{s.end_scan ? new Date(s.end_scan).toLocaleString() : '-'}</td>
-                        </tr>
-                      )) : <tr><td colSpan={6} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-secondary)' }}>No hay reportes SCA para este agente.</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Tab 11: MITRE ATT&CK */}
-          {activeTab === 'wazuh_mitre' && (
-            <div className="settings-block">
-              <div className="block-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                <div>
-                  <h3>Framework MITRE ATT&CK®</h3>
-                  <span className="block-tag">Matriz Enterprise Wazuh</span>
-                </div>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--green-healthy)', backgroundColor: 'rgba(46, 204, 113, 0.15)', padding: '3px 10px', borderRadius: '12px', border: '1px solid rgba(46, 204, 113, 0.3)' }}>
-                  🟢 Conectado y Levantado ({mitreData?.total_tactics || 14} Tácticas / {mitreData?.total_techniques || 750} Técnicas)
-                </span>
-              </div>
-              <p className="block-desc">
-                Mapeo de incidentes, reglas y detecciones de comportamiento malicioso según la matriz MITRE ATT&CK v14+.
-              </p>
-
-              {loadingMitre ? <p style={{ padding: '15px' }}>Consultando base de tácticas y técnicas de Wazuh...</p> : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '10px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
-                    <div style={{ background: 'var(--bg-card-hover)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '12px' }}>
-                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Tácticas Cargadas</span>
-                      <h4 style={{ margin: '4px 0 0 0', fontSize: '20px', color: 'var(--cyan-accent)' }}>{mitreData?.total_tactics || 14}</h4>
-                    </div>
-                    <div style={{ background: 'var(--bg-card-hover)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '12px' }}>
-                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Técnicas Mapeadas</span>
-                      <h4 style={{ margin: '4px 0 0 0', fontSize: '20px', color: 'var(--wazuh-blue)' }}>{mitreData?.total_techniques || 750}</h4>
-                    </div>
-                    <div style={{ background: 'var(--bg-card-hover)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '12px' }}>
-                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Estado de Conexión</span>
-                      <h4 style={{ margin: '4px 0 0 0', fontSize: '16px', color: 'var(--green-healthy)' }}>Conectado</h4>
-                    </div>
-                  </div>
-
-                  <h4 style={{ margin: '10px 0 5px 0', fontSize: '14px', color: 'var(--text-primary)' }}>Tácticas Principales Supervisadas</h4>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
-                          <th style={{ padding: '8px' }}>ID Externo</th>
-                          <th style={{ padding: '8px' }}>Nombre de Táctica</th>
-                          <th style={{ padding: '8px' }}>Descripción</th>
-                          <th style={{ padding: '8px' }}>Técnicas</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {mitreData?.tactics && mitreData.tactics.length > 0 ? mitreData.tactics.slice(0, 15).map((t: any, i: number) => (
-                          <tr key={i} style={{ borderBottom: '1px solid var(--bg-card)' }}>
-                            <td style={{ padding: '8px', fontFamily: 'monospace', color: 'var(--cyan-accent)', fontWeight: 600 }}>{t.external_id || '-'}</td>
-                            <td style={{ padding: '8px', fontWeight: 600, color: 'var(--text-primary)' }}>{t.name}</td>
-                            <td style={{ padding: '8px', fontSize: '12px', color: 'var(--text-secondary)', maxWidth: '400px' }}>
-                              {t.description ? t.description.slice(0, 120) + '...' : '-'}
-                            </td>
-                            <td style={{ padding: '8px', color: 'var(--wazuh-blue)' }}>{t.techniques ? t.techniques.length : '-'}</td>
-                          </tr>
-                        )) : (
-                          <tr><td colSpan={4} style={{ padding: '16px', textAlign: 'center' }}>Cargando catálogo MITRE...</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
+                {logsOutput}
+              </pre>
             </div>
           )}
 
           {/* Footer Actions */}
-
-
           <div className="settings-modal-footer">
             <div className="footer-actions-left">
               {activeTab === 'wazuh' && (
@@ -1140,19 +564,18 @@ export const SettingsSection: React.FC = () => {
                 </button>
               )}
 
-              {activeTab === 'whatsapp' && (
+              {activeTab === 'email' && (
                 <button
                   type="button"
                   className="nav-btn test-btn"
-                  onClick={handleTestWhatsApp}
-                  disabled={testingWhatsApp}
-                  title="Mandar un WhatsApp de prueba al número configurado"
+                  onClick={handleTestEmail}
+                  disabled={testingEmail}
+                  title="Enviar correo de prueba al ADMIN_EMAIL"
                 >
-                  {testingWhatsApp ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                  <span>{testingWhatsApp ? 'Enviando...' : 'Test WhatsApp'}</span>
+                  {testingEmail ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
+                  <span>{testingEmail ? 'Enviando...' : '📨 Test Correo'}</span>
                 </button>
               )}
-
             </div>
 
             <div className="footer-actions-right">
@@ -1170,16 +593,14 @@ export const SettingsSection: React.FC = () => {
                 disabled={saving}
               >
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                <span>{saving ? 'Guardando en .env...' : 'Guardar Todo'}</span>
+                <span>{saving ? 'Guardando...' : 'Guardar en .env'}</span>
               </button>
             </div>
           </div>
-
-      </form>
+        </form>
       </div>
     </div>
   );
 };
 
 export default SettingsSection;
-

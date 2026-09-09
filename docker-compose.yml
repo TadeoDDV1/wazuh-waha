@@ -35,8 +35,6 @@ services:
   dashboard:
     build:
       context: ./dashboard
-      args:
-        - VITE_API_URL=
     container_name: wazuh-waha-dashboard
     restart: unless-stopped
     ports:

@@ -1,54 +1,20 @@
 import React from 'react';
 import './Dashboard.css';
 import { useDashboardContext } from '../context/DashboardContext';
-import ComponentCard from './ComponentCard';
-import WhatsappCard from './WhatsappCard';
-import { WazuhGroupsCard } from './WazuhGroupsCard';
-import { WazuhAgentsCard } from './WazuhAgentsCard';
 import { WazuhServicesCard } from './WazuhServicesCard';
-import CategoryNav from './CategoryNav';
-import type { Component } from '../types/dashboard';
+import { WazuhAgentsCard } from './WazuhAgentsCard';
+import { WazuhModulesControlCard } from './WazuhModulesControlCard';
+import { WhatsappCard } from './WhatsappCard';
 import {
-  CATEGORY_ORDER,
-  CATEGORY_LABELS,
-  CATEGORY_DESCRIPTIONS,
-} from '../utils/constants';
-import {
-  ShieldAlert,
   Loader2,
   AlertCircle,
-  SearchX,
-  FileCheck2,
-  Bug,
-  ClipboardList,
-  MessageSquare,
-  Activity,
-  BellRing,
-  Layers,
-  Landmark,
 } from 'lucide-react';
-
-const CATEGORY_ICONS_MAP: Record<string, React.ReactNode> = {
-  sec_ops: <ShieldAlert size={18} style={{ color: 'var(--cyan-accent)' }} />,
-  integrity: <FileCheck2 size={18} style={{ color: 'var(--wazuh-blue)' }} />,
-  threat_detection: <Bug size={18} style={{ color: 'var(--red-error)' }} />,
-  auditing_policy: <ClipboardList size={18} style={{ color: 'var(--yellow-warning)' }} />,
-  whatsapp_gateway: <MessageSquare size={18} style={{ color: 'var(--green-healthy)' }} />,
-  watchdogs: <Activity size={18} style={{ color: 'var(--cyan-accent)' }} />,
-  notifications: <BellRing size={18} style={{ color: 'var(--wazuh-blue)' }} />,
-  compliance: <Landmark size={18} style={{ color: 'var(--yellow-warning)' }} />,
-};
 
 export const Dashboard: React.FC = () => {
   const {
     status,
     loading,
     error,
-    searchQuery,
-    setSearchQuery,
-    activeTab,
-    statusFilter,
-    setStatusFilter,
     refresh,
   } = useDashboardContext();
 
@@ -58,7 +24,7 @@ export const Dashboard: React.FC = () => {
         <div className="dashboard-state-card">
           <Loader2 size={36} className="animate-spin" style={{ color: 'var(--cyan-accent)' }} />
           <h3>Cargando Centro de Control Wazuh-WAHA...</h3>
-          <p>Consultando estado de daemons, sesiones y grupos de reglas.</p>
+          <p>Consultando estado de daemons, sesiones y módulos de seguridad.</p>
         </div>
       </main>
     );
@@ -79,115 +45,36 @@ export const Dashboard: React.FC = () => {
     );
   }
 
-  const allComponents = status?.components || [];
-
-  // Filter by search query
-  const searchFiltered = allComponents.filter((c) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      c.name.toLowerCase().includes(q) ||
-      c.description.toLowerCase().includes(q) ||
-      (c.rule_group && c.rule_group.toLowerCase().includes(q)) ||
-      (c.detail && c.detail.toLowerCase().includes(q)) ||
-      (c.unit && c.unit.toLowerCase().includes(q)) ||
-      (c.category && c.category.toLowerCase().includes(q))
-    );
-  });
-
-  // Filter by status filter pill
-  const statusFiltered = searchFiltered.filter((c) => {
-    if (statusFilter === 'all') return true;
-    if (statusFilter === 'healthy') return c.health === 'healthy';
-    if (statusFilter === 'warning_error') return c.health === 'warning' || c.health === 'error';
-    if (statusFilter === 'disabled') return c.health === 'disabled' || c.current_state === false;
-    return true;
-  });
-
-  // Group by category
-  const groupedComponents: Record<string, Component[]> = {};
-  statusFiltered.forEach((c) => {
-    if (!groupedComponents[c.category]) {
-      groupedComponents[c.category] = [];
-    }
-    groupedComponents[c.category].push(c);
-  });
-
-  // Determine categories to render
-  const categoriesToRender =
-    activeTab === 'all'
-      ? CATEGORY_ORDER.filter((cat) => groupedComponents[cat] && groupedComponents[cat].length > 0)
-      : [activeTab].filter((cat) => groupedComponents[cat] && groupedComponents[cat].length > 0);
-
-  // Total matching count
-  const totalRendered = statusFiltered.length;
+  const wahaComponent = status?.components?.find((c) => c.id === 'waha_session');
 
   return (
-    <>
+    <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '10px 0 40px' }}>
+      {/* ── 1. Resumen de Conexión Wazuh ── */}
       <WazuhServicesCard />
-      <WazuhGroupsCard />
+
+      {/* ── 2. Agentes Conectados y Despliegue de Nuevos Agentes ── */}
       <WazuhAgentsCard />
 
+      {/* ── 3. Módulos de Wazuh Integrados con Reglas y Datos en Vivo ── */}
+      <WazuhModulesControlCard />
 
-      <CategoryNav />
-
-      <main className="dashboard-main">
-        {totalRendered === 0 ? (
-          <div className="empty-filter-state">
-            <SearchX size={40} style={{ opacity: 0.5 }} />
-            <h3>No se encontraron componentes</h3>
-            <p>
-              {searchQuery
-                ? `No hay módulos que coincidan con la búsqueda "${searchQuery}".`
-                : 'No hay componentes con el filtro de estado seleccionado.'}
+      {/* ── 3. Pasarela y Sesión de WhatsApp (WAHA) con Código QR ── */}
+      {wahaComponent && (
+        <div style={{ margin: '0 24px 30px' }}>
+          <div style={{ marginBottom: '14px' }}>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>📱</span> Sesión y Gateway de WhatsApp (WAHA)
+            </h3>
+            <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+              Inicia o detén la sesión de WhatsApp, o genera el código QR para vincular el dispositivo que enviará las alertas.
             </p>
-            <button
-              className="reset-filter-btn"
-              onClick={() => {
-                setSearchQuery('');
-                setStatusFilter('all');
-              }}
-            >
-              Restablecer Filtros
-            </button>
           </div>
-        ) : (
-          categoriesToRender.map((catKey) => {
-            const list = groupedComponents[catKey] || [];
-            if (list.length === 0) return null;
-
-            return (
-              <section key={catKey} className="category-section" id={`sec-${catKey}`}>
-                {/* Category Header */}
-                <div className="category-header">
-                  <div className="category-title-block">
-                    <h2 className="category-title">
-                      {CATEGORY_ICONS_MAP[catKey] || <Layers size={18} />}
-                      <span>{CATEGORY_LABELS[catKey] || catKey}</span>
-                    </h2>
-                    {CATEGORY_DESCRIPTIONS[catKey] && (
-                      <p className="category-desc">{CATEGORY_DESCRIPTIONS[catKey]}</p>
-                    )}
-                  </div>
-                  <span className="category-count-badge">{list.length} módulos</span>
-                </div>
-
-                {/* Grid */}
-                <div className="component-grid">
-                  {list.map((component) =>
-                    component.id === 'waha_session' ? (
-                      <WhatsappCard key={component.id} component={component} />
-                    ) : (
-                      <ComponentCard key={component.id} component={component} />
-                    )
-                  )}
-                </div>
-              </section>
-            );
-          })
-        )}
-      </main>
-    </>
+          <div style={{ maxWidth: '650px' }}>
+            <WhatsappCard component={wahaComponent} />
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 

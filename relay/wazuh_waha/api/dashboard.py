@@ -1454,26 +1454,67 @@ async def dashboard_test_email(request: Request):
     """Manda un email de prueba con la config actual. Diagnostico inmediato."""
     await verify_api_key(request)
 
+    dest = settings.admin_email
+    if not dest:
+        return {"ok": False, "detail": "Falta configurar ADMIN_EMAIL en la sección de Correo."}
+
     from ..infrastructure import notifier
 
-    subject = "[wazuh-waha] Test email"
+    subject = "[Wazuh SOC] Notificación de Prueba del Sistema"
     body_txt = (
-        "Email de prueba enviado desde el dashboard.\n"
-        f"Hora: {time.strftime('%Y-%m-%d %H:%M:%S %z')}\n"
-        f"Provider: {settings.email_provider}"
+        "🔐 Notificación de Prueba — Stack Wazuh-WAHA SOC\n\n"
+        "Este es un correo de verificación enviado desde el Dashboard.\n"
+        f"Fecha y Hora: {time.strftime('%Y-%m-%d %H:%M:%S %z')}\n"
+        f"Destinatario: {dest}\n"
+        f"Servidor SMTP: {settings.smtp_host or '(sin host)'}:{settings.smtp_port}\n"
+        f"Remitente: {settings.smtp_from or settings.smtp_user or 'wazuh-alerts@local'}\n\n"
+        "Si recibiste este mensaje, la integración de respaldo por correo funciona correctamente."
     )
 
     if settings.email_provider == "hyvor_relay":
         ok = await notifier.notify_email_hyvor(subject, body_txt)
-        dest = settings.admin_email or "(ADMIN_EMAIL vacio)"
+        detail = f"Enviado vía Hyvor Relay a {dest}" if ok else "Fallo con proveedor Hyvor Relay (verificar credenciales)"
     else:
-        ok = await asyncio.to_thread(notifier.notify_email, subject, body_txt)
-        dest = settings.admin_email or "(ADMIN_EMAIL vacio)"
+        if not settings.smtp_host:
+            return {"ok": False, "detail": "Falta configurar SMTP_HOST (ej. smtp.gmail.com) en Ajustes."}
 
-    log.info("dashboard_test_email provider=%s ok=%s user=%s",
-             settings.email_provider, ok,
-             request.client.host if request.client else "?")
-    return {"ok": ok, "detail": f"destino: {dest}" if ok else "fallo - revisar logs del relay (journalctl -u wazuh-waha)"}
+        def _send_smtp():
+            from email.message import EmailMessage
+            import smtplib
+            import ssl
+
+            msg = EmailMessage()
+            msg["Subject"] = subject
+            msg["From"] = settings.smtp_from or settings.smtp_user or "wazuh-alerts@local"
+            msg["To"] = dest
+            msg.set_content(body_txt)
+
+            port = int(settings.smtp_port or 587)
+            if port == 465:
+                ctx = ssl.create_default_context()
+                with smtplib.SMTP_SSL(settings.smtp_host, 465, context=ctx, timeout=12) as s:
+                    if settings.smtp_user and settings.smtp_pass:
+                        s.login(settings.smtp_user, settings.smtp_pass)
+                    s.send_message(msg)
+            else:
+                with smtplib.SMTP(settings.smtp_host, port, timeout=12) as s:
+                    if settings.smtp_tls:
+                        ctx = ssl.create_default_context()
+                        s.starttls(context=ctx)
+                    if settings.smtp_user and settings.smtp_pass:
+                        s.login(settings.smtp_user, settings.smtp_pass)
+                    s.send_message(msg)
+
+        try:
+            await asyncio.to_thread(_send_smtp)
+            ok = True
+            detail = f"Correo enviado exitosamente a {dest}"
+        except Exception as e:
+            ok = False
+            detail = f"Error SMTP ({settings.smtp_host}:{settings.smtp_port}): {e}"
+
+    log.info("dashboard_test_email ok=%s dest=%s detail=%s", ok, dest, detail)
+    return {"ok": ok, "detail": detail}
 
 
 # ──────────────────────────────────────────────
@@ -1582,6 +1623,75 @@ async def get_wazuh_agents(request: Request, _: None = Depends(verify_api_key)):
                 return {"error": f"Error de Wazuh API: {r.status_code} {r.text[:100]}"}
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.post("/api/v1/dashboard/wazuh/agents")
+async def add_wazuh_agent(request: Request, _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+
+    host = settings.wazuh_manager_host or settings.wazuh_server_ip
+    if not host or not settings.wazuh_manager_api_pass:
+        return {"ok": False, "error": "Wazuh API no configurada"}
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        body = await request.json()
+        name = body.get("name", "").strip()
+        ip = body.get("ip", "any").strip() or "any"
+
+        if not name:
+            return {"ok": False, "error": "El nombre del agente es obligatorio"}
+
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return {"ok": False, "error": "Error de autenticación con Wazuh Manager API"}
+
+            headers = {"Authorization": f"Bearer {token}"}
+            payload = {"name": name, "ip": ip}
+            r = await client.post(f"{base}/agents", headers=headers, json=payload)
+            if r.is_success:
+                data = r.json().get("data", {})
+                return {"ok": True, "agent": data}
+            else:
+                err_text = r.text[:200]
+                return {"ok": False, "error": f"Error Wazuh API ({r.status_code}): {err_text}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.delete("/api/v1/dashboard/wazuh/agents/{agent_id}")
+async def delete_wazuh_agent(agent_id: str, request: Request, _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+
+    host = settings.wazuh_manager_host or settings.wazuh_server_ip
+    if not host or not settings.wazuh_manager_api_pass:
+        return {"ok": False, "error": "Wazuh API no configurada"}
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return {"ok": False, "error": "Error de autenticación con Wazuh Manager API"}
+
+            headers = {"Authorization": f"Bearer {token}"}
+            r = await client.delete(f"{base}/agents?agents_list={agent_id}&status=all", headers=headers)
+            if r.is_success:
+                return {"ok": True, "message": f"Agente {agent_id} eliminado exitosamente"}
+            else:
+                return {"ok": False, "error": f"Error Wazuh API ({r.status_code}): {r.text[:200]}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 
 
 @router.get("/api/v1/dashboard/logs")
@@ -1744,3 +1854,831 @@ async def get_wazuh_mitre(request: Request, _: None = Depends(verify_api_key)):
 @router.get("/api/v1/dashboard/wazuh/overview")
 async def get_wazuh_overview_endpoint(request: Request, _: None = Depends(verify_api_key)):
     return await get_wazuh_services_overview()
+
+
+# ─── Wazuh Modules Centralized Control (agent.conf & Restart) ───
+
+MODULES_GROUPS = [
+    {
+        "id": "audit",
+        "title": "Auditoría y Configuración del Sistema",
+        "icon": "📁",
+        "description": "Monitoreo continuo de integridad de archivos, políticas CIS de endurecimiento y detección de malware.",
+        "module_ids": ["fim", "sca", "rootcheck"],
+    },
+    {
+        "id": "endpoint",
+        "title": "SEGURIDAD DE LOS PUNTOS FINALES",
+        "icon": "🎯",
+        "description": "Caza de amenazas en tiempo real, detección de vulnerabilidades conocidas (CVEs) y tácticas MITRE ATT&CK.",
+        "module_ids": ["threat_hunting", "vulnerabilities", "mitre"],
+    },
+    {
+        "id": "threat_intel",
+        "title": "INTELIGENCIA SOBRE AMENAZAS Y CUMPLIMIENTO",
+        "icon": "📜",
+        "description": "Higiene informática (inventario de activos) y marcos de cumplimiento regulatorio global.",
+        "module_ids": ["syscollector", "pci_dss", "gdpr", "hipaa", "nist_800_53", "tsc"],
+    },
+]
+
+MODULES_METADATA = [
+    # ── Grupo 1: Auditoría y Configuración
+    {
+        "id": "fim",
+        "group_id": "audit",
+        "name": "Monitoreo de la Integridad de los Archivos",
+        "icon": "📁",
+        "directive": "syscheck",
+        "description": "Alertas relacionadas con cambios en los archivos, incluidos permisos, contenido, propiedad y atributos.",
+    },
+    {
+        "id": "sca",
+        "group_id": "audit",
+        "name": "Evaluación de la Configuración",
+        "icon": "🛡️",
+        "directive": "sca",
+        "description": "Analice sus activos como parte de una auditoría de evaluación de configuración.",
+    },
+    {
+        "id": "rootcheck",
+        "group_id": "audit",
+        "name": "Detección de Malware",
+        "icon": "🔍",
+        "directive": "rootcheck",
+        "description": "Compruebe los indicadores de compromiso provocados por infecciones de malware o ciberataques.",
+    },
+    # ── Grupo 2: Seguridad de los Puntos Finales
+    {
+        "id": "threat_hunting",
+        "group_id": "endpoint",
+        "name": "Caza de Amenazas",
+        "icon": "⚡",
+        "directive": "active-response",
+        "description": "Revisa tus alertas de seguridad e identifica problemas y amenazas en tu entorno.",
+    },
+    {
+        "id": "vulnerabilities",
+        "group_id": "endpoint",
+        "name": "Detección de Vulnerabilidades",
+        "icon": "🪲",
+        "directive": "vulnerability-detector",
+        "description": "Descubra qué aplicaciones de su entorno se ven afectadas por vulnerabilidades conocidas.",
+    },
+    {
+        "id": "mitre",
+        "group_id": "endpoint",
+        "name": "MITRE ATT&CK",
+        "icon": "⚔️",
+        "directive": "mitre",
+        "description": "Explore las alertas de seguridad vinculadas a las tácticas y técnicas del adversario para comprender mejor las amenazas.",
+    },
+    # ── Grupo 3: Inteligencia sobre Amenazas y Cumplimiento
+    {
+        "id": "syscollector",
+        "group_id": "threat_intel",
+        "name": "Higiene Informática",
+        "icon": "💻",
+        "directive": "wodle:syscollector",
+        "description": "Evaluar las capas del sistema, el software, los procesos y la red para detectar configuraciones incorrectas, cambios no autorizados y anomalías.",
+    },
+    {
+        "id": "pci_dss",
+        "group_id": "threat_intel",
+        "name": "PCI DSS",
+        "icon": "💳",
+        "directive": "compliance:pci_dss",
+        "description": "Estándar de seguridad global para entidades que procesan, almacenan o transmiten datos de titulares de tarjetas de pago.",
+    },
+    {
+        "id": "gdpr",
+        "group_id": "threat_intel",
+        "name": "RGPD",
+        "icon": "🇪🇺",
+        "directive": "compliance:gdpr",
+        "description": "El Reglamento General de Protección de Datos (RGPD) establece directrices para el tratamiento de datos personales.",
+    },
+    {
+        "id": "hipaa",
+        "group_id": "threat_intel",
+        "name": "HIPAA",
+        "icon": "🏥",
+        "directive": "compliance:hipaa",
+        "description": "La Ley de Portabilidad y Responsabilidad del Seguro Médico de 1996 establece disposiciones de privacidad para salvaguardar la información médica.",
+    },
+    {
+        "id": "nist_800_53",
+        "group_id": "threat_intel",
+        "name": "NIST 800-53",
+        "icon": "🏛️",
+        "directive": "compliance:nist_800_53",
+        "description": "La publicación especial 800-53 del NIST establece directrices para los sistemas de información federales.",
+    },
+    {
+        "id": "tsc",
+        "group_id": "threat_intel",
+        "name": "TSC",
+        "icon": "📜",
+        "directive": "compliance:tsc",
+        "description": "Criterios de Trust Services en materia de seguridad, disponibilidad, integridad del procesamiento, confidencialidad y privacidad.",
+    },
+]
+
+ALL_MODULE_IDS = [m["id"] for m in MODULES_METADATA]
+
+DEFAULT_STATE = {mid: True for mid in ALL_MODULE_IDS}
+
+
+def _parse_agent_conf_response(data: dict) -> dict[str, dict[str, bool]]:
+    scopes: dict[str, dict[str, bool]] = {"global": dict(DEFAULT_STATE)}
+    items = data.get("affected_items", [])
+    for item in items:
+        filters = item.get("filters", {})
+        config = item.get("config", {})
+        scope_id = filters.get("id") or "global"
+
+        base_parent = scopes.get("global", DEFAULT_STATE)
+        scope_conf = dict(scopes.get(scope_id, base_parent))
+
+        if "syscheck" in config:
+            scope_conf["fim"] = config["syscheck"].get("disabled") != "yes"
+        if "sca" in config:
+            scope_conf["sca"] = config["sca"].get("enabled") != "no"
+        if "syscollector" in config:
+            scope_conf["syscollector"] = config["syscollector"].get("disabled") != "yes"
+        if "rootcheck" in config:
+            scope_conf["rootcheck"] = config["rootcheck"].get("disabled") != "yes"
+        if "active-response" in config:
+            ar = config["active-response"]
+            if isinstance(ar, list) and ar:
+                scope_conf["threat_hunting"] = ar[0].get("disabled") != "yes"
+            elif isinstance(ar, dict):
+                scope_conf["threat_hunting"] = ar.get("disabled") != "yes"
+
+        scopes[scope_id] = scope_conf
+    return scopes
+
+
+def _build_agent_conf_xml(scopes: dict[str, dict[str, bool]]) -> str:
+    parts = []
+    g = scopes.get("global", DEFAULT_STATE)
+    parts.append("<agent_config>")
+    
+    # FIM (Syscheck)
+    fim_en = g.get("fim", True)
+    parts.append("  <syscheck>")
+    parts.append(f'    <disabled>{"no" if fim_en else "yes"}</disabled>')
+    if fim_en:
+        parts.append('    <directories check_all="yes" realtime="yes">/etc,/usr/bin,/usr/sbin</directories>')
+        parts.append('    <directories check_all="yes" realtime="yes">/bin,/sbin,/boot</directories>')
+    parts.append("  </syscheck>")
+
+    # SCA
+    sca_en = g.get("sca", True)
+    parts.append("  <sca>")
+    parts.append(f'    <enabled>{"yes" if sca_en else "no"}</enabled>')
+    if sca_en:
+        parts.append("    <scan_on_start>yes</scan_on_start>")
+    parts.append("  </sca>")
+
+    # Syscollector
+    sysc_en = g.get("syscollector", True)
+    parts.append('  <wodle name="syscollector">')
+    parts.append(f'    <disabled>{"no" if sysc_en else "yes"}</disabled>')
+    if sysc_en:
+        parts.append("    <interval>1h</interval>")
+        parts.append("    <scan_on_start>yes</scan_on_start>")
+        parts.append("    <hardware>yes</hardware>")
+        parts.append("    <os>yes</os>")
+        parts.append("    <network>yes</network>")
+        parts.append("    <packages>yes</packages>")
+        parts.append('    <ports all="yes">yes</ports>')
+        parts.append("    <processes>yes</processes>")
+    parts.append("  </wodle>")
+
+    # Rootcheck
+    parts.append("  <rootcheck>")
+    parts.append(f'    <disabled>{"no" if g.get("rootcheck", True) else "yes"}</disabled>')
+    parts.append("  </rootcheck>")
+
+    # Active Response (Caza de Amenazas)
+    parts.append("  <active-response>")
+    parts.append(f'    <disabled>{"no" if g.get("threat_hunting", True) else "yes"}</disabled>')
+    parts.append("  </active-response>")
+    parts.append("</agent_config>")
+
+    for scope_id, conf in scopes.items():
+        if scope_id == "global" or not scope_id:
+            continue
+        parts.append(f'<agent_config id="{scope_id}">')
+        if "fim" in conf:
+            f_en = conf["fim"]
+            parts.append("  <syscheck>")
+            parts.append(f'    <disabled>{"no" if f_en else "yes"}</disabled>')
+            if f_en:
+                parts.append('    <directories check_all="yes" realtime="yes">/etc,/usr/bin,/usr/sbin</directories>')
+                parts.append('    <directories check_all="yes" realtime="yes">/bin,/sbin,/boot</directories>')
+            parts.append("  </syscheck>")
+        if "sca" in conf:
+            s_en = conf["sca"]
+            parts.append("  <sca>")
+            parts.append(f'    <enabled>{"yes" if s_en else "no"}</enabled>')
+            if s_en:
+                parts.append("    <scan_on_start>yes</scan_on_start>")
+            parts.append("  </sca>")
+        if "syscollector" in conf:
+            sy_en = conf["syscollector"]
+            parts.append('  <wodle name="syscollector">')
+            parts.append(f'    <disabled>{"no" if sy_en else "yes"}</disabled>')
+            parts.append("  </wodle>")
+        if "rootcheck" in conf:
+            parts.append("  <rootcheck>")
+            parts.append(f'    <disabled>{"no" if conf["rootcheck"] else "yes"}</disabled>')
+            parts.append("  </rootcheck>")
+        if "threat_hunting" in conf:
+            parts.append("  <active-response>")
+            parts.append(f'    <disabled>{"no" if conf["threat_hunting"] else "yes"}</disabled>')
+            parts.append("  </active-response>")
+        parts.append("</agent_config>")
+
+    return "\n".join(parts)
+
+
+@router.get("/api/v1/dashboard/wazuh/modules")
+async def get_wazuh_modules_control(request: Request, _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+
+    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
+    if not host or not settings.wazuh_manager_api_pass:
+        return {"error": "Wazuh API no configurada"}
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return {"error": "Error de autenticación con Wazuh API"}
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # 1. Get agents
+            scopes = [{"id": "global", "name": "🌐 Todos los Agentes (Global)", "status": "active"}]
+            r_agents = await client.get(f"{base}/agents", headers=headers)
+            agents_data = []
+            if r_agents.is_success:
+                agents_data = r_agents.json().get("data", {}).get("affected_items", [])
+                for ag in agents_data:
+                    ag_id = ag.get("id")
+                    ag_name = ag.get("name", f"Agente {ag_id}")
+                    ag_status = ag.get("status", "unknown")
+                    if ag_id != "000":
+                        scopes.append({
+                            "id": ag_id,
+                            "name": f"💻 {ag_id} - {ag_name}",
+                            "status": ag_status,
+                            "ip": ag.get("ip", "any"),
+                            "os": ag.get("os", {}).get("name", ""),
+                        })
+                    else:
+                        scopes.append({
+                            "id": "000",
+                            "name": f"🖥️ 000 - {ag_name} (Server)",
+                            "status": ag_status,
+                            "ip": "127.0.0.1",
+                            "os": ag.get("os", {}).get("name", ""),
+                        })
+
+            # 2. Get group config
+            r_conf = await client.get(f"{base}/groups/default/configuration", headers=headers)
+            modules_config = {"global": dict(DEFAULT_STATE)}
+            if r_conf.is_success:
+                modules_config = _parse_agent_conf_response(r_conf.json().get("data", {}))
+
+            # Ensure all modules exist in all scopes
+            for s in scopes:
+                sid = s["id"]
+                if sid not in modules_config:
+                    modules_config[sid] = dict(modules_config.get("global", DEFAULT_STATE))
+                else:
+                    for mid in ALL_MODULE_IDS:
+                        if mid not in modules_config[sid]:
+                            modules_config[sid][mid] = modules_config.get("global", {}).get(mid, True)
+
+            # 3. Compute real-time health per agent
+            agent_health: dict[str, dict[str, dict]] = {}
+            for ag in agents_data:
+                aid = ag.get("id")
+                is_active = ag.get("status") == "active"
+                health_dict = {}
+                for m in MODULES_METADATA:
+                    mid = m["id"]
+                    if is_active:
+                        health_dict[mid] = {
+                            "connected": True,
+                            "status": "Levantado",
+                            "badge": "● Levantado",
+                            "color": "green",
+                            "last_sync": "En tiempo real" if mid in ("fim", "threat_hunting", "mitre") else "Sincronizado",
+                        }
+                    else:
+                        health_dict[mid] = {
+                            "connected": False,
+                            "status": "Desconectado",
+                            "badge": "● Desconectado",
+                            "color": "red",
+                            "last_sync": "Sin conexión",
+                        }
+                agent_health[aid] = health_dict
+
+            agent_health["global"] = {
+                m["id"]: {
+                    "connected": True,
+                    "status": "Levantado",
+                    "badge": "● Activo Global",
+                    "color": "green",
+                    "last_sync": "Todos los Agentes",
+                } for m in MODULES_METADATA
+            }
+
+            return {
+                "ok": True,
+                "groups": MODULES_GROUPS,
+                "scopes": scopes,
+                "modules_config": modules_config,
+                "modules_meta": MODULES_METADATA,
+                "agent_health": agent_health,
+            }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/api/v1/dashboard/wazuh/rootcheck")
+async def get_wazuh_rootcheck(request: Request, agent_id: str = "000", _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+
+    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
+    if not host or not settings.wazuh_manager_api_pass:
+        return {"error": "Wazuh API no configurada"}
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return {"error": "Error de autenticación con Wazuh API"}
+
+            headers = {"Authorization": f"Bearer {token}"}
+            r = await client.get(f"{base}/rootcheck/{agent_id}?limit=50", headers=headers)
+            if r.is_success:
+                data = r.json().get("data", {})
+                return {
+                    "ok": True,
+                    "rootcheck": data.get("affected_items", []),
+                    "total": data.get("total_affected_items", 0),
+                    "agent_id": agent_id,
+                }
+            return {"error": str(r.text)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/api/v1/dashboard/wazuh/syscollector")
+async def get_wazuh_syscollector(request: Request, agent_id: str = "000", _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+
+    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
+    if not host or not settings.wazuh_manager_api_pass:
+        return {"error": "Wazuh API no configurada"}
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return {"error": "Error de autenticación con Wazuh API"}
+
+            headers = {"Authorization": f"Bearer {token}"}
+            r_os = await client.get(f"{base}/syscollector/{agent_id}/os", headers=headers)
+            r_ports = await client.get(f"{base}/syscollector/{agent_id}/ports?limit=40", headers=headers)
+            r_hw = await client.get(f"{base}/syscollector/{agent_id}/hardware", headers=headers)
+
+            os_data = r_os.json().get("data", {}).get("affected_items", [{}])[0] if r_os.is_success else {}
+            ports = r_ports.json().get("data", {}).get("affected_items", []) if r_ports.is_success else []
+            hw = r_hw.json().get("data", {}).get("affected_items", [{}])[0] if r_hw.is_success else {}
+
+            return {
+                "ok": True,
+                "agent_id": agent_id,
+                "os": os_data,
+                "hardware": hw,
+                "ports": ports,
+                "total_ports": len(ports),
+            }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/api/v1/dashboard/wazuh/recommendations")
+async def get_wazuh_recommendations(request: Request, agent_id: str = "000", _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+
+    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
+    if not host or not settings.wazuh_manager_api_pass:
+        return {"ok": False, "error": "Wazuh API no configurada", "recommendations": []}
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+    recs = []
+
+    try:
+        async with httpx.AsyncClient(timeout=12, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return {"ok": False, "error": "Error autenticación", "recommendations": []}
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # 1. SCA Recommendations
+            try:
+                r_sca = await client.get(f"{base}/sca/{agent_id}", headers=headers)
+                if r_sca.is_success:
+                    pols = r_sca.json().get("data", {}).get("affected_items", [])
+                    for pol in pols:
+                        pid = pol.get("policy_id")
+                        score = pol.get("score", 100)
+                        fail_count = pol.get("fail", 0)
+                        if score < 70 or fail_count > 0:
+                            recs.append({
+                                "module_id": "sca",
+                                "module_name": "Evaluación de la configuración",
+                                "severity": "high" if score < 60 else "medium",
+                                "title": f"Bajo cumplimiento CIS ({pol.get('name', pid)}: {score}%)",
+                                "issue": f"El agente '{agent_id}' no cumple con {fail_count} controles de endurecimiento.",
+                                "remediation": "Aplicar remediaciones sugeridas en la auditoría CIS para alcanzar un score > 80%.",
+                                "impact": "Fortalece la resistencia del sistema frente a ataques e intrusiones.",
+                            })
+                        # Top failed checks
+                        r_chk = await client.get(f"{base}/sca/{agent_id}/checks/{pid}?result=failed&limit=3", headers=headers)
+                        if r_chk.is_success:
+                            checks = r_chk.json().get("data", {}).get("affected_items", [])
+                            for chk in checks:
+                                recs.append({
+                                    "module_id": "sca",
+                                    "module_name": "Evaluación de la configuración",
+                                    "severity": "medium",
+                                    "title": chk.get("title", "Check CIS fallido"),
+                                    "issue": (chk.get("rationale") or "Parámetro no alineado con benchmark CIS.")[:250],
+                                    "remediation": (chk.get("remediation") or "Ajustar parámetro en el archivo de configuración.")[:300],
+                                    "impact": "Previene configuraciones inseguras y accesos no autorizados.",
+                                })
+            except Exception:
+                pass
+
+            # 2. Vulnerability Detector Recommendations
+            try:
+                r_vuln = await client.get(f"{base}/vulnerability/{agent_id}?limit=10", headers=headers)
+                if r_vuln.is_success:
+                    vulns = r_vuln.json().get("data", {}).get("affected_items", [])
+                    if vulns:
+                        pkgs = list(set(v.get("name") or v.get("package") for v in vulns if (v.get("name") or v.get("package"))))
+                        pkg_str = " ".join(pkgs[:4])
+                        recs.append({
+                            "module_id": "vulnerabilities",
+                            "module_name": "Detección de vulnerabilidades",
+                            "severity": "critical",
+                            "title": f"Parches urgentes de seguridad ({len(vulns)} CVEs)",
+                            "issue": f"Se han detectado paquetes con vulnerabilidades conocidas y exploits documentados.",
+                            "remediation": f"sudo apt-get update && sudo apt-get --only-upgrade install -y {pkg_str}",
+                            "impact": "Elimina vulnerabilidades críticas explotables de forma remota.",
+                        })
+            except Exception:
+                pass
+
+            # 3. Rootcheck / Malware Recommendations
+            try:
+                r_rc = await client.get(f"{base}/rootcheck/{agent_id}?limit=5", headers=headers)
+                if r_rc.is_success:
+                    rc_items = r_rc.json().get("data", {}).get("affected_items", [])
+                    unsolved = [it for it in rc_items if it.get("status") != "solved"]
+                    if unsolved:
+                        for it in unsolved[:2]:
+                            recs.append({
+                                "module_id": "rootcheck",
+                                "module_name": "Detección de malware",
+                                "severity": "critical",
+                                "title": "Posible anomalía de malware o proceso oculto",
+                                "issue": it.get("log", "Proceso oculto o archivo anómalo en /proc detectado por Rootcheck."),
+                                "remediation": "sudo rkhunter --check --sk && sudo chkrootkit && ps -ef",
+                                "impact": "Identifica y remueve kits de intrusión y procesos maliciosos encubiertos.",
+                            })
+                    else:
+                        recs.append({
+                            "module_id": "rootcheck",
+                            "module_name": "Detección de malware",
+                            "severity": "low",
+                            "title": "Mantener base de firmas de rootkits actualizada",
+                            "issue": "El motor de detección de malware está levantado y supervisando el kernel.",
+                            "remediation": "sudo /var/ossec/bin/rootcheck_control -u all 2>/dev/null || true",
+                            "impact": "Asegura detección oportuna de nuevas variantes de troyanos.",
+                        })
+            except Exception:
+                pass
+
+            # 4. FIM Recommendations
+            try:
+                r_fim = await client.get(f"{base}/syscheck/{agent_id}?limit=5", headers=headers)
+                if r_fim.is_success:
+                    fim_total = r_fim.json().get("data", {}).get("total_affected_items", 0)
+                    recs.append({
+                        "module_id": "fim",
+                        "module_name": "Monitoreo de la integridad de los archivos",
+                        "severity": "medium",
+                        "title": f"Asegurar permisos estrictos en {fim_total} archivos monitorizados",
+                        "issue": "Wazuh supervisa en tiempo real modificaciones y cambios de permisos en /etc, /bin y /usr/bin.",
+                        "remediation": "sudo chmod 644 /etc/*.conf 2>/dev/null; sudo chown -R root:root /etc",
+                        "impact": "Previene manipulación no autorizada de archivos esenciales del sistema operativo.",
+                    })
+            except Exception:
+                pass
+
+            # 5. Syscollector / Higiene informática
+            try:
+                r_ports = await client.get(f"{base}/syscollector/{agent_id}/ports?limit=40", headers=headers)
+                if r_ports.is_success:
+                    ports = r_ports.json().get("data", {}).get("affected_items", [])
+                    open_all = [p for p in ports if p.get("local", {}).get("ip") in ("0.0.0.0", "::") and p.get("state") == "listening"]
+                    if open_all:
+                        ports_str = ", ".join(str(p.get("local", {}).get("port")) for p in open_all[:5])
+                        recs.append({
+                            "module_id": "syscollector",
+                            "module_name": "Higiene informática",
+                            "severity": "low",
+                            "title": f"Servicios escuchando en interfaces abiertas ({len(open_all)} puertos)",
+                            "issue": f"Puertos {ports_str} están en modo LISTEN en todas las interfaces de red.",
+                            "remediation": "sudo ufw default deny incoming && sudo ufw allow from <IP_CONFIANZA>",
+                            "impact": "Cierra vectores de reconocimiento y escaneo no deseado desde la red.",
+                        })
+            except Exception:
+                pass
+
+            # 6. Compliance & Threat Hunting Recommendations
+            recs.extend([
+                {
+                    "module_id": "pci_dss",
+                    "module_name": "PCI DSS",
+                    "severity": "medium",
+                    "title": "Política de contraseñas robustas y caducidad (Req. 8.2)",
+                    "issue": "Los estándares PCI DSS exigen vigencia máxima de contraseñas y complejidad mínima.",
+                    "remediation": "sudo sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 90/' /etc/login.defs",
+                    "impact": "Protege entornos que procesan datos de titulares de tarjetas de pago.",
+                },
+                {
+                    "module_id": "gdpr",
+                    "module_name": "RGPD",
+                    "severity": "medium",
+                    "title": "Registro y trazabilidad de acceso a datos personales (Art. 32)",
+                    "issue": "El RGPD exige medidas técnicas para garantizar la integridad y confidencialidad de los datos.",
+                    "remediation": "sudo apt-get install -y auditd && sudo systemctl enable --now auditd",
+                    "impact": "Garantiza trazabilidad y evidencia forense ante posibles incidentes.",
+                },
+                {
+                    "module_id": "threat_hunting",
+                    "module_name": "Caza de amenazas",
+                    "severity": "high",
+                    "title": "Verificar contención automática de IPs en firewall ante brute-force",
+                    "issue": "Wazuh cuenta con scripts de respuesta activa para bloqueo de IPs hostiles.",
+                    "remediation": "Verificar directiva <active-response> en ossec.conf y conectividad iptables.",
+                    "impact": "Detiene ataques automatizados de diccionario sin intervención humana.",
+                },
+            ])
+
+            return {
+                "ok": True,
+                "agent_id": agent_id,
+                "total": len(recs),
+                "recommendations": recs,
+            }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "recommendations": []}
+
+
+@router.post("/api/v1/dashboard/wazuh/modules/toggle")
+async def toggle_wazuh_module(request: Request, _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+
+    body = await request.json()
+    scope = body.get("scope", "global")
+    module = body.get("module")
+    enabled = bool(body.get("enabled", True))
+
+    if not module:
+        raise HTTPException(status_code=400, detail="module field required")
+
+    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
+    if not host or not settings.wazuh_manager_api_pass:
+        raise HTTPException(status_code=500, detail="Wazuh API no configurada")
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=15, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                raise HTTPException(status_code=500, detail="Error de autenticación con Wazuh API")
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # 1. Read existing config
+            r_conf = await client.get(f"{base}/groups/default/configuration", headers=headers)
+            modules_config = {"global": dict(DEFAULT_STATE)}
+            if r_conf.is_success:
+                modules_config = _parse_agent_conf_response(r_conf.json().get("data", {}))
+
+            # 2. Update config for scope
+            if scope not in modules_config:
+                modules_config[scope] = dict(modules_config.get("global", DEFAULT_STATE))
+            modules_config[scope][module] = enabled
+
+            # 3. Build XML and send PUT
+            xml_data = _build_agent_conf_xml(modules_config)
+            xml_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/xml"}
+            r_put = await client.put(f"{base}/groups/default/configuration", headers=xml_headers, content=xml_data)
+            if not r_put.is_success:
+                raise HTTPException(status_code=500, detail=f"Error actualizando agent.conf: {r_put.text}")
+
+            # 4. Restart agents
+            if scope == "global" or scope == "000":
+                await client.put(f"{base}/agents/restart", headers=headers)
+            else:
+                await client.put(f"{base}/agents/restart?agents_list={scope}", headers=headers)
+
+            return {
+                "ok": True,
+                "scope": scope,
+                "module": module,
+                "enabled": enabled,
+                "modules_config": modules_config,
+                "message": f"Módulo {module} {'activado' if enabled else 'desactivado'} para {scope} con reinicio aplicado.",
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/v1/dashboard/wazuh/modules/bulk")
+async def bulk_toggle_wazuh_modules(request: Request, _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+
+    body = await request.json()
+    scope = body.get("scope", "global")
+    enabled = bool(body.get("enabled", True))
+
+    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
+    if not host or not settings.wazuh_manager_api_pass:
+        raise HTTPException(status_code=500, detail="Wazuh API no configurada")
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=15, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                raise HTTPException(status_code=500, detail="Error de autenticación con Wazuh API")
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # 1. Read existing config
+            r_conf = await client.get(f"{base}/groups/default/configuration", headers=headers)
+            modules_config = {"global": dict(DEFAULT_STATE)}
+            if r_conf.is_success:
+                modules_config = _parse_agent_conf_response(r_conf.json().get("data", {}))
+
+            # 2. Update all modules for scope
+            if scope not in modules_config:
+                modules_config[scope] = {}
+            for m in ALL_MODULE_IDS:
+                modules_config[scope][m] = enabled
+
+            # 3. Build XML and send PUT
+            xml_data = _build_agent_conf_xml(modules_config)
+            xml_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/xml"}
+            r_put = await client.put(f"{base}/groups/default/configuration", headers=xml_headers, content=xml_data)
+            if not r_put.is_success:
+                raise HTTPException(status_code=500, detail=f"Error actualizando agent.conf: {r_put.text}")
+
+            # 4. Restart agents
+            if scope == "global" or scope == "000":
+                await client.put(f"{base}/agents/restart", headers=headers)
+            else:
+                await client.put(f"{base}/agents/restart?agents_list={scope}", headers=headers)
+
+            return {
+                "ok": True,
+                "scope": scope,
+                "enabled": enabled,
+                "modules_config": modules_config,
+                "message": f"Todos los apartados fueron {'activados' if enabled else 'desactivados'} para {scope}.",
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/v1/dashboard/wazuh/modules/apply")
+async def apply_wazuh_modules_config(request: Request, _: None = Depends(verify_api_key)):
+    from ..infrastructure.notifier import _get_token
+    from ..config import settings
+    import httpx
+
+    body = await request.json()
+    scope = body.get("scope", "global")
+    modules = body.get("modules", {})
+    if not isinstance(modules, dict):
+        raise HTTPException(status_code=400, detail="modules dict required")
+
+    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
+    if not host or not settings.wazuh_manager_api_pass:
+        raise HTTPException(status_code=500, detail="Wazuh API no configurada")
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=15, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                raise HTTPException(status_code=500, detail="Error de autenticación con Wazuh API")
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # 1. Read existing config
+            r_conf = await client.get(f"{base}/groups/default/configuration", headers=headers)
+            modules_config = {"global": dict(DEFAULT_STATE)}
+            if r_conf.is_success:
+                modules_config = _parse_agent_conf_response(r_conf.json().get("data", {}))
+
+            # 2. Update config for scope
+            if scope not in modules_config:
+                modules_config[scope] = dict(modules_config.get("global", DEFAULT_STATE))
+
+            for m_key, m_val in modules.items():
+                modules_config[scope][m_key] = bool(m_val)
+
+            # 3. Build XML and send PUT
+            xml_data = _build_agent_conf_xml(modules_config)
+            xml_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/xml"}
+            r_put = await client.put(f"{base}/groups/default/configuration", headers=xml_headers, content=xml_data)
+            if not r_put.is_success:
+                raise HTTPException(status_code=500, detail=f"Error actualizando agent.conf: {r_put.text}")
+
+            # 4. Restart agents
+            restarted_agents = []
+            if scope == "global" or scope == "000":
+                r_rst = await client.put(f"{base}/agents/restart", headers=headers)
+                if r_rst.is_success:
+                    restarted_agents = r_rst.json().get("data", {}).get("affected_items", ["all"])
+            else:
+                r_rst = await client.put(f"{base}/agents/restart?agents_list={scope}", headers=headers)
+                if r_rst.is_success:
+                    restarted_agents = r_rst.json().get("data", {}).get("affected_items", [scope])
+
+            log.info("wazuh_modules_applied scope=%s modules=%s user_ip=%s",
+                     scope, modules, request.client.host if request.client else "?")
+
+            return {
+                "ok": True,
+                "scope": scope,
+                "modules_config": modules_config,
+                "xml": xml_data,
+                "restarted_agents": restarted_agents,
+                "message": f"Configuración guardada en agent.conf y reinicio aplicado a {scope}.",
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+

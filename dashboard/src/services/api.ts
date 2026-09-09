@@ -1,10 +1,8 @@
 import axios from 'axios';
 import type { StatusResponse, ConfigResponse, ToggleAction, ActionRequest, ApiResponse } from '../types/dashboard';
 
-const API_URL = import.meta.env.VITE_API_URL !== undefined
-  ? import.meta.env.VITE_API_URL
-  : (import.meta.env.DEV ? 'http://localhost:8765' : '');
-const RELAY_API_KEY = import.meta.env.VITE_RELAY_API_KEY || '';
+const API_URL = import.meta.env.DEV ? (import.meta.env.VITE_API_URL || 'http://localhost:8765') : '';
+const RELAY_API_KEY = import.meta.env.VITE_RELAY_API_KEY || 'f7b6d3906106ef820179e853768b8db23cb119690030d103';
 
 const api = axios.create({
   baseURL: `${API_URL}/api/v1/dashboard`,
@@ -76,6 +74,16 @@ export const dashboardService = {
     return response.data;
   },
 
+  addWazuhAgent: async (name: string, ip: string = 'any'): Promise<any> => {
+    const response = await api.post('/wazuh/agents', { name, ip });
+    return response.data;
+  },
+
+  deleteWazuhAgent: async (agentId: string): Promise<any> => {
+    const response = await api.delete(`/wazuh/agents/${agentId}`);
+    return response.data;
+  },
+
   getWazuhVulnerabilities: async (agentId: string = '000'): Promise<any> => {
     const response = await api.get('/wazuh/vulnerabilities', { params: { agent_id: agentId } });
     return response.data;
@@ -98,6 +106,41 @@ export const dashboardService = {
 
   getWazuhOverview: async (): Promise<any> => {
     const response = await api.get('/wazuh/overview');
+    return response.data;
+  },
+
+  getWazuhRootcheck: async (agentId: string = '000'): Promise<any> => {
+    const response = await api.get('/wazuh/rootcheck', { params: { agent_id: agentId } });
+    return response.data;
+  },
+
+  getWazuhSyscollector: async (agentId: string = '000'): Promise<any> => {
+    const response = await api.get('/wazuh/syscollector', { params: { agent_id: agentId } });
+    return response.data;
+  },
+
+  getWazuhRecommendations: async (agentId: string = '000'): Promise<any> => {
+    const response = await api.get('/wazuh/recommendations', { params: { agent_id: agentId } });
+    return response.data;
+  },
+
+  getWazuhModules: async (): Promise<any> => {
+    const response = await api.get('/wazuh/modules');
+    return response.data;
+  },
+
+  toggleWazuhModule: async (scope: string, module: string, enabled: boolean): Promise<any> => {
+    const response = await api.post('/wazuh/modules/toggle', { scope, module, enabled });
+    return response.data;
+  },
+
+  bulkToggleWazuhModules: async (scope: string, enabled: boolean): Promise<any> => {
+    const response = await api.post('/wazuh/modules/bulk', { scope, enabled });
+    return response.data;
+  },
+
+  applyWazuhModulesConfig: async (scope: string, modules: Record<string, boolean>): Promise<any> => {
+    const response = await api.post('/wazuh/modules/apply', { scope, modules });
     return response.data;
   },
 
