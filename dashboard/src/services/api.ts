@@ -54,8 +54,8 @@ export const dashboardService = {
     return response.data || { ok: false, result: 'Unknown error' };
   },
 
-  testEmail: async (): Promise<{ ok: boolean; detail: string }> => {
-    const response = await api.post('/test-email');
+  testEmail: async (dest?: string): Promise<{ ok: boolean; detail: string }> => {
+    const response = await api.post('/test-email', dest ? { dest } : {});
     return response.data || { ok: false, detail: 'Unknown error' };
   },
 

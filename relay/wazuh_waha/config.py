@@ -58,7 +58,7 @@ class Settings(BaseSettings):
 
     # --- Email backup (opcional, vacio = desactivado) ---
     email_provider: str = "smtp"               # smtp | hyvor_relay
-    smtp_host: str = ""
+    smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_pass: str = ""

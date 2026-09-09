@@ -1454,11 +1454,26 @@ async def dashboard_test_email(request: Request):
     """Manda un email de prueba con la config actual. Diagnostico inmediato."""
     await verify_api_key(request)
 
-    dest = settings.admin_email
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    dest = (body.get("dest") or body.get("admin_email") or settings.admin_email or os.environ.get("ADMIN_EMAIL", "")).strip()
     if not dest:
-        return {"ok": False, "detail": "Falta configurar ADMIN_EMAIL en la sección de Correo."}
+        dest = settings.smtp_to or os.environ.get("SMTP_TO", "")
+    if not dest:
+        raise HTTPException(status_code=400, detail="Falta dirección de correo destinatario (ADMIN_EMAIL)")
 
     from ..infrastructure import notifier
+
+    smtp_host = settings.smtp_host or os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(settings.smtp_port or os.environ.get("SMTP_PORT", 587))
+    smtp_user = settings.smtp_user or os.environ.get("SMTP_USER", "")
+    smtp_pass = settings.smtp_pass or os.environ.get("SMTP_PASS", "")
+    smtp_from = settings.smtp_from or smtp_user or "wazuh-waha@localhost"
+    smtp_tls = settings.smtp_tls if settings.smtp_tls is not None else True
 
     subject = "[Wazuh SOC] Notificación de Prueba del Sistema"
     body_txt = (
@@ -1466,18 +1481,15 @@ async def dashboard_test_email(request: Request):
         "Este es un correo de verificación enviado desde el Dashboard.\n"
         f"Fecha y Hora: {time.strftime('%Y-%m-%d %H:%M:%S %z')}\n"
         f"Destinatario: {dest}\n"
-        f"Servidor SMTP: {settings.smtp_host or '(sin host)'}:{settings.smtp_port}\n"
-        f"Remitente: {settings.smtp_from or settings.smtp_user or 'wazuh-alerts@local'}\n\n"
+        f"Servidor SMTP: {smtp_host}:{smtp_port}\n"
+        f"Remitente: {smtp_from}\n\n"
         "Si recibiste este mensaje, la integración de respaldo por correo funciona correctamente."
     )
 
-    if settings.email_provider == "hyvor_relay":
+    if settings.email_provider == "hyvor_relay" and settings.hyvor_base_url:
         ok = await notifier.notify_email_hyvor(subject, body_txt)
         detail = f"Enviado vía Hyvor Relay a {dest}" if ok else "Fallo con proveedor Hyvor Relay (verificar credenciales)"
     else:
-        if not settings.smtp_host:
-            return {"ok": False, "detail": "Falta configurar SMTP_HOST (ej. smtp.gmail.com) en Ajustes."}
-
         def _send_smtp():
             from email.message import EmailMessage
             import smtplib
@@ -1485,33 +1497,32 @@ async def dashboard_test_email(request: Request):
 
             msg = EmailMessage()
             msg["Subject"] = subject
-            msg["From"] = settings.smtp_from or settings.smtp_user or "wazuh-alerts@local"
+            msg["From"] = smtp_from
             msg["To"] = dest
             msg.set_content(body_txt)
 
-            port = int(settings.smtp_port or 587)
-            if port == 465:
+            if smtp_port == 465:
                 ctx = ssl.create_default_context()
-                with smtplib.SMTP_SSL(settings.smtp_host, 465, context=ctx, timeout=12) as s:
-                    if settings.smtp_user and settings.smtp_pass:
-                        s.login(settings.smtp_user, settings.smtp_pass)
+                with smtplib.SMTP_SSL(smtp_host, 465, context=ctx, timeout=12) as s:
+                    if smtp_user and smtp_pass:
+                        s.login(smtp_user, smtp_pass)
                     s.send_message(msg)
             else:
-                with smtplib.SMTP(settings.smtp_host, port, timeout=12) as s:
-                    if settings.smtp_tls:
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=12) as s:
+                    if smtp_tls:
                         ctx = ssl.create_default_context()
                         s.starttls(context=ctx)
-                    if settings.smtp_user and settings.smtp_pass:
-                        s.login(settings.smtp_user, settings.smtp_pass)
+                    if smtp_user and smtp_pass:
+                        s.login(smtp_user, smtp_pass)
                     s.send_message(msg)
 
         try:
             await asyncio.to_thread(_send_smtp)
             ok = True
-            detail = f"Correo enviado exitosamente a {dest}"
+            detail = f"Correo de prueba enviado exitosamente a {dest}"
         except Exception as e:
             ok = False
-            detail = f"Error SMTP ({settings.smtp_host}:{settings.smtp_port}): {e}"
+            detail = f"Error SMTP ({smtp_host}:{smtp_port}): {e}"
 
     log.info("dashboard_test_email ok=%s dest=%s detail=%s", ok, dest, detail)
     return {"ok": ok, "detail": detail}

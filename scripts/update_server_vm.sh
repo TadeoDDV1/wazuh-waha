@@ -19,10 +19,10 @@ if [ -f .env ]; then
   API_PASS=$(grep -E '^WAZUH_MANAGER_API_PASS=' .env | cut -d'=' -f2 | tr -d '"' | tr -d "'" | tr -d ' ')
 fi
 
-SERVER_IP="${SERVER_IP:-192.168.122.142}"
-SSH_USER="${SSH_USER:-tadeou7}"
+SERVER_IP="${SERVER_IP:-127.0.0.1}"
+SSH_USER="${SSH_USER:-root}"
 API_USER="${API_USER:-wazuh-wui}"
-API_PASS="${API_PASS:-7JebC236wNxrflAe0MJOipOw66ncLo.D}"
+API_PASS="${API_PASS:-}"
 
 echo "========================================================"
 echo " Actualizando y Validando Wazuh Manager en: $SERVER_IP"

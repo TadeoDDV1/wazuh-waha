@@ -15,6 +15,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface Agent {
   id: string;
@@ -124,13 +125,13 @@ sudo /Library/Ossec/bin/wazuh-control start`;
 
   const handleCopy = async () => {
     const text = getInstallCommand();
-    try {
-      await navigator.clipboard.writeText(text);
+    const ok = await copyToClipboard(text);
+    if (ok) {
       setCopied(true);
       toast.success('Comando de instalación copiado al portapapeles');
       setTimeout(() => setCopied(false), 2500);
-    } catch {
-      toast.error('No se pudo copiar el comando automáticamente');
+    } else {
+      toast.error('No se pudo copiar el comando. Por favor selecciónalo manualmente.');
     }
   };
 

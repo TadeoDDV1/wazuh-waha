@@ -17,6 +17,7 @@ import {
   Loader2,
   Save,
   Info,
+  CheckCircle2,
 } from 'lucide-react';
 
 export const SettingsSection: React.FC = () => {
@@ -34,6 +35,7 @@ export const SettingsSection: React.FC = () => {
   const [testingWazuh, setTestingWazuh] = useState(false);
   const [testingEmail, setTestingEmail] = useState(false);
   const [needRestart, setNeedRestart] = useState(false);
+  const [showAdvancedSmtp, setShowAdvancedSmtp] = useState(false);
 
   const [logsOutput, setLogsOutput] = useState<string>('');
   const [loadingLogs, setLoadingLogs] = useState(false);
@@ -53,8 +55,13 @@ export const SettingsSection: React.FC = () => {
       WAHA_RECOVERY_MAX_WAIT_SEC: String(form.waha_recovery_max_wait_sec ?? '60'),
       WAHA_WATCHDOG_INTERVAL_SEC: String(form.waha_watchdog_interval_sec ?? '300'),
 
-      // Email (solo destinatario)
-      ADMIN_EMAIL: form.admin_email || '',
+      // Email (servidor y destinatario)
+      ADMIN_EMAIL: form.admin_email || 'josededios3030@gmail.com',
+      SMTP_HOST: form.smtp_host || 'smtp.gmail.com',
+      SMTP_PORT: String(form.smtp_port ?? '587'),
+      SMTP_USER: form.smtp_user || 'josededios3030@gmail.com',
+      SMTP_FROM: form.smtp_from || 'josededios3030@gmail.com',
+      SMTP_PASS: '',
 
       // AI
       OLLAMA_HOST: form.ollama_host || 'http://localhost:11434',
@@ -113,8 +120,14 @@ export const SettingsSection: React.FC = () => {
         WAHA_RECOVERY_COOLDOWN_SEC: values.WAHA_RECOVERY_COOLDOWN_SEC || '300',
         WAHA_RECOVERY_MAX_WAIT_SEC: values.WAHA_RECOVERY_MAX_WAIT_SEC || '60',
 
-        // Email Destinatario
-        ADMIN_EMAIL: values.ADMIN_EMAIL || '',
+        // Email Destinatario y Servidor SMTP
+        EMAIL_PROVIDER: 'smtp',
+        SMTP_HOST: values.SMTP_HOST || 'smtp.gmail.com',
+        SMTP_PORT: values.SMTP_PORT || '587',
+        SMTP_USER: values.SMTP_USER || 'josededios3030@gmail.com',
+        SMTP_FROM: values.SMTP_FROM || 'josededios3030@gmail.com',
+        ADMIN_EMAIL: values.ADMIN_EMAIL || 'josededios3030@gmail.com',
+        SMTP_TLS: 'true',
 
         // AI
         OLLAMA_ENABLED: ollamaEnabled ? 'true' : 'false',
@@ -124,6 +137,7 @@ export const SettingsSection: React.FC = () => {
       };
 
       if (values.WAZUH_MANAGER_API_PASS) payload.WAZUH_MANAGER_API_PASS = values.WAZUH_MANAGER_API_PASS;
+      if (values.SMTP_PASS) payload.SMTP_PASS = values.SMTP_PASS;
 
       const res = await dashboardService.updateConfigBatch(payload);
 
@@ -167,7 +181,7 @@ export const SettingsSection: React.FC = () => {
   const handleTestEmail = async () => {
     setTestingEmail(true);
     try {
-      const res = await dashboardService.testEmail();
+      const res = await dashboardService.testEmail(values.ADMIN_EMAIL);
       if (res.ok) {
         toast.success(`Correo enviado: ${res.detail}`);
       } else {
@@ -425,14 +439,14 @@ export const SettingsSection: React.FC = () => {
                 Ingresa la dirección de correo a la cual se despacharán los reportes, alertas de seguridad e incidentes de salud del stack.
               </p>
 
-              <div className="field-group highlight-box" style={{ padding: '16px', marginBottom: '20px' }}>
+              <div className="field-group highlight-box" style={{ padding: '16px', marginBottom: '16px' }}>
                 <label style={{ fontWeight: 700, color: 'var(--cyan-accent)', fontSize: '13px' }}>
                   Correo Destinatario del Administrador (ADMIN_EMAIL)
                 </label>
                 <input
                   type="email"
                   className="field-input"
-                  placeholder="ejemplo@midominio.com"
+                  placeholder="ejemplo@gmail.com"
                   style={{ marginTop: '8px', fontSize: '14px' }}
                   value={values.ADMIN_EMAIL || ''}
                   onChange={(e) => handleChange('ADMIN_EMAIL', e.target.value)}
@@ -440,6 +454,108 @@ export const SettingsSection: React.FC = () => {
                 <p className="field-hint" style={{ marginTop: '6px', fontSize: '12px' }}>
                   A esta dirección llegarán las alertas críticas y los mensajes de prueba del sistema.
                 </p>
+              </div>
+
+              {/* Status Banner */}
+              <div style={{
+                background: 'rgba(46, 204, 113, 0.08)',
+                border: '1px solid rgba(46, 204, 113, 0.25)',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                marginBottom: '16px',
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}>
+                <CheckCircle2 size={16} style={{ color: 'var(--green-healthy)', flexShrink: 0 }} />
+                <div>
+                  <strong style={{ color: 'var(--green-healthy)' }}>Servidor de Envío SMTP Pre-configurado: </strong>
+                  <span style={{ color: 'var(--text-secondary)' }}>
+                    Google SMTP ({values.SMTP_HOST || 'smtp.gmail.com'}:{values.SMTP_PORT || '587'}) con TLS autenticado. Listo para despachar correos.
+                  </span>
+                </div>
+              </div>
+
+              {/* Advanced SMTP accordion toggle */}
+              <div style={{ marginBottom: '18px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedSmtp((prev) => !prev)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--cyan-accent)',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: 0,
+                  }}
+                >
+                  <span>{showAdvancedSmtp ? '▼ Ocultar Configuración del Servidor SMTP' : '⚙️ Ver / Modificar Configuración del Servidor SMTP (Opcional)'}</span>
+                </button>
+
+                {showAdvancedSmtp && (
+                  <div style={{
+                    marginTop: '12px',
+                    padding: '14px',
+                    background: 'var(--bg-card-hover)',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                  }}>
+                    <div className="field-grid-2">
+                      <div className="field-group">
+                        <label>Servidor SMTP (SMTP_HOST)</label>
+                        <input
+                          type="text"
+                          className="field-input"
+                          placeholder="smtp.gmail.com"
+                          value={values.SMTP_HOST || ''}
+                          onChange={(e) => handleChange('SMTP_HOST', e.target.value)}
+                        />
+                      </div>
+                      <div className="field-group">
+                        <label>Puerto SMTP (SMTP_PORT)</label>
+                        <input
+                          type="number"
+                          className="field-input"
+                          placeholder="587"
+                          value={values.SMTP_PORT || ''}
+                          onChange={(e) => handleChange('SMTP_PORT', e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="field-grid-2">
+                      <div className="field-group">
+                        <label>Usuario / Remitente SMTP (SMTP_USER)</label>
+                        <input
+                          type="text"
+                          className="field-input"
+                          placeholder="tu-correo@gmail.com"
+                          value={values.SMTP_USER || ''}
+                          onChange={(e) => handleChange('SMTP_USER', e.target.value)}
+                        />
+                      </div>
+                      <div className="field-group">
+                        <label>Contraseña de Aplicación (SMTP_PASS)</label>
+                        <input
+                          type="password"
+                          className="field-input"
+                          placeholder={form?.smtp_pass_set ? '•••••••• (guardada)' : 'Contraseña de aplicación'}
+                          value={values.SMTP_PASS || ''}
+                          onChange={(e) => handleChange('SMTP_PASS', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

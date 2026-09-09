@@ -32,6 +32,7 @@ import {
   FileCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { copyToClipboard } from '../utils/clipboard';
 
 /* ─── Types ─── */
 interface ScopeOption {
@@ -247,11 +248,15 @@ const RecommendationsPanel: React.FC<{
 
   const filtered = recommendations.filter((r) => r.module_id === moduleId);
 
-  const handleCopy = (cmd: string, idx: number) => {
-    navigator.clipboard.writeText(cmd);
-    setCopiedIndex(idx);
-    toast.success('Comando de remediación copiado al portapapeles');
-    setTimeout(() => setCopiedIndex(null), 2000);
+  const handleCopy = async (cmd: string, idx: number) => {
+    const ok = await copyToClipboard(cmd);
+    if (ok) {
+      setCopiedIndex(idx);
+      toast.success('Comando de remediación copiado al portapapeles');
+      setTimeout(() => setCopiedIndex(null), 2000);
+    } else {
+      toast.error('No se pudo copiar el comando automáticamente');
+    }
   };
 
   if (loading) {
