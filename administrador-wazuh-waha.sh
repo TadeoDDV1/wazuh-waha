@@ -1298,6 +1298,9 @@ while true; do
     echo -e "${AZUL}║${NC}  ${GRIS}    Host: $(hostname) | Manager: $WAZUH_SERVER_IP | $(date '+%d/%m/%Y %H:%M')${NC}   ${AZUL}║${NC}"
     echo -e "${AZUL}╠══════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${AZUL}║${NC}                                                                      ${AZUL}║${NC}"
+    echo -e "${AZUL}║${NC}  ${VERDE}── Configuración Rápida (1-Click Setup) ───────────────────${NC}       ${AZUL}║${NC}"
+    echo -e "${AZUL}║${NC}   ${VERDE} 0)${NC} 🔑 Configurar / Sincronizar credenciales y reiniciar todo     ${AZUL}║${NC}"
+    echo -e "${AZUL}║${NC}                                                                      ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}  ${CYAN}── Monitoreo y Diagnóstico ────────────────────────────────${NC}       ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${AMARILLO} 1)${NC} Estado e información del sistema (CPU, RAM, Disco)           ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${AMARILLO} 2)${NC} Estado de TODOS los servicios (Wazuh, Docker, Relay)         ${AZUL}║${NC}"
@@ -1328,12 +1331,20 @@ while true; do
     echo -e "${AZUL}║${NC}   ${ROJO}17)${NC} Salir                                                         ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}                                                                      ${AZUL}║${NC}"
     echo -e "${AZUL}╚══════════════════════════════════════════════════════════════════════╝${NC}"
-    if ! read -rp "  Seleccione una opción [1-17]: " opcion; then
+    if ! read -rp "  Seleccione una opción [0-17]: " opcion; then
         echo -e "\n  ${VERDE}Saliendo del administrador. ¡Hasta pronto!${NC}\n"
         exit 0
     fi
 
     case $opcion in
+        0)
+            if [ -x "$PROJECT_ROOT/conectar.sh" ]; then
+                bash "$PROJECT_ROOT/conectar.sh"
+            else
+                fail "No se encontró el script conectar.sh en $PROJECT_ROOT"
+            fi
+            pausar
+            ;;
         1)  info_sistema;          pausar ;;
         2)  estado_servicios;      pausar ;;
         3)  diagnostico;           pausar ;;
@@ -1356,7 +1367,7 @@ while true; do
             exit 0
             ;;
         *)
-            echo -e "\n  ${ROJO}Opción no válida. Elija un número entre 1 y 17.${NC}"
+            echo -e "\n  ${ROJO}Opción no válida. Elija un número entre 0 y 17.${NC}"
             sleep 1.2
             ;;
     esac
