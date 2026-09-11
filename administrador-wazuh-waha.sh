@@ -1055,9 +1055,10 @@ gestionar_servicios() {
     echo -e "  ${AMARILLO} 7)${NC} Alternar Timer de Watchdog WAHA (Habilitar / Deshabilitar)"
     echo -e "  ${AMARILLO} 8)${NC} Alternar Monitor IP Manager"
     echo -e "  ${VERDE} 9)${NC} ⚡ REINICIO MAESTRO DE TODO EL STACK"
-    echo -e "  ${ROJO}10)${NC} Volver al menú principal"
+    echo -e "  ${CYAN}10)${NC} 🚀 Desplegar / Sincronizar Servidor Completo (deploy-server.sh)"
+    echo -e "  ${ROJO}11)${NC} Volver al menú principal"
     separador
-    read -rp "  Seleccione [1-10]: " srv
+    read -rp "  Seleccione [1-11]: " srv
 
     case $srv in
         1)
@@ -1137,7 +1138,14 @@ gestionar_servicios() {
                 ok "¡Reinicio Maestro completado exitosamente!"
             fi
             ;;
-        10) return ;;
+        10)
+            if [ -f "$PROJECT_ROOT/scripts/deploy-server.sh" ]; then
+                sudo bash "$PROJECT_ROOT/scripts/deploy-server.sh"
+            else
+                fail "No se encontró $PROJECT_ROOT/scripts/deploy-server.sh"
+            fi
+            ;;
+        11) return ;;
         *) fail "Opción no válida"; sleep 1 ;;
     esac
     log "SERVICIOS: Acción $srv ejecutada."

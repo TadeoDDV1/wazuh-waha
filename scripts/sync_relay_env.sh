@@ -37,14 +37,12 @@ if [ "$DRY_RUN" = 1 ]; then
   echo "[dry-run] Mostrando destino que se generaria. Re-ejecutar con 'apply' para aplicar."
   BACKUP_OPT=""
 else
-  if [ ! -w "$TARGET_ENV" ] && [ "$(id -u)" != "0" ]; then
-    echo "ERROR: necesito root (o sudo) para escribir $TARGET_ENV" >&2
-    echo "Uso: sudo bash $0 apply" >&2
-    exit 1
+  sudo mkdir -p "$(dirname "$TARGET_ENV")"
+  if [ -f "$TARGET_ENV" ]; then
+    BACKUP_OPT="/etc/wazuh-waha/relay.env.bak.$(date +%s)"
+    sudo cp "$TARGET_ENV" "$BACKUP_OPT"
+    echo "[apply] Backup -> $BACKUP_OPT"
   fi
-  BACKUP_OPT="/etc/wazuh-waha/relay.env.bak.$(date +%s)"
-  sudo cp "$TARGET_ENV" "$BACKUP_OPT"
-  echo "[apply] Backup -> $BACKUP_OPT"
 fi
 
 # Generar el archivo destino. Usar un path escribible por root si estamos

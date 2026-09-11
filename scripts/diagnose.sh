@@ -1,138 +1,172 @@
 #!/bin/bash
-# Diagnostico read-only de la integracion Wazuh -> WAHA.
-# NO modifica nada. Solo lee.
-#
-# Variables opcionales (de .env o exportadas):
-#   WAZUH_SERVER_IP       IP del manager Wazuh. FUENTE DE VERDAD (default 172.44.30.5).
-#                         Si no esta, cae a WAZUH_MANAGER_HOST o WAZUH_VM_SSH_HOST
-#                         (aliases deprecated, mantendidos por compat).
-#   WAZUH_VM_SSH_USER     Usuario SSH (default tadeou7)
-#   WAZUH_VM_SSH_PORT     Puerto SSH (default 22)
-#   WAZUH_VM_SSH_PASS     Pass SSH. Si no esta seteada, se skipea el ssh test.
-#   WAHA_HOST             URL base de WAHA (default http://172.44.30.8:3000)
-#   RELAY_HOST            URL base del relay (default http://172.44.30.8:8765)
-#   OLLAMA_HOST           URL base de Ollama (default http://172.44.30.8:11434)
-#   WAZUH_MANAGER_API_USER (default wazuh)
-#   WAZUH_MANAGER_API_PASS Si no esta seteada, se skipea el test de la API.
+# =============================================================================
+# diagnose.sh - Diagnóstico del Stack Wazuh -> WAHA en Servidor Local
+# =============================================================================
+# Diagnóstico read-only. No modifica nada.
+# - Lee .env del proyecto de forma segura (sin fallar ante espacios ni comillas).
+# - Comprueba contenedores Docker (WAHA, Dashboard).
+# - Comprueba sesión de WAHA y API Key.
+# - Comprueba servicio systemd y salud HTTP del Relay (:8765).
+# - Comprueba estado de Wazuh Manager local e integración custom-whatsapp.
+# =============================================================================
 
 set +e
 
-# Resolver IP del manager: prioridad WAZUH_SERVER_IP > WAZUH_MANAGER_HOST > WAZUH_VM_SSH_HOST
-WAZUH_SERVER_IP_RESOLVED="${WAZUH_SERVER_IP:-${WAZUH_MANAGER_HOST:-${WAZUH_VM_SSH_HOST:-172.44.30.5}}}"
-
-# Defaults (aliases deprecated se mantienen por compat pero usan la IP resuelta)
-WAZUH_VM_SSH_HOST="${WAZUH_VM_SSH_HOST:-${WAZUH_SERVER_IP_RESOLVED}}"
-WAZUH_VM_SSH_USER="${WAZUH_VM_SSH_USER:-tadeou7}"
-WAZUH_VM_SSH_PORT="${WAZUH_VM_SSH_PORT:-22}"
-WAHA_HOST="${WAHA_HOST:-http://172.44.30.8:3000}"
-RELAY_HOST="${RELAY_HOST:-http://172.44.30.8:8765}"
-OLLAMA_HOST="${OLLAMA_HOST:-http://172.44.30.8:11434}"
-WAZUH_MANAGER_API_HOST="${WAZUH_MANAGER_API_HOST:-${WAZUH_SERVER_IP_RESOLVED}}"
-WAZUH_MANAGER_API_USER="${WAZUH_MANAGER_API_USER:-wazuh}"
-
-GRN='\033[0;32m'; RED='\033[0;31m'; YEL='\033[1;33m'; NC='\033[0m'
+GRN='\033[0;32m'; RED='\033[0;31m'; YEL='\033[1;33m'; CYN='\033[0;36m'; NC='\033[0m'
 ok()   { echo -e "${GRN}[ OK ]${NC} $1"; }
 fail() { echo -e "${RED}[FAIL]${NC} $1"; }
 warn() { echo -e "${YEL}[WARN]${NC} $1"; }
-sep()  { echo -e "\n${YEL}========== $1 ==========${NC}"; }
+sep()  { echo -e "\n${CYN}========== $1 ==========${NC}"; }
 
-# Cargar .env si existe en el cwd o ~/Desktop/wazuh-waha/.env
-# (PROJECT_ROOT se mantiene como ~/Desktop/wazuh-waha aunque el codigo
-#  viva en ~/Desktop/wazuh-waha/relay/, por compat con instalacion previa)
-if [ -f .env ]; then
-  set -a; source .env; set +a
-elif [ -f ~/Desktop/wazuh-waha/.env ]; then
-  set -a; source ~/Desktop/wazuh-waha/.env; set +a
+# 1. Resolver ruta del proyecto
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="$PROJECT_ROOT/.env"
+
+# 2. Cargar .env de forma segura con Python
+if [ -f "$ENV_FILE" ]; then
+    PARSED_ENV=$(python3 - <<EOF 2>/dev/null
+import sys
+
+data = {}
+try:
+    with open("$ENV_FILE", 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            k, v = line.split('=', 1)
+            k = k.strip()
+            v = v.strip()
+            if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                v = v[1:-1]
+            data[k] = v
+except Exception:
+    pass
+
+for k, v in data.items():
+    escaped = v.replace('\\\\', '\\\\\\\\').replace('"', '\\"')
+    print(f'{k}="{escaped}"')
+EOF
+)
+    eval "$PARSED_ENV"
 fi
 
-sep "1. WAHA (docker)"
-docker ps --filter "name=wazuh-waha" --format "  {{.Names}}  {{.Status}}  {{.Ports}}" 2>&1
-if docker ps --filter "name=wazuh-waha" --format "{{.Names}}" 2>/dev/null | grep -q waha; then
-  ok "WAHA container running"
+# Variables resueltas con defaults para servidor local
+RELAY_HOST="${RELAY_HOST:-http://127.0.0.1:8765}"
+WAHA_HOST="${WAHA_HOST:-http://127.0.0.1:3001}"
+OLLAMA_HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
+WAZUH_SERVER_IP="${WAZUH_SERVER_IP:-127.0.0.1}"
+WAZUH_MANAGER_API_HOST="${WAZUH_MANAGER_API_HOST:-$WAZUH_SERVER_IP}"
+WAZUH_MANAGER_API_USER="${WAZUH_MANAGER_API_USER:-wazuh}"
+WAZUH_MANAGER_API_PORT="${WAZUH_MANAGER_API_PORT:-55000}"
+
+sep "1. WAHA y Dashboard (Docker)"
+if command -v docker &>/dev/null; then
+  docker ps --filter "name=wazuh-waha" --format "  {{.Names}}  {{.Status}}  {{.Ports}}" 2>&1
+  if docker ps --filter "name=wazuh-waha" --format "{{.Names}}" 2>/dev/null | grep -q waha; then
+    ok "WAHA container corriendo"
+  else
+    fail "WAHA container NO esta corriendo"
+  fi
 else
-  fail "WAHA container NOT running"
+  warn "Docker no encontrado o no ejecutable sin sudo"
 fi
 
-sep "2. WAHA session (pide API key desde .env)"
+sep "2. WAHA sesión y API Key"
 if [ -z "$WAHA_API_KEY" ]; then
-  fail "no pude leer WAHA_API_KEY del .env"
+  fail "no pude leer WAHA_API_KEY del .env ($ENV_FILE)"
 else
-  echo "  key len: ${#WAHA_API_KEY}"
-  curl -sS -m 5 -H "X-Api-Key: $WAHA_API_KEY" "$WAHA_HOST/api/sessions/default" 2>&1 | head -c 600
-  echo
+  echo "  Longitud de clave WAHA_API_KEY: ${#WAHA_API_KEY} caracteres"
+  WAHA_RESP=$(curl -sS -m 5 -H "X-Api-Key: $WAHA_API_KEY" "$WAHA_HOST/api/sessions/default" 2>&1 || true)
+  echo "  Respuesta WAHA: ${WAHA_RESP:0:200}"
+  if echo "$WAHA_RESP" | grep -q '"status":"WORKING"'; then
+    ok "Sesión WAHA operativa (WORKING)"
+  elif echo "$WAHA_RESP" | grep -q '"status":"SCAN_QR_CODE"'; then
+    warn "Sesión WAHA requiere escanear código QR"
+  fi
 fi
 
-sep "3. Puerto 8765 (relay)"
+sep "3. Puerto 8765 (Relay Wazuh-WAHA)"
 if ss -tln 2>/dev/null | grep -q ":8765"; then
-  ok "relay escucha en :8765"
+  ok "Relay escuchando en :8765"
 else
-  fail "nada escucha en :8765"
+  fail "Nada escucha en el puerto :8765"
 fi
 
-sep "4. Relay health endpoint"
-curl -sS -m 5 "$RELAY_HOST/health" 2>&1
-echo
+sep "4. Endpoint de Salud del Relay ($RELAY_HOST/health)"
+RELAY_HEALTH=$(curl -sS -m 5 "$RELAY_HOST/health" 2>&1 || true)
+echo "  $RELAY_HEALTH"
+if echo "$RELAY_HEALTH" | grep -q '"status":"ok"'; then
+  ok "Relay responde 200 OK con salud intacta"
+else
+  fail "Relay no responde o devolvió error"
+fi
 
-sep "5. Relay systemd unit"
+sep "5. Servicio Systemd del Relay (wazuh-waha)"
 systemctl is-active wazuh-waha 2>&1
 systemctl is-enabled wazuh-waha 2>&1
-systemctl status wazuh-waha --no-pager 2>&1 | head -15
+systemctl status wazuh-waha --no-pager 2>&1 | head -12
 
-sep "6. Ollama"
-curl -sS -m 5 "$OLLAMA_HOST/api/tags" 2>&1 | head -c 400
-echo
+sep "6. Integración en Wazuh Manager Local (/var/ossec)"
+if [ -d "/var/ossec" ]; then
+  ok "Directorio /var/ossec existe"
+  
+  # Script custom
+  if [ -x "/var/ossec/integrations/custom/whatsapp_alert.py" ]; then
+    ok "whatsapp_alert.py instalado con permisos de ejecución"
+  else
+    fail "whatsapp_alert.py no existe o no tiene permisos de ejecución"
+  fi
 
-sep "7. Wazuh Manager API ($WAZUH_MANAGER_API_HOST:55000)"
-if [ -z "$WAZUH_MANAGER_API_PASS" ]; then
-  warn "WAZUH_MANAGER_API_PASS no seteada, saltando"
+  # Config relay
+  if [ -f "/var/ossec/etc/wsl-relay.conf" ]; then
+    ok "/var/ossec/etc/wsl-relay.conf existe"
+    grep -v "API_KEY" /var/ossec/etc/wsl-relay.conf 2>/dev/null | sed 's/^/    /'
+  else
+    fail "/var/ossec/etc/wsl-relay.conf no existe"
+  fi
+
+  # Inyección en ossec.conf
+  if grep -q "custom-whatsapp" /var/ossec/etc/ossec.conf 2>/dev/null; then
+    ok "Bloque <integration> custom-whatsapp presente en ossec.conf"
+  else
+    fail "Bloque <integration> custom-whatsapp NO encontrado en ossec.conf"
+  fi
 else
-  curl -sS -m 5 -k -u "$WAZUH_MANAGER_API_USER:$WAZUH_MANAGER_API_PASS" \
-    "https://$WAZUH_MANAGER_API_HOST:55000/" 2>&1 | head -c 300
-  echo
+  warn "/var/ossec no encontrado en este host (Wazuh Manager)"
 fi
 
-sep "8. Wazuh Manager status"
-if [ -z "$WAZUH_MANAGER_API_PASS" ]; then
-  warn "WAZUH_MANAGER_API_PASS no seteada, saltando"
-else
-  curl -sS -m 5 -k -u "$WAZUH_MANAGER_API_USER:$WAZUH_MANAGER_API_PASS" \
-    "https://$WAZUH_MANAGER_API_HOST:55000/manager/status" 2>&1 | head -c 400
-  echo
-fi
-
-sep "9. Agente Wazuh LOCAL"
-if systemctl is-active --quiet wazuh-agent 2>/dev/null; then
-  ok "wazuh-agent activo"
+sep "7. Estado de Wazuh Manager"
+if systemctl is-active --quiet wazuh-manager 2>/dev/null; then
+  ok "wazuh-manager activo (systemd)"
 elif [ -x /var/ossec/bin/wazuh-control ]; then
-  /var/ossec/bin/wazuh-control status 2>&1 | head -10
+  /var/ossec/bin/wazuh-control status 2>&1 | head -8
 else
-  warn "no encontre wazuh-agent local"
+  warn "wazuh-manager local no detectado"
 fi
 
-sep "10. Ping a la VM manager"
-ping -c 2 -W 2 "$WAZUH_VM_SSH_HOST" 2>&1 | tail -5
-
-sep "10b. SSH port abierto?"
-nc -zvw3 "$WAZUH_VM_SSH_HOST" "$WAZUH_VM_SSH_PORT" 2>&1 || echo "puerto $WAZUH_VM_SSH_PORT cerrado/timed out"
-
-sep "11. SSH a la VM (solo check de pass, no hace nada)"
-if [ -z "$WAZUH_VM_SSH_PASS" ]; then
-  warn "WAZUH_VM_SSH_PASS no seteada, saltando ssh test"
-elif ! command -v sshpass >/dev/null; then
-  warn "sshpass no instalado, saltando ssh test"
+sep "8. Wazuh Manager API ($WAZUH_MANAGER_API_HOST:$WAZUH_MANAGER_API_PORT)"
+if [ -z "$WAZUH_MANAGER_API_PASS" ]; then
+  warn "WAZUH_MANAGER_API_PASS no seteada en .env, saltando prueba de API"
 else
-  sshpass -p "$WAZUH_VM_SSH_PASS" ssh \
-    -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-    -p "$WAZUH_VM_SSH_PORT" \
-    "$WAZUH_VM_SSH_USER@$WAZUH_VM_SSH_HOST" \
-    'echo SSH_OK; ls /var/ossec/etc/ossec.conf 2>&1; sudo -n true 2>&1 && echo SUDO_OK || echo SUDO_needs_tty' \
-    2>&1 | head -10
+  API_AUTH=$(curl -sS -m 5 -k -u "$WAZUH_MANAGER_API_USER:$WAZUH_MANAGER_API_PASS" \
+    "https://$WAZUH_MANAGER_API_HOST:$WAZUH_MANAGER_API_PORT/security/user/authenticate" 2>&1 || true)
+  if echo "$API_AUTH" | grep -q '"token"'; then
+    ok "Autenticación exitosa en Wazuh API (Token JWT obtenido)"
+  else
+    fail "Fallo al autenticar en Wazuh API: ${API_AUTH:0:200}"
+  fi
 fi
 
-sep "12. Estructura del repo"
-ls -la ~/Desktop/wazuh-waha/ 2>&1 | head -15
-ls -la ~/Desktop/wazuh-waha/relay/ 2>&1 | head -10
+sep "9. Dashboard Web (Puerto 8000)"
+DASH_HTTP=$(curl -s -m 3 -o /dev/null -w "%{http_code}" "http://127.0.0.1:8000/" 2>/dev/null || true)
+if [ "$DASH_HTTP" = "200" ]; then
+  ok "Dashboard Web disponible en http://localhost:8000 (HTTP 200)"
+else
+  warn "Dashboard Web respondió con HTTP $DASH_HTTP en puerto 8000"
+fi
 
 echo
-echo -e "${GRN}========== FIN DIAGNOSTICO ==========${NC}"
-echo "Pegame toda esta salida en el chat."
+echo -e "${GRN}========== FIN DIAGNÓSTICO ==========${NC}"
+echo "Estado general del stack verificado."

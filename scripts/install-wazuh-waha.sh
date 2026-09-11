@@ -12,7 +12,7 @@
 
 set -e
 
-PROJECT_ROOT="${PROJECT_ROOT:-$HOME/Desktop/wazuh-waha}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 echo "=== Verificando precondiciones ==="
 if [ ! -d "$PROJECT_ROOT" ]; then
@@ -77,8 +77,12 @@ echo "OK"
 echo "=== 3. Si hay override.conf de deploy/, instalarlo ==="
 OVERRIDE_SRC="$PROJECT_ROOT/deploy/arch-host/wazuh-waha.service.override.conf"
 if [ -f "$OVERRIDE_SRC" ]; then
-  sudo mkdir -p /etc/systemd/system/wazuh-waha.service.d
+  sudo mkdir -p /etc/systemd/system/wazuh-waha.service.d /etc/wazuh-waha
   install_unit "$OVERRIDE_SRC" /etc/systemd/system/wazuh-waha.service.d/override.conf
+  if [ -f "$PROJECT_ROOT/scripts/sync_relay_env.sh" ]; then
+    echo "  Sincronizando /etc/wazuh-waha/relay.env..."
+    sudo bash "$PROJECT_ROOT/scripts/sync_relay_env.sh" apply || echo "WARN: fallo sync_relay_env.sh"
+  fi
   sudo systemctl daemon-reload
   echo "Override instalado."
 else
