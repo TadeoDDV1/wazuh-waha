@@ -5,6 +5,7 @@ import { WazuhServicesCard } from './WazuhServicesCard';
 import { WazuhAgentsCard } from './WazuhAgentsCard';
 import { WazuhModulesControlCard } from './WazuhModulesControlCard';
 import { WhatsappCard } from './WhatsappCard';
+import { TelemetryGlobalCard } from './TelemetryGlobalCard';
 import {
   Loader2,
   AlertCircle,
@@ -49,6 +50,9 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '10px 0 40px' }}>
+      {/* ── 0. Telemetría en Vivo — Tráfico del Pipeline ── */}
+      <TelemetryGlobalCard />
+
       {/* ── 1. Resumen de Conexión Wazuh ── */}
       <WazuhServicesCard />
 

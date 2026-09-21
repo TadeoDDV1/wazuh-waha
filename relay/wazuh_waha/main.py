@@ -10,6 +10,7 @@ from . import __version__
 from .api.alerts import router as alerts_router
 from .api.dashboard import router as dashboard_router
 from .api.debug import router as debug_router
+from .api.telemetry import router as telemetry_router
 from .common.context import WORKER_ID
 from .common.logging import log
 from .config import settings
@@ -43,10 +44,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Api-Key"],
 )
 
 app.include_router(alerts_router)
 app.include_router(debug_router)
+app.include_router(telemetry_router)
 app.include_router(dashboard_router)

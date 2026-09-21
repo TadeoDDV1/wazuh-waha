@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from ..common.backup import save_alert_backup
 from ..common.context import WORKER_ID, record_recent
 from ..common.logging import log
+from ..common.telemetry import telemetry_store
 from ..config import settings
 from ..domain.pipeline import format_alert
 from ..infrastructure import waha_client
@@ -72,6 +73,14 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         record["decision"] = "format_error"
         record["error"] = str(e)
         _finish_record(record, alert)
+        # ── telemetría ──
+        import asyncio
+        asyncio.create_task(telemetry_store.record(
+            rule_id=rule_id, level=level,
+            agent_id=agent_id, agent_name=agent_name,
+            description=description, decision="format_error",
+            alert_timestamp=ts_alert,
+        ))
         raise HTTPException(status_code=500, detail="format error")
 
     record["decision"] = meta.get("decision", "?")
@@ -83,6 +92,14 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         )
         record["result"] = "deduped"
         _finish_record(record, alert)
+        # ── telemetría ──
+        import asyncio
+        asyncio.create_task(telemetry_store.record(
+            rule_id=rule_id, level=level,
+            agent_id=agent_id, agent_name=agent_name,
+            description=description, decision="deduped",
+            alert_timestamp=ts_alert,
+        ))
         return JSONResponse(status_code=200, content={"status": "deduped", "meta": meta})
 
     log.info(
@@ -99,6 +116,14 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         record["result"] = "waha_error"
         record["error"] = str(e)
         _finish_record(record, alert)
+        # ── telemetría ──
+        import asyncio
+        asyncio.create_task(telemetry_store.record(
+            rule_id=rule_id, level=level,
+            agent_id=agent_id, agent_name=agent_name,
+            description=description, decision="waha_error",
+            alert_timestamp=ts_alert,
+        ))
         raise HTTPException(status_code=502, detail=f"waha error: {e}")
 
     elapsed_ms = int((time.time() - t_start) * 1000)
@@ -111,6 +136,16 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
     record["waha_id"] = msg_id
     record["total_ms"] = elapsed_ms
     _finish_record(record, alert)
+
+    # ── telemetría ──
+    import asyncio
+    asyncio.create_task(telemetry_store.record(
+        rule_id=rule_id, level=level,
+        agent_id=agent_id, agent_name=agent_name,
+        description=description, decision="sent",
+        latency_ms=float(elapsed_ms),
+        alert_timestamp=ts_alert,
+    ))
 
     return {
         "status": "sent",

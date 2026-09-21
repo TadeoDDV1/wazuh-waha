@@ -5,7 +5,12 @@ from ..config import settings
 
 
 async def verify_api_key(request: Request) -> None:
-    key = request.headers.get("X-Api-Key") or request.headers.get("x-api-key")
+    # Header (REST normal) o query param (SSE — EventSource no permite headers custom)
+    key = (
+        request.headers.get("X-Api-Key")
+        or request.headers.get("x-api-key")
+        or request.query_params.get("api_key")
+    )
     if not key or key != settings.relay_api_key:
         log.warning(
             "auth_fail path=%s ip=%s",

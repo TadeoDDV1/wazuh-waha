@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { dashboardService } from '../services/api';
+import { useTelemetry } from '../hooks/useTelemetry';
 import {
   Sliders,
   CheckCircle2,
@@ -425,6 +426,15 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
+  // Telemetría en vivo filtrada por módulo
+  const { snapshot: telSnap, connected: telConnected } = useTelemetry();
+  const moduleAlerts = (telSnap?.alerts_live ?? []).filter(
+    (a) => a.module_id === moduleId
+  );
+  const moduleAlertsLast60s = moduleAlerts.filter(
+    (a) => Date.now() / 1000 - a.ts <= 60
+  ).length;
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -454,6 +464,88 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
     fetchData();
   }, [fetchData]);
 
+  // ── Sección de telemetría en vivo por módulo ──────────────────────────────
+  const LiveModuleSection = () => (
+    <div style={{
+      background: 'rgba(0,188,212,0.04)',
+      border: '1px solid rgba(0,188,212,0.12)',
+      borderRadius: '8px',
+      padding: '10px 12px',
+      marginBottom: '12px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '6px',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--cyan-accent)', display: 'flex', alignItems: 'center', gap: '5px', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          <Radio size={11} />
+          Tráfico en Vivo — {moduleId}
+        </span>
+        <span style={{
+          fontSize: '10px',
+          padding: '2px 7px',
+          borderRadius: '8px',
+          fontWeight: 700,
+          background: telConnected ? 'rgba(46,204,113,0.1)' : 'rgba(100,100,100,0.1)',
+          color: telConnected ? 'var(--green-healthy)' : 'var(--text-muted)',
+          border: `1px solid ${telConnected ? 'rgba(46,204,113,0.2)' : 'rgba(100,100,100,0.2)'}`,
+        }}>
+          {telConnected ? 'LIVE' : 'OFFLINE'}
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: '14px', fontSize: '11px' }}>
+        <span style={{ color: 'var(--text-secondary)' }}>
+          Alertas últimos 60s:&nbsp;
+          <strong style={{ color: moduleAlertsLast60s > 0 ? 'var(--cyan-accent)' : 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+            {moduleAlertsLast60s}
+          </strong>
+        </span>
+        <span style={{ color: 'var(--text-secondary)' }}>
+          En buffer:&nbsp;
+          <strong style={{ color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+            {moduleAlerts.length}
+          </strong>
+        </span>
+      </div>
+      {moduleAlerts.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+          {[...moduleAlerts].reverse().slice(0, 4).map((a, i) => {
+            const ago = Math.floor(Date.now() / 1000 - a.ts);
+            const agoStr = ago < 60 ? `${ago}s` : `${Math.floor(ago / 60)}m`;
+            return (
+              <div key={`${a.rule_id}-${a.ts}-${i}`} style={{
+                display: 'flex',
+                gap: '8px',
+                alignItems: 'baseline',
+                fontSize: '11px',
+                padding: '3px 0',
+                borderBottom: i < 3 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+              }}>
+                <span style={{ color: a.level >= 12 ? 'var(--red-error)' : a.level >= 8 ? 'var(--yellow-warning)' : 'var(--text-muted)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  L{a.level}
+                </span>
+                <span style={{ fontFamily: 'monospace', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                  #{a.rule_id}
+                </span>
+                <span style={{ color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                  {a.description}
+                </span>
+                <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                  {agoStr}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {moduleAlerts.length === 0 && (
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          Sin tráfico de este módulo en el buffer. En espera de alertas de Wazuh...
+        </span>
+      )}
+    </div>
+  );
+
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 0', color: 'var(--text-secondary)', fontSize: '12px' }}>
@@ -467,6 +559,7 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
     const list = Array.isArray(data) ? data : [];
     return (
       <div style={{ marginTop: '8px' }}>
+        <LiveModuleSection />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <FileSearch size={12} />
@@ -514,6 +607,7 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
     const list = Array.isArray(data) ? data : [];
     return (
       <div style={{ marginTop: '8px' }}>
+        <LiveModuleSection />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <ShieldCheck size={12} />
@@ -555,6 +649,7 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
     const ports = Array.isArray(data?.ports) ? data.ports : [];
     return (
       <div style={{ marginTop: '8px' }}>
+        <LiveModuleSection />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Cpu size={12} />
@@ -601,6 +696,7 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
     const list = Array.isArray(data) ? data : [];
     return (
       <div style={{ marginTop: '8px' }}>
+        <LiveModuleSection />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Search size={12} />
@@ -631,14 +727,17 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
   }
 
   return (
-    <div style={{ marginTop: '8px', padding: '10px 12px', background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-subtle)', fontSize: '12px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--green-healthy)' }}>
-        <CheckCircle2 size={14} />
-        <span>Supervisión activa en agente {selectedAgent}</span>
+    <div style={{ marginTop: '8px' }}>
+      <LiveModuleSection />
+      <div style={{ padding: '10px 12px', background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-subtle)', fontSize: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--green-healthy)' }}>
+          <CheckCircle2 size={14} />
+          <span>Supervisión activa en agente {selectedAgent}</span>
+        </div>
+        <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-secondary)' }}>
+          Las alertas y eventos de este módulo son capturados continuamente por el motor de análisis y correlacionadas en tiempo real.
+        </p>
       </div>
-      <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-secondary)' }}>
-        Las alertas y eventos de este módulo son capturados continuamente por el motor de análisis y correlacionadas en tiempo real.
-      </p>
     </div>
   );
 };

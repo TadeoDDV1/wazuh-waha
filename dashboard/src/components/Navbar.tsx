@@ -1,6 +1,7 @@
 import React from 'react';
 import '../App.css';
 import { useDashboardContext } from '../context/DashboardContext';
+import { useTelemetry } from '../hooks/useTelemetry';
 import {
   ShieldAlert,
   Activity,
@@ -42,6 +43,10 @@ export const Navbar: React.FC = () => {
     refresh,
     config,
   } = useDashboardContext();
+
+  // Telemetría en vivo para el badge de actividad en la navbar
+  const { snapshot: telSnap, connected: telConnected } = useTelemetry();
+  const alertsLast60s = telSnap?.kpis?.alerts_last_60s ?? 0;
 
   const components = status?.components || [];
   
@@ -119,15 +124,58 @@ export const Navbar: React.FC = () => {
               <span>{refreshing ? 'Actualizando...' : 'Refrescar'}</span>
             </button>
 
-            {/* Recent alerts trigger */}
+            {/* Recent alerts trigger — badge con telemetría en vivo */}
             <button
               className="nav-btn"
               onClick={() => setShowRecentAlerts(true)}
-              title="Ver alertas recientes recibidas por el relay"
+              title={`Ver alertas recientes · ${alertsLast60s} en los últimos 60s`}
+              style={{ position: 'relative' }}
             >
-              <Bell size={15} style={{ color: recentAlerts.length > 0 ? 'var(--cyan-accent)' : 'inherit' }} />
+              <Bell size={15} style={{ color: alertsLast60s > 0 ? 'var(--cyan-accent)' : recentAlerts.length > 0 ? 'var(--cyan-accent)' : 'inherit' }} />
               <span>Alertas ({recentAlerts.length})</span>
+              {alertsLast60s > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    background: 'var(--cyan-accent)',
+                    color: '#000',
+                    fontSize: '9px',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    padding: '1px 5px',
+                    lineHeight: 1.4,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {alertsLast60s}/60s
+                </span>
+              )}
             </button>
+
+            {/* Indicador LIVE en la navbar */}
+            {telConnected && (
+              <span
+                title="Telemetría en vivo conectada (SSE/polling)"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  color: 'var(--green-healthy)',
+                  background: 'rgba(46,204,113,0.1)',
+                  border: '1px solid rgba(46,204,113,0.2)',
+                  borderRadius: '10px',
+                  padding: '2px 8px',
+                  cursor: 'default',
+                }}
+              >
+                <Radio size={10} />
+                LIVE
+              </span>
+            )}
 
             {/* Settings button */}
             <button
