@@ -17,6 +17,7 @@ export const useDashboard = () => {
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(10_000); // 10s default
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [showRecentAlerts, setShowRecentAlerts] = useState<boolean>(false);
+  const [showTrafficTerminal, setShowTrafficTerminal] = useState<boolean>(false);
 
   // Fetch status, config and recent alerts
   const fetchData = useCallback(async (isBackground = false) => {
@@ -121,6 +122,8 @@ export const useDashboard = () => {
     setShowSettings,
     showRecentAlerts,
     setShowRecentAlerts,
+    showTrafficTerminal,
+    setShowTrafficTerminal,
     fetchData,
     toggleComponent,
     performAction,

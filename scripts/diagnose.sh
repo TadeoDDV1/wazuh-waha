@@ -159,12 +159,12 @@ else
   fi
 fi
 
-sep "9. Dashboard Web (Puerto 8000)"
-DASH_HTTP=$(curl -s -m 3 -o /dev/null -w "%{http_code}" "http://127.0.0.1:8000/" 2>/dev/null || true)
+sep "9. Dashboard Web (Puerto 8001)"
+DASH_HTTP=$(curl -s -m 3 -o /dev/null -w "%{http_code}" "http://127.0.0.1:8001/" 2>/dev/null || true)
 if [ "$DASH_HTTP" = "200" ]; then
-  ok "Dashboard Web disponible en http://localhost:8000 (HTTP 200)"
+  ok "Dashboard Web disponible en http://localhost:8001 (HTTP 200)"
 else
-  warn "Dashboard Web respondió con HTTP $DASH_HTTP en puerto 8000"
+  warn "Dashboard Web respondió con HTTP $DASH_HTTP en puerto 8001"
 fi
 
 echo

@@ -3,6 +3,46 @@
 Todos los cambios notables de este proyecto se documentan acá. Formato basado
 en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-09-22
+
+### Added
+- **Terminal de telemetría en vivo (pestaña en el navbar):** consola SSE con
+  tail inicial, pausa con cola de eventos, filtros por nivel/búsqueda,
+  auto-scroll, Test Event y vista JSON expandible.
+- **Fuente de tráfico multi-agente:** el host suele ser *agente*; el manager
+  está en la VM. `traffic_source=auto|local|ssh|api|off`:
+  - `local` — tail de `alerts.json` si el path existe y es legible;
+  - `api` — poll de la API del manager (`:55000`);
+  - `ssh` — poll de `alerts.json` en la VM (BatchMode, sin password en repo);
+  - journal JSONL compartido `traffic.jsonl` (`fcntl.flock`) para que
+    `/telemetry/traffic/tail` y SSE sean consistentes con `--workers 2`.
+- Endpoint `GET /api/v1/telemetry/traffic/source` (fuente activa + journal).
+- Rate limiting simple por IP en el relay (429): `/alerts` 120/min,
+  telemetría 600/min, resto 300/min.
+- `ALLOWED_ORIGINS` configurable (dev Vite + nginx `:8001`).
+
+### Fixed
+- **API key hardcodeada** eliminada de `nginx.conf` y de los fallbacks del
+  frontend (`api.ts`, `telemetryService.ts`). En prod el browser manda
+  `?api_key=` (SSE) o `X-Api-Key` (REST) desde `VITE_RELAY_API_KEY`.
+- **`_fail_window` multi-worker:** contador de fallos WAHA persistido en
+  `fail_state.json` con `flock` (fix documentado en `docs/multi-worker.md`).
+- **Password SSH por defecto** eliminada de `tests/test_traffic_detection.py`.
+- **CORS** ya no solo `localhost:5173`; ahora incluye `:8001` y es configurable.
+- **Watchdog unit:** paths con placeholders `<REEMPLAZAR_PROYECTO>` (no
+  hardcodeados a `/home/tadeo/...`).
+- **Puerto dashboard** unificado en scripts/docs a **8001** (compose ya usaba
+  8001 tras el cambio previo).
+- **nginx SSE:** `proxy_buffering off`, HTTP/1.1, `Connection ""` para
+  Server-Sent Events sin cortes detrás del reverse proxy.
+- **Versión unificada** en `0.4.0` (`__version__`, `pyproject.toml`, CHANGELOG).
+
+### Changed
+- `LiveTrafficTerminal` acepta `asPanel` (pestaña principal) y reconecta SSE
+  con backoff exponencial + jitter.
+- `record_manual_event(..., source=...)` etiqueta el origen (`relay`,
+  `simulate`, `local`, `ssh`, `api`) en cada evento de la terminal.
+
 ## [0.3.1] - 2026-06-16
 
 ### Fixed

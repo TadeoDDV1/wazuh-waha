@@ -2,7 +2,8 @@ import axios from 'axios';
 import type { StatusResponse, ConfigResponse, ToggleAction, ActionRequest, ApiResponse } from '../types/dashboard';
 
 const API_URL = import.meta.env.DEV ? (import.meta.env.VITE_API_URL || 'http://localhost:8765') : '';
-const RELAY_API_KEY = import.meta.env.VITE_RELAY_API_KEY || 'f7b6d3906106ef820179e853768b8db23cb119690030d103';
+// Sin fallback hardcodeado: en dev debe existir VITE_RELAY_API_KEY en dashboard/.env
+const RELAY_API_KEY = import.meta.env.VITE_RELAY_API_KEY || '';
 
 const api = axios.create({
   baseURL: `${API_URL}/api/v1/dashboard`,

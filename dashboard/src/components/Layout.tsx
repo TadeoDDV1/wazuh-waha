@@ -4,17 +4,26 @@ import Navbar from './Navbar';
 import Dashboard from './Dashboard';
 import RecentAlertsDrawer from './RecentAlertsDrawer';
 import SettingsSection from './SettingsSection';
+import LiveTrafficTerminal from './LiveTrafficTerminal';
 import { Toaster } from 'sonner';
 import { useDashboardContext } from '../context/DashboardContext';
 import './Layout.css';
 
 const LayoutContent: React.FC = () => {
-  const { showSettings } = useDashboardContext();
+  const { showSettings, showTrafficTerminal, setShowTrafficTerminal } = useDashboardContext();
   return (
     <div className="app-layout">
       <Navbar />
       <main className="app-main">
-        <Dashboard />
+        {showTrafficTerminal ? (
+          <LiveTrafficTerminal
+            isOpen
+            onClose={() => setShowTrafficTerminal(false)}
+            asPanel
+          />
+        ) : (
+          <Dashboard />
+        )}
       </main>
       <RecentAlertsDrawer />
       {showSettings && <SettingsSection />}

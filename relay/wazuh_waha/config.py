@@ -31,7 +31,20 @@ class Settings(BaseSettings):
     # --- Server Wazuh (manager) ---
     wazuh_server_ip: str = "192.168.1.72"
     wazuh_server_ip_fallback: str = ""
+    wazuh_alerts_json_path: str = "/var/ossec/logs/alerts/alerts.json"
     auto_reconcile: bool = False
+
+    # --- Telemetría / terminal de tráfico en vivo ---
+    # auto = local si el path existe; si no, SSH a la VM; si no, API manager
+    traffic_source: str = "auto"  # auto | local | ssh | api | off
+    traffic_poll_interval_sec: float = 1.5
+    traffic_journal_path: str = ""  # vacío = <relay_lib_dir>/traffic.jsonl
+    # SSH a la VM manager (para leer alerts.json remoto cuando el host es agente)
+    wazuh_vm_ssh_user: str = "wazuh"
+    wazuh_vm_ssh_port: int = 22
+    wazuh_vm_ssh_key_path: str = ""  # vacío = ssh default (~/.ssh/id_*)
+    # CORS extra para dashboard (dev vite + nginx de prod)
+    allowed_origins: str = "http://localhost:5173,http://localhost:8001,http://127.0.0.1:5173"
 
     # --- WhatsApp destino ---
     admin_phone: str = ""  # formato: 5219991234567 (sin +)
@@ -90,6 +103,16 @@ class Settings(BaseSettings):
     @property
     def dedup_state_file(self) -> Path:
         return Path(self.relay_lib_dir) / "dedup_state.json"
+
+    @property
+    def traffic_journal_file(self) -> Path:
+        if self.traffic_journal_path:
+            return Path(self.traffic_journal_path)
+        return Path(self.relay_lib_dir) / "traffic.jsonl"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
 
 settings = Settings()

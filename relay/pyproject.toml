@@ -1,6 +1,6 @@
 [project]
 name = "wazuh-waha"
-version = "0.3.0"
+version = "0.4.0"
 description = "Bridge entre Wazuh manager y WAHA (WhatsApp HTTP API). Multi-worker safe."
 requires-python = ">=3.11"
 dependencies = [

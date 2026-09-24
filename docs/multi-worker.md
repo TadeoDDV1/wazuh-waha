@@ -51,13 +51,17 @@ uvicorn incluye en el log message).
 - **`_recent` (deque)**: buffer circular de últimas 50 alertas. Con 2
   workers, cada uno tiene su propio buffer de 50, así que en `/debug/recent`
   vas a ver hasta 100 alertas (50 de cada uno). No es bug, es feature.
-- **`_fail_window` (en waha_client)**: counter de fallos de WAHA. Cada
-  worker tiene el suyo. Si 4 alertas consecutivas fallan en worker 1 y
-  worker 2 también falla 4, el umbral de CRITICAL (5 en 60s) no se dispara
-  en ninguno de los dos.
+- **`_fail_window` (en waha_client)**: counter de fallos de WAHA.
+  **Implementado (0.4.0):** se persiste en `fail_state.json` con
+  `fcntl.flock`, igual que dedup. El umbral CRITICAL (5 en 60s) es
+  consistente entre workers.
 
-  **Fix futuro (no implementado en este alcance):** mover `_fail_window` a
-  un archivo `fail_state.json` con `fcntl.flock`, igual que dedup.
+### Tráfico en vivo / terminal
+
+- Journal compartido `traffic.jsonl` (`fcntl.flock`) bajo `RELAY_LIB_DIR`.
+- `/api/v1/telemetry/traffic/tail` lee el journal (consistente entre workers).
+- Solo un worker (leader via lock) corre las fuentes externas (local/ssh/api)
+  para no duplicar polls; todos los workers hacen broadcast SSE del journal.
 
 ## Cómo saber cuántos workers están corriendo
 

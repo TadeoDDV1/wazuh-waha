@@ -1,7 +1,10 @@
 import asyncio
+import fcntl
+import json
 import logging
 import time
 from collections import deque
+from pathlib import Path
 from threading import Lock
 
 import httpx
@@ -16,6 +19,49 @@ _fail_lock = Lock()
 FAIL_THRESHOLD = 5
 FAIL_WINDOW_SEC = 60
 
+
+def _fail_state_path() -> Path:
+    return Path(settings.relay_lib_dir) / "fail_state.json"
+
+
+def _load_fail_window() -> deque[float]:
+    path = _fail_state_path()
+    window: deque[float] = deque(maxlen=20)
+    if not path.exists():
+        return window
+    try:
+        with open(path, "rb") as fd:
+            fcntl.flock(fd.fileno(), fcntl.LOCK_SH)
+            try:
+                data = json.loads(fd.read().decode("utf-8") or "[]")
+            finally:
+                fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
+        now = time.time()
+        for ts in data:
+            if now - float(ts) <= FAIL_WINDOW_SEC:
+                window.append(float(ts))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return window
+
+
+def _save_fail_window(window: deque[float]) -> None:
+    path = _fail_state_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(list(window)).encode("utf-8")
+        with open(path, "rb+") as fd:
+            fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
+            try:
+                fd.seek(0)
+                fd.truncate()
+                fd.write(payload)
+                fd.flush()
+            finally:
+                fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
+    except OSError as e:
+        log.warning("fail_state_write_error err=%s", e)
+
 _recovery_lock = asyncio.Lock()
 _recovery_in_progress = False
 _recovery_last_attempt: float = 0.0
@@ -28,15 +74,17 @@ class WAHAError(Exception):
 def _record_failure() -> int:
     with _fail_lock:
         now = time.time()
-        _fail_window.append(now)
-        while _fail_window and now - _fail_window[0] > FAIL_WINDOW_SEC:
-            _fail_window.popleft()
-        return len(_fail_window)
+        window = _load_fail_window()
+        window.append(now)
+        while window and now - window[0] > FAIL_WINDOW_SEC:
+            window.popleft()
+        _save_fail_window(window)
+        return len(window)
 
 
 def _reset_failures() -> None:
     with _fail_lock:
-        _fail_window.clear()
+        _save_fail_window(deque(maxlen=20))
 
 
 def _check_failure_threshold(count: int) -> None:

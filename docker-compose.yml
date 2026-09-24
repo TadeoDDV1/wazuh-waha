@@ -38,7 +38,7 @@ services:
     container_name: wazuh-waha-dashboard
     restart: unless-stopped
     ports:
-      - "8000:80"
+      - "8001:80"
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

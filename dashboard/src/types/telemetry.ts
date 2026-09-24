@@ -48,3 +48,36 @@ export interface TelemetrySnapshot {
   top_agents: TopAgentEntry[];
   top_modules: TopModuleEntry[];
 }
+
+export interface TrafficEvent {
+  id: string;
+  timestamp: string;
+  rule_id: string;
+  level: number;
+  description: string;
+  agent_id: string;
+  agent_name: string;
+  src_ip?: string;
+  src_port?: string;
+  src_user?: string;
+  dst_user?: string;
+  command?: string;
+  location?: string;
+  mitre_ids?: string[];
+  mitre_tactics?: string[];
+  mitre_techniques?: string[];
+  full_log?: string;
+  groups?: string[];
+  source?: string;
+  raw_json?: Record<string, unknown> | null;
+}
+
+export interface TrafficSourceInfo {
+  mode: string;
+  resolved: string;
+  is_leader: boolean;
+  journal: string;
+  buffer_size: number;
+  pid: number;
+}
+

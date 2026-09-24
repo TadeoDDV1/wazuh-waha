@@ -67,6 +67,6 @@ fi
 echo ""
 echo "========================================================"
 echo " Sincronizacion completada con exito."
-echo " Dashboard disponible en: http://localhost:8000"
+echo " Dashboard disponible en: http://localhost:8001"
 echo " Wazuh Oficial UI en:    https://$SERVER_IP"
 echo "========================================================"

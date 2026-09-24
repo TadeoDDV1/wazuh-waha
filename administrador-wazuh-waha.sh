@@ -224,9 +224,9 @@ estado_servicios() {
         echo -e "${ROJO}[SIN RESPUESTA]${NC}"
     fi
 
-    # Dashboard Web HTTP :8000
-    printf "  %-40s" "• Dashboard Web (:8000)"
-    if curl -sS -m 3 "http://localhost:8000/" >/dev/null 2>&1; then
+    # Dashboard Web HTTP :8001
+    printf "  %-40s" "• Dashboard Web (:8001)"
+    if curl -sS -m 3 "http://localhost:8001/" >/dev/null 2>&1; then
         echo -e "${VERDE}[DISPONIBLE]${NC}"
     else
         echo -e "${ROJO}[SIN RESPUESTA]${NC}"
@@ -320,11 +320,11 @@ diagnostico() {
     fi
 
     # 7. Dashboard Nginx
-    echo -e "\n  ${AMARILLO}▸ 7/8 Dashboard SOC Web (:8000)${NC}"
-    if curl -s -m 3 "http://localhost:8000/" | grep -qi "Wazuh"; then
-        ok "Dashboard Web sirviendo interfaz correctamente en http://localhost:8000"
+    echo -e "\n  ${AMARILLO}▸ 7/8 Dashboard SOC Web (:8001)${NC}"
+    if curl -s -m 3 "http://localhost:8001/" | grep -qi "Wazuh"; then
+        ok "Dashboard Web sirviendo interfaz correctamente en http://localhost:8001"
     else
-        fail "Dashboard Web no accesible en puerto 8000"
+        fail "Dashboard Web no accesible en puerto 8001"
     fi
 
     # 8. Script de diagnóstico heredado si existe
@@ -779,7 +779,7 @@ menu_notificaciones() {
                     echo -e "  ${AMARILLO}[!] qrencode no está instalado para renderizar en terminal.${NC}"
                     echo -e "  Texto del QR: ${CYAN}$raw_qr${NC}"
                     echo -e "\n  También puedes escanearlo cómodamente abriendo el Dashboard:"
-                    echo -e "  👉 ${BLANCO}http://${WAZUH_SERVER_IP}:8000/${NC}"
+                    echo -e "  👉 ${BLANCO}http://${WAZUH_SERVER_IP}:8001/${NC}"
                 fi
             else
                 local status_msg

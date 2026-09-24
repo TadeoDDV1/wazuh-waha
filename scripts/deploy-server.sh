@@ -392,9 +392,9 @@ else
 fi
 
 # Test 3: Dashboard Nginx
-printf "  %-45s" "• Dashboard SOC Web (Puerto 8000)"
-if curl -s -m 3 "http://127.0.0.1:8000/" >/dev/null 2>&1; then
-    echo -e "${VERDE}[OK]${NC} (Accesible en http://localhost:8000/)"
+printf "  %-45s" "• Dashboard SOC Web (Puerto 8001)"
+if curl -s -m 3 "http://127.0.0.1:8001/" >/dev/null 2>&1; then
+    echo -e "${VERDE}[OK]${NC} (Accesible en http://localhost:8001/)"
 else
     echo -e "${AMARILLO}[NO RESPONDE]${NC}"
 fi

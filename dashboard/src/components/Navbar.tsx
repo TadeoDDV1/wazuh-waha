@@ -17,7 +17,8 @@ import {
   Server,
   Radio,
   Clock,
-  ExternalLink
+  ExternalLink,
+  TerminalSquare,
 } from 'lucide-react';
 
 function formatUptime(sec: number): string {
@@ -40,6 +41,8 @@ export const Navbar: React.FC = () => {
     setAutoRefreshInterval,
     setShowSettings,
     setShowRecentAlerts,
+    showTrafficTerminal,
+    setShowTrafficTerminal,
     refresh,
     config,
   } = useDashboardContext();
@@ -176,6 +179,30 @@ export const Navbar: React.FC = () => {
                 LIVE
               </span>
             )}
+
+            <button
+              className="nav-btn"
+              style={{ position: 'relative', ...(showTrafficTerminal ? { borderColor: 'var(--cyan-accent)', color: 'var(--cyan-accent)' } : {}) }}
+              onClick={() => setShowTrafficTerminal(!showTrafficTerminal)}
+              title="Terminal de telemetría y tráfico Wazuh en vivo"
+            >
+              <TerminalSquare size={15} />
+              <span>Terminal</span>
+              {telConnected && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    background: 'var(--green-healthy)',
+                    pointerEvents: 'none',
+                  }}
+                />
+              )}
+            </button>
 
             {/* Settings button */}
             <button

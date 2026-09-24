@@ -8,6 +8,7 @@ from ..common.backup import save_alert_backup
 from ..common.context import WORKER_ID, record_recent
 from ..common.logging import log
 from ..common.telemetry import telemetry_store
+from ..common.traffic_stream import traffic_watcher
 from ..config import settings
 from ..domain.pipeline import format_alert
 from ..infrastructure import waha_client
@@ -54,6 +55,12 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         "alert_received rule_id=%s level=%d agent_id=%s agent=%s desc=%r body_bytes=%d worker=%s",
         rule_id, level, agent_id, agent_name, description, len(body_bytes), WORKER_ID,
     )
+
+    # Difundir evento al stream de tráfico en vivo (journal + SSE)
+    try:
+        traffic_watcher.record_manual_event(alert, source="relay")
+    except Exception as _tw_err:
+        log.debug("Error registrando alerta en traffic_watcher: %s", _tw_err)
 
     record = {
         "ts": time.time(),
