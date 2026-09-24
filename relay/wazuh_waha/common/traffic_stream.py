@@ -384,7 +384,9 @@ class TrafficStreamWatcher:
                 await asyncio.sleep(2.0)
                 continue
             try:
-                file_obj = await asyncio.to_thread(open, path, "r", "utf-8", "ignore")
+                file_obj = await asyncio.to_thread(
+                    open, path, mode="r", encoding="utf-8", errors="ignore"
+                )
                 file_obj.seek(0, os.SEEK_END)
                 last_ino = os.fstat(file_obj.fileno()).st_ino
                 while self._running and self._is_leader:
