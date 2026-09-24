@@ -353,20 +353,25 @@ class TrafficStreamWatcher:
         if mode == "off":
             return "off"
         if mode == "local":
-            return "local" if Path(settings.wazuh_alerts_json_path).exists() else "off"
+            try:
+                local_path = Path(settings.wazuh_alerts_json_path)
+                return "local" if local_path.is_file() and os.access(local_path, os.R_OK) else "off"
+            except (PermissionError, OSError, Exception):
+                return "off"
         if mode == "ssh":
             return "ssh"
         if mode == "api":
             return "api"
         # auto
-        local_path = Path(settings.wazuh_alerts_json_path)
-        if local_path.exists() and os.access(local_path, os.R_OK):
-            try:
+        try:
+            local_path = Path(settings.wazuh_alerts_json_path)
+            if local_path.is_file() and os.access(local_path, os.R_OK):
                 with open(local_path, "rb") as f:
                     f.read(1)
                 return "local"
-            except OSError:
-                pass
+        except (PermissionError, OSError, Exception):
+            pass
+
         host = settings.wazuh_manager_host or settings.wazuh_server_ip
         if settings.wazuh_manager_api_pass and host:
             return "api"

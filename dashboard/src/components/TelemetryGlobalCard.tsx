@@ -12,6 +12,7 @@
 
 import React, { useState } from 'react';
 import { useTelemetry } from '../hooks/useTelemetry';
+import { useDashboardContext } from '../context/DashboardContext';
 import type { LiveAlertEntry } from '../types/telemetry';
 import {
   Radio,
@@ -24,6 +25,7 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronRight,
+  TerminalSquare,
 } from 'lucide-react';
 
 /* ── Utilidades ─────────────────────────────────────────────────────────── */
@@ -213,6 +215,7 @@ const AlertRow: React.FC<{ alert: LiveAlertEntry }> = ({ alert }) => (
 /* ── Main Component ──────────────────────────────────────────────────────── */
 export const TelemetryGlobalCard: React.FC = () => {
   const { snapshot, connected, mode, error } = useTelemetry();
+  const { setShowTrafficTerminal } = useDashboardContext();
   const [expanded, setExpanded] = useState(true);
   const [showFeed, setShowFeed] = useState(false);
 
@@ -295,7 +298,34 @@ export const TelemetryGlobalCard: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowTrafficTerminal(true);
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.2), rgba(59, 130, 246, 0.25))',
+              border: '1px solid var(--cyan-accent)',
+              borderRadius: '8px',
+              color: '#00e5ff',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 0 14px rgba(0, 229, 255, 0.25)',
+              transition: 'all 0.2s ease',
+            }}
+            title="Abrir terminal interactiva de tráfico Wazuh en vivo"
+          >
+            <TerminalSquare size={15} />
+            <span>Abrir Terminal en Vivo</span>
+          </button>
+
           {snapshot && (
             <span style={{ fontFamily: 'monospace', fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '-0.02em' }}>
               {sparkStr}
@@ -426,6 +456,69 @@ export const TelemetryGlobalCard: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Banner de acceso directo a la Terminal de Tráfico */}
+          <div
+            style={{
+              background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.08), rgba(59, 130, 246, 0.12))',
+              border: '1px solid rgba(0, 229, 255, 0.3)',
+              borderRadius: '10px',
+              padding: '12px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
+                  background: 'rgba(0, 229, 255, 0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--cyan-accent)',
+                }}
+              >
+                <TerminalSquare size={18} />
+              </div>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Consola de Tráfico SOC en Tiempo Real
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                  Inspecciona payloads JSON completos, filtra por IP/MITRE, pausa y analiza todo el flujo de eventos de Wazuh.
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowTrafficTerminal(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 16px',
+                background: 'var(--cyan-accent)',
+                color: '#040d1a',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: '0 0 12px rgba(0, 229, 255, 0.4)',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <TerminalSquare size={14} />
+              <span>Ver Terminal Completa</span>
+            </button>
           </div>
 
           {/* Feed de alertas en vivo */}

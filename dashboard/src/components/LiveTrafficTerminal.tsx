@@ -19,6 +19,7 @@ import {
   Minimize2,
   X,
   ArrowDown,
+  ArrowLeft,
   Zap,
   ChevronRight,
   ChevronDown,
@@ -325,6 +326,33 @@ export const LiveTrafficTerminal: React.FC<LiveTrafficTerminalProps> = ({
       {/* ── Titlebar ── */}
       <div className="terminal-titlebar">
         <div className="terminal-titlebar-left">
+          {asPanel && (
+            <button
+              type="button"
+              className="terminal-back-btn"
+              onClick={onClose}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'rgba(255, 255, 255, 0.08)',
+                border: '1px solid var(--border-card)',
+                color: 'var(--text-primary)',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                marginRight: '6px',
+                transition: 'all 0.2s',
+              }}
+              title="Volver a la vista del Dashboard"
+            >
+              <ArrowLeft size={13} />
+              <span>Dashboard</span>
+            </button>
+          )}
+
           {!asPanel && (
             <div className="terminal-window-dots">
               <button className="terminal-dot close" onClick={onClose} title="Cerrar terminal" />

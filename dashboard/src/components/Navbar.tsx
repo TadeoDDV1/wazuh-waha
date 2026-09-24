@@ -101,6 +101,79 @@ export const Navbar: React.FC = () => {
             </div>
           )}
 
+          {/* Navigation View Tabs (Dashboard vs Live Traffic Terminal) */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(6, 11, 25, 0.75)',
+              padding: '4px',
+              borderRadius: '10px',
+              border: '1px solid var(--border-card)',
+            }}
+          >
+            <button
+              type="button"
+              className={`nav-tab-btn ${!showTrafficTerminal ? 'active' : ''}`}
+              onClick={() => setShowTrafficTerminal(false)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: !showTrafficTerminal ? 700 : 500,
+                border: !showTrafficTerminal ? '1px solid var(--cyan-accent)' : '1px solid transparent',
+                background: !showTrafficTerminal ? 'rgba(0, 229, 255, 0.18)' : 'transparent',
+                color: !showTrafficTerminal ? 'var(--cyan-accent)' : 'var(--text-secondary)',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <Activity size={14} />
+              <span>Dashboard SOC</span>
+            </button>
+
+            <button
+              type="button"
+              className={`nav-tab-btn ${showTrafficTerminal ? 'active' : ''}`}
+              onClick={() => setShowTrafficTerminal(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: 700,
+                border: showTrafficTerminal ? '1px solid #00e5ff' : '1px solid rgba(0, 229, 255, 0.4)',
+                background: showTrafficTerminal
+                  ? 'linear-gradient(135deg, rgba(0, 229, 255, 0.3), rgba(59, 130, 246, 0.35))'
+                  : 'rgba(0, 229, 255, 0.08)',
+                color: showTrafficTerminal ? '#00e5ff' : '#67e8f9',
+                boxShadow: showTrafficTerminal ? '0 0 16px rgba(0, 229, 255, 0.4)' : 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              title="Abrir Terminal de Telemetría y Tráfico Wazuh en Vivo"
+            >
+              <TerminalSquare size={14} style={{ color: '#00e5ff' }} />
+              <span>Terminal de Tráfico (LIVE)</span>
+              <span
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: telConnected ? 'var(--green-healthy)' : 'var(--yellow-warning)',
+                  display: 'inline-block',
+                  animation: telConnected ? 'pulse 2s infinite' : 'none',
+                }}
+              />
+            </button>
+          </div>
+
           {/* Actions & controls */}
           <div className="navbar-actions">
             {/* Auto refresh dropdown */}
