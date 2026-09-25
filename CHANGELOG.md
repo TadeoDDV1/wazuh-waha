@@ -3,6 +3,32 @@
 Todos los cambios notables de este proyecto se documentan acá. Formato basado
 en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- **Build del dashboard:** nuevo `dashboard/.dockerignore` (excluye
+  `node_modules`, `dist`, `.env` y logs del contexto de build), Dockerfile con
+  `npm ci` y build arg `VITE_RELAY_API_KEY`. Antes el bundle de prod se
+  construía sin la key → 401 en todos los endpoints del relay.
+- `docker-compose.yml` inyecta `VITE_RELAY_API_KEY` desde `RELAY_API_KEY`
+  (fuente única de la key).
+- `dashboard/.env` local: `VITE_RELAY_API_KEY` desactualizada (daba 401 contra
+  el relay en `npm run dev`).
+- `dashboard/package-lock.json` ahora se trackea (el `.gitignore` raíz solo
+  ignora el lock de la raíz).
+- README: troubleshooting del build del dashboard (disco lleno, caché de
+  BuildKit corrupta, warning de Bake sin buildx).
+
+### Removed
+- `.hermes/` (planes de trabajo viejos) y `_archive/` (código legacy).
+- `administrador-wazuh-waha.sh` (duplicado byte a byte de `admin.sh`).
+- `monitor.sh` y `logs.sh` (redundantes con las opciones de `admin.sh`).
+- Artefactos locales: `dashboard/dist/`, `dashboard/dashboard.log`,
+  `.pytest_cache/`, `__pycache__/` de `manager-side/custom/`.
+
+### Added
+- `relay/uv.lock` trackeado (builds del relay reproducibles con `uv sync`).
+
 ## [0.4.0] - 2026-09-22
 
 ### Added

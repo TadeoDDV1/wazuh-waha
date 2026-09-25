@@ -35,6 +35,9 @@ services:
   dashboard:
     build:
       context: ./dashboard
+      args:
+        # El bundle del dashboard debe llevar la misma key que acepta el relay
+        VITE_RELAY_API_KEY: ${RELAY_API_KEY:-}
     container_name: wazuh-waha-dashboard
     restart: unless-stopped
     ports:

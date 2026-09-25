@@ -1,0 +1,15 @@
+# Excluye artefactos locales y secrets del build context
+node_modules
+dist
+dist-ssr
+*.log
+.env
+.env.*
+*.local
+.git
+.gitignore
+.vscode
+.idea
+Dockerfile
+.dockerignore
+README.md

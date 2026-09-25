@@ -79,6 +79,30 @@ bash scripts/recover-waha.sh
 bash scripts/diagnose.sh
 ```
 
+## Problemas del build del dashboard
+
+Si `docker compose build` falla con `/app/dist: not found`,
+`no space left on device` o el aviso
+`Bake, but buildx isn't installed`:
+
+```bash
+# 1. Espacio: Docker no vive en / — revisar su root real
+docker info --format '{{.DockerRootDir}}' | xargs df -h
+
+# 2. Caché de build corrupta (rebuild limpio)
+docker compose build --no-cache dashboard
+#    o: docker builder prune -af
+
+# 3. Si el warning de Bake/buildx molesta (el build aun funciona):
+#    instalar docker-buildx-plugin o exportar COMPOSE_BAKE=false
+```
+
+Notas del build:
+- El build inyecta `VITE_RELAY_API_KEY` desde `RELAY_API_KEY` del `.env` raíz
+  (misma key que valida el relay). `dashboard/.env` solo se usa en `npm run dev`.
+- `dashboard/package-lock.json` está trackeado: `npm ci` es reproducible.
+
+
 ## Estructura del proyecto
 
 ```
@@ -101,10 +125,7 @@ wazuh-waha/                       ← repo root
 ├── deploy/                       # config específica por host
 │   ├── arch-host/                # systemd override + env file para este host
 │   └── vm-manager/               # scripts para la VM del manager
-├── tests/                        # tests del relay
-└── _archive/                     # código legacy (no se deploya)
-    ├── whatsapp_alert.py         # versión vieja del relay, reemplazada
-    └── wazuh-integration/         # carpeta del proyecto original (vacía)
+└── tests/                        # tests del relay
 ```
 
 ## Documentación

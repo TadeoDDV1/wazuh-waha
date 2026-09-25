@@ -53,8 +53,8 @@ Thumbs.db
 # Node (dashboard)
 node_modules/
 
-# Root artifacts accidentales
-package-lock.json
+# Root artifacts accidentales (solo en la raíz; el del dashboard sí se trackea)
+/package-lock.json
 
 # Cache local de Wazuh (no es parte del repo)
 .sixth/
