@@ -18,6 +18,15 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ignora el lock de la raíz).
 - README: troubleshooting del build del dashboard (disco lleno, caché de
   BuildKit corrupta, warning de Bake sin buildx).
+- `admin.sh` restaurado como archivo regular: era un symlink a
+  `administrador-wazuh-waha.sh`, que se eliminó en la limpieza anterior
+  (symlink colgado).
+- `admin.sh`: detección automática de contexto Docker (inyecta
+  `--context default` si los contenedores viven ahí). Antes los contenedores
+  se veían "detenidos" con el contexto activo equivocado.
+- `admin.sh`: `instalar_herramientas` y "limpiar paquetes obsoletos"
+  multi-distro (pacman / apt-get / dnf). Antes solo existía apt-get (no-op en
+  hosts Arch).
 
 ### Removed
 - `.hermes/` (planes de trabajo viejos) y `_archive/` (código legacy).
@@ -28,6 +37,23 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - `relay/uv.lock` trackeado (builds del relay reproducibles con `uv sync`).
+- **`admin.sh` ampliado** (nuevo reemplazo del script borrado):
+  - Reinicio individual de Wazuh Manager / Indexer / Dashboard (opciones 3-5
+    del menú 11): local si la unidad existe, si no en la VM del Manager por
+    SSH (clave → `sshpass` con `WAZUH_VM_SSH_PASS` → interactivo con TTY).
+  - Opción 6 del menú 11: vista de estado Wazuh local/VM con uptime y disco
+    de la VM (una sola conexión SSH por consulta).
+  - Reinicio individual de los contenedores WAHA y Dashboard Web
+    (opciones 7-8 del menú 11); el menú pasó de 11 a 16 opciones.
+  - Estado de servicios con etiquetas `[ACTIVO]` local / `(VM)` /
+    `[VM SIN ACCESO]` en lugar de "no encontrado" engañoso.
+  - Opción 17 del menú principal: visualización de credenciales del stack
+    con confirmación (`.env`, `/etc/wazuh-waha/relay.env`, 
+    `manager-side/wsl-relay.conf`).
+  - Respaldo de la sesión WAHA (volumen `wazuh_waha_sessions`) como tipo de
+    respaldo en `backups/`.
+  - Reinicio maestro actualizado para incluir los servicios Wazuh de la VM
+    (modo batch, sin prompts).
 
 ## [0.4.0] - 2026-09-22
 
