@@ -20,7 +20,7 @@
 #  14) Instalar / actualizar herramientas del sistema
 #  15) Ver registro de auditoría (admin-wazuh-waha.log)
 #  16) Ejecutar mantenimiento y diagnóstico completo
-#  17) Ver credenciales y contraseñas del stack (con confirmación)
+#  17) Ver credenciales de acceso a Wazuh (API + SSH, con confirmación)
 #  18) Salir
 # ==============================================================================
 
@@ -1528,13 +1528,13 @@ ejecutar_todo() {
 }
 
 # ==============================================================================
-# 17. VER CREDENCIALES Y SECRETOS DEL STACK
+# 17. VER CREDENCIALES DE ACCESO A WAZUH
 # ==============================================================================
 ver_credenciales() {
     limpiar
-    titulo "CREDENCIALES Y SECRETOS DEL STACK"
+    titulo "CREDENCIALES DE ACCESO A WAZUH"
 
-    warn "Se mostrarán API keys y contraseñas EN CLARO en la pantalla."
+    warn "Se mostrará la contraseña de la API de Wazuh EN CLARO en la pantalla."
     read -rp "  ¿Desea continuar? (s/n): " c_sec
     if [ "$c_sec" != "s" ] && [ "$c_sec" != "S" ]; then
         info "Operación cancelada."
@@ -1552,69 +1552,18 @@ ver_credenciales() {
         fi
     }
 
-    echo -e "\n  ${BLANCO}── Relay / Pipeline (.env) ──${NC}"
-    sec "RELAY_API_KEY (X-Api-Key)"        "${RELAY_API_KEY:-}"
-    sec "WAHA_API_KEY"                     "${WAHA_API_KEY:-}"
-    sec "ADMIN_PHONE (destino WhatsApp)"   "${ADMIN_PHONE:-}"
-    sec "ADMIN_EMAIL"                      "${ADMIN_EMAIL:-}"
+    echo -e "\n  ${BLANCO}── Wazuh Manager API ──${NC}"
+    sec "URL"                              "https://${WAZUH_SERVER_IP:-}:${WAZUH_MANAGER_API_PORT}"
+    sec "Usuario"                          "${WAZUH_MANAGER_API_USER:-wazuh}"
+    sec "Password"                         "${WAZUH_MANAGER_API_PASS:-}"
 
-    echo -e "\n  ${BLANCO}── Wazuh Manager API (.env) ──${NC}"
-    sec "WAZUH_MANAGER_API_USER"           "${WAZUH_MANAGER_API_USER:-}"
-    sec "WAZUH_MANAGER_API_PASS"           "${WAZUH_MANAGER_API_PASS:-}"
-    sec "WAZUH_SERVER_IP"                  "${WAZUH_SERVER_IP:-}"
-
-    echo -e "\n  ${BLANCO}── Dashboard Web / Swagger (.env) ──${NC}"
-    sec "WAHA_DASHBOARD_USERNAME"          "${WAHA_DASHBOARD_USERNAME:-}"
-    sec "WAHA_DASHBOARD_PASSWORD"          "${WAHA_DASHBOARD_PASSWORD:-}"
-    sec "WHATSAPP_SWAGGER_USERNAME"        "${WHATSAPP_SWAGGER_USERNAME:-}"
-    sec "WHATSAPP_SWAGGER_PASSWORD"        "${WHATSAPP_SWAGGER_PASSWORD:-}"
-
-    echo -e "\n  ${BLANCO}── Correo saliente / Hyvor (.env) ──${NC}"
-    sec "SMTP_HOST:SMTP_PORT"              "${SMTP_HOST:-}:${SMTP_PORT:-}"
-    sec "SMTP_USER"                        "${SMTP_USER:-}"
-    sec "SMTP_PASS"                        "${SMTP_PASS:-}"
-    sec "SMTP_FROM → SMTP_TO"              "${SMTP_FROM:-} → ${SMTP_TO:-}"
-    sec "HYVOR_API_KEY"                    "${HYVOR_API_KEY:-}"
-
-    echo -e "\n  ${BLANCO}── SSH a la VM del Manager (.env) ──${NC}"
+    echo -e "\n  ${BLANCO}── Servidor Wazuh (VM) por SSH ──${NC}"
     sec "Usuario@Host:Puerto"              "${WAZUH_VM_SSH_USER:-root}@${WAZUH_VM_SSH_HOST:-$WAZUH_SERVER_IP}:${WAZUH_VM_SSH_PORT:-22}"
-    sec "WAZUH_VM_SSH_PASS"                "${WAZUH_VM_SSH_PASS:-}"
-
-    echo -e "\n  ${BLANCO}── Relay en ejecución (/etc/wazuh-waha/relay.env) ──${NC}"
-    local rel_env k v
-    if rel_env=$(sudo cat /etc/wazuh-waha/relay.env 2>/dev/null); then
-        if [ -n "$rel_env" ]; then
-            while IFS='=' read -r k v; do
-                [ -z "$k" ] && continue
-                case "$k" in
-                    RELAY_API_KEY|WAHA_API_KEY|ADMIN_PHONE)
-                        if [ "$v" = "${!k}" ]; then
-                            sec "$k (igual que .env)" "$v"
-                        else
-                            sec "$k (DIFIERE de .env)" "$v"
-                        fi
-                        ;;
-                esac
-            done <<< "$rel_env"
-        else
-            warn "relay.env existe pero está vacío."
-        fi
-    else
-        warn "No se pudo leer /etc/wazuh-waha/relay.env (requiere sudo)."
-    fi
-
-    echo -e "\n  ${BLANCO}── Integration en la VM (manager-side/wsl-relay.conf) ──${NC}"
-    if [ -f "$PROJECT_ROOT/manager-side/wsl-relay.conf" ]; then
-        local integ_key
-        integ_key=$(grep -m1 '^WAZUH_RELAY_API_KEY=' "$PROJECT_ROOT/manager-side/wsl-relay.conf" 2>/dev/null | cut -d= -f2-)
-        sec "WAZUH_RELAY_API_KEY" "${integ_key:-}"
-    else
-        info "No existe manager-side/wsl-relay.conf local."
-    fi
+    info "La contraseña SSH no está en el repo: se pide al conectarse (o use clave)."
 
     echo ""
     separador
-    log "CREDENCIALES: Se visualizaron secrets en pantalla."
+    log "CREDENCIALES: Visualización de credenciales de Wazuh en pantalla."
     pausar
 }
 
@@ -1659,7 +1608,7 @@ while true; do
     echo -e "${AZUL}║${NC}  ${CYAN}── Automatización y Auditoría ─────────────────────────────${NC}       ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${AMARILLO}15)${NC} Ver historial de auditoría (admin-wazuh-waha.log)            ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${VERDE}16)${NC} ⚡ Ejecutar TODO el mantenimiento integral                    ${AZUL}║${NC}"
-    echo -e "${AZUL}║${NC}   ${AMARILLO}17)${NC} 🔑 Ver credenciales y contraseñas del stack                  ${AZUL}║${NC}"
+    echo -e "${AZUL}║${NC}   ${AMARILLO}17)${NC} 🔑 Ver credenciales de acceso a Wazuh                     ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${ROJO}18)${NC} Salir                                                         ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}                                                                      ${AZUL}║${NC}"
     echo -e "${AZUL}╚══════════════════════════════════════════════════════════════════════╝${NC}"

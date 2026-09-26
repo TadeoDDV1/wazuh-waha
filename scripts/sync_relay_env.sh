@@ -95,12 +95,11 @@ KEYS=(
   SMTP_USER
   SMTP_PASS
   SMTP_FROM
-  SMTP_TO
   SMTP_TLS
+  ADMIN_EMAIL
   HYVOR_BASE_URL
   HYVOR_API_KEY
   HYVOR_FROM
-  HYVOR_TO
 )
 
 # Parsear .env (ignorar comentarios / líneas vacías)
@@ -128,9 +127,9 @@ done >> "$TMP_NEW"
 
 echo ""
 echo "=== Preview (sin secrets): ==="
-grep -v -E '(PASS|API_KEY|SMTP_PASS|SMTP_USER|SMTP_FROM|SMTP_TO|RELAY_API_KEY|WAHA_API_KEY)' /tmp/relay.env.new | head -25
+grep -v -E '(PASS|API_KEY|SMTP_PASS|SMTP_USER|SMTP_FROM|RELAY_API_KEY|WAHA_API_KEY)' "$TMP_NEW" | head -25
 echo ""
-echo "=== Total keys: $(grep -E '^[A-Z_]+=' /tmp/relay.env.new | wc -l) ==="
+echo "=== Total keys: $(grep -E '^[A-Z_]+=' "$TMP_NEW" | wc -l) ==="
 echo ""
 
 if [ "$DRY_RUN" = 1 ]; then

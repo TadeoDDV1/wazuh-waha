@@ -6,6 +6,18 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **Relay caído y notificaciones muertas:** `relay/.venv` quedó incompleto
+  (instalación parcial con archivos root-owned a las 15:24; `uvicorn`,
+  `pydantic` y `pydantic_settings` desaparecidos) → `wazuh-waha.service`
+  en crash-loop (153 reinicios, `203/EXEC`) y `boot-notify` fallando con
+  `ModuleNotFoundError`. Venv recreado desde `uv.lock` (`sudo rm -rf .venv`
+  + `uv sync`); servicio activo y `/health` 200.
+- **Test de correo del dashboard:** eliminado el fallback `settings.smtp_to`
+  (el campo no existe en `Settings` → `AttributeError` si `ADMIN_EMAIL`
+  estuviera vacío). El destino único y canónico es `ADMIN_EMAIL`.
+- `scripts/sync_relay_env.sh`: el preview y el conteo de keys usaban el path
+  hardcodeado `/tmp/relay.env.new` (mostraba "Total keys: 0" en `apply`);
+  ahora usan `$TMP_NEW`.
 - **Build del dashboard:** nuevo `dashboard/.dockerignore` (excluye
   `node_modules`, `dist`, `.env` y logs del contexto de build), Dockerfile con
   `npm ci` y build arg `VITE_RELAY_API_KEY`. Antes el bundle de prod se
@@ -29,6 +41,13 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   hosts Arch).
 
 ### Removed
+- **`.env` limpio —6 claves muertas:** `SMTP_TO` y `HYVOR_TO` (el destino de
+  todos los correos es siempre `ADMIN_EMAIL`), `WAHA_DASHBOARD_USERNAME/
+  PASSWORD` y `WHATSAPP_SWAGGER_USERNAME/PASSWORD` (cero referencias en el
+  código: ni compose, ni nginx, ni relay, ni dashboard). Referencias
+  eliminadas también en `scripts/sync_relay_env.sh`, 
+  `deploy/arch-host/relay.env.example`, `docs/waha-recovery.md` y el visor
+  de credenciales de `admin.sh` (50 →44 claves).
 - `.hermes/` (planes de trabajo viejos) y `_archive/` (código legacy).
 - `administrador-wazuh-waha.sh` (duplicado byte a byte de `admin.sh`).
 - `monitor.sh` y `logs.sh` (redundantes con las opciones de `admin.sh`).
@@ -37,6 +56,9 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - `relay/uv.lock` trackeado (builds del relay reproducibles con `uv sync`).
+- `ADMIN_EMAIL` ahora se sincroniza a `/etc/wazuh-waha/relay.env`
+  (`sync_relay_env.sh`): antes no estaba en el EnvironmentFile del servicio
+  y dependía solo de la lectura directa del `.env` del repo.
 - **`admin.sh` ampliado** (nuevo reemplazo del script borrado):
   - Reinicio individual de Wazuh Manager / Indexer / Dashboard (opciones 3-5
     del menú 11): local si la unidad existe, si no en la VM del Manager por
@@ -47,9 +69,9 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     (opciones 7-8 del menú 11); el menú pasó de 11 a 16 opciones.
   - Estado de servicios con etiquetas `[ACTIVO]` local / `(VM)` /
     `[VM SIN ACCESO]` en lugar de "no encontrado" engañoso.
-  - Opción 17 del menú principal: visualización de credenciales del stack
-    con confirmación (`.env`, `/etc/wazuh-waha/relay.env`, 
-    `manager-side/wsl-relay.conf`).
+  - Opción 17 del menú principal: visualización de credenciales de acceso
+    a Wazuh (API del Manager y SSH de la VM) con confirmación. Por diseño
+    **no** muestra API keys ni secrets del `.env` (relay, SMTP, Hyvor).
   - Respaldo de la sesión WAHA (volumen `wazuh_waha_sessions`) como tipo de
     respaldo en `backups/`.
   - Reinicio maestro actualizado para incluir los servicios Wazuh de la VM

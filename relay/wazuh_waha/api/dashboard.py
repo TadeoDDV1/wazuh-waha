@@ -1462,8 +1462,6 @@ async def dashboard_test_email(request: Request):
 
     dest = (body.get("dest") or body.get("admin_email") or settings.admin_email or os.environ.get("ADMIN_EMAIL", "")).strip()
     if not dest:
-        dest = settings.smtp_to or os.environ.get("SMTP_TO", "")
-    if not dest:
         raise HTTPException(status_code=400, detail="Falta dirección de correo destinatario (ADMIN_EMAIL)")
 
     from ..infrastructure import notifier

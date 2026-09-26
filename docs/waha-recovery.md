@@ -96,9 +96,11 @@ SMTP_PORT=587
 SMTP_USER=tu-cuenta@gmail.com
 SMTP_PASS=app-password
 SMTP_FROM=wazuh-waha@tu-dominio.com
-SMTP_TO=admin@tu-dominio.com,backup@tu-dominio.com
+ADMIN_EMAIL=admin@tu-dominio.com
 SMTP_TLS=true
 ```
+
+El destino de todos los correos es siempre `ADMIN_EMAIL` (no hay lista).
 
 Si SMTP no esta configurado, el canal email se desactiva silenciosamente
 (solo log debug).
@@ -178,7 +180,7 @@ journalctl -u wazuh-waha-watchdog -n 20 --no-pager
 | `SMTP_PORT` | 587 | Puerto SMTP |
 | `SMTP_USER` / `SMTP_PASS` | (vacio) | Credenciales SMTP |
 | `SMTP_FROM` | wazuh-waha@localhost | From |
-| `SMTP_TO` | (vacio) | Lista separada por coma |
+| `ADMIN_EMAIL` | (vacio) | Destino de todos los correos |
 | `SMTP_TLS` | true | STARTTLS |
 
 Todas viven en `/etc/wazuh-waha/relay.env` (producción) o en `.env` (dev local).
