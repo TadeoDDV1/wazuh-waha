@@ -80,8 +80,6 @@ fi
 if [ -n "$TARGET_IP" ]; then
     echo -e "\033[0;34m[*] Actualizando $ENV_FILE con $TARGET_IP...\033[0m"
     sed -i -E "s/^(WAZUH_SERVER_IP)=.*/\1=$TARGET_IP/" "$ENV_FILE"
-    sed -i -E "s/^(WAZUH_MANAGER_HOST)=.*/\1=$TARGET_IP/" "$ENV_FILE"
-    sed -i -E "s/^(WAZUH_VM_SSH_HOST)=.*/\1=$TARGET_IP/" "$ENV_FILE"
     
     # Verify it was updated
     if grep -q "^WAZUH_SERVER_IP=$TARGET_IP" "$ENV_FILE"; then

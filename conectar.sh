@@ -91,6 +91,13 @@ is_valid_hex_key() {
 # ── Leer/escribir .env ───────────────────────────────────────────────────────
 get_env_val() {
     local k="$1"
+    # 1) Variable de entorno en runtime tiene prioridad (ej:
+    #    WAZUH_VM_SSH_PASS=xxx ./conectar.sh --fix-connection)
+    if [ -n "${!k:-}" ]; then
+        printf '%s\n' "${!k}"
+        return
+    fi
+    # 2) Fallback: leer del .env
     grep -E "^${k}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
 }
 
@@ -216,8 +223,6 @@ if [ -z "$CURRENT_MGR_IP" ] || [ "$CURRENT_MGR_IP" = "0.0.0.0" ]; then
     if [ -n "$DETECTED_MGR_IP" ]; then
         ok "IP del Manager detectada: $DETECTED_MGR_IP"
         set_env_val "WAZUH_SERVER_IP" "$DETECTED_MGR_IP"
-        set_env_val "WAZUH_MANAGER_HOST" "$DETECTED_MGR_IP"
-        set_env_val "WAZUH_VM_SSH_HOST" "$DETECTED_MGR_IP"
         CURRENT_MGR_IP="$DETECTED_MGR_IP"
     elif [ "$AUTO_MODE" = true ]; then
         fail "No se pudo detectar el Wazuh Manager automáticamente."
@@ -322,8 +327,6 @@ if [ "$FIX_CONNECTION" = false ]; then
         read -rp "  IP del Wazuh Manager: " input_mgr_ip
         if [ -n "$input_mgr_ip" ]; then
             set_env_val "WAZUH_SERVER_IP" "$input_mgr_ip"
-            set_env_val "WAZUH_MANAGER_HOST" "$input_mgr_ip"
-            set_env_val "WAZUH_VM_SSH_HOST" "$input_mgr_ip"
             CURRENT_MGR_IP="$input_mgr_ip"
         fi
     fi
@@ -462,52 +465,54 @@ if [ "$MANAGER_LOCAL" = true ]; then
 
 elif [ -n "$CURRENT_MGR_IP" ]; then
     # ── Manager remoto: intentar SSH ─────────────────────────────────────────
+    # Pass en runtime (WAZUH_VM_SSH_PASS=... ./conectar.sh --fix-connection),
+    # nunca guardada en .env. Si no hay pass, se intenta clave SSH (BatchMode).
     SSH_PASS=$(get_env_val "WAZUH_VM_SSH_PASS")
 
     if [ -n "$SSH_PASS" ] && command -v sshpass &>/dev/null; then
-        info "Desplegando configuración al Manager remoto (${CURRENT_SSH_USER}@${CURRENT_MGR_IP})..."
+        SSHX=(sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -p "$CURRENT_SSH_PORT")
+        SCPX=(sshpass -p "$SSH_PASS" scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -P "$CURRENT_SSH_PORT")
+        # sudo en la VM pide contraseña: se pasa por stdin (-S)
+        REMOTE_SUDO="echo $SSH_PASS | sudo -S"
+    else
+        [ -z "$SSH_PASS" ] && info "Sin WAZUH_VM_SSH_PASS en runtime: intentando clave SSH (${CURRENT_SSH_USER}@${CURRENT_MGR_IP})."
+        SSHX=(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -p "$CURRENT_SSH_PORT")
+        SCPX=(scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -P "$CURRENT_SSH_PORT")
+        # -n: falla rápido si sudo necesita pass (sin cuelgue); se muestran
+        # los comandos manuales al final.
+        REMOTE_SUDO="sudo -n"
+    fi
 
-        # Backup
-        sshpass -p "$SSH_PASS" ssh \
-            -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-            -p "$CURRENT_SSH_PORT" \
+    info "Desplegando configuración al Manager remoto (${CURRENT_SSH_USER}@${CURRENT_MGR_IP})..."
+
+    # Backup
+    "${SSHX[@]}" \
+        "${CURRENT_SSH_USER}@${CURRENT_MGR_IP}" \
+        "$REMOTE_SUDO cp /var/ossec/etc/wsl-relay.conf /var/ossec/etc/wsl-relay.conf.bak.\$(date +%s) 2>/dev/null || true" \
+        2>/dev/null && ok "Backup creado en el Manager." || \
+        warn "No se pudo crear backup (puede no existir aún)."
+
+    # Copiar
+    "${SCPX[@]}" \
+        "$MGR_CONF_FILE" \
+        "${CURRENT_SSH_USER}@${CURRENT_MGR_IP}:/tmp/wsl-relay.conf" 2>/dev/null
+
+    if [ $? -eq 0 ]; then
+        "${SSHX[@]}" \
             "${CURRENT_SSH_USER}@${CURRENT_MGR_IP}" \
-            "sudo cp /var/ossec/etc/wsl-relay.conf /var/ossec/etc/wsl-relay.conf.bak.\$(date +%s) 2>/dev/null || true" \
-            2>/dev/null && ok "Backup creado en el Manager." || \
-            warn "No se pudo crear backup (puede no existir aún)."
-
-        # Copiar
-        sshpass -p "$SSH_PASS" scp \
-            -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-            -P "$CURRENT_SSH_PORT" \
-            "$MGR_CONF_FILE" \
-            "${CURRENT_SSH_USER}@${CURRENT_MGR_IP}:/tmp/wsl-relay.conf" 2>/dev/null
+            "$REMOTE_SUDO cp /tmp/wsl-relay.conf /var/ossec/etc/wsl-relay.conf && \
+             $REMOTE_SUDO chown root:wazuh /var/ossec/etc/wsl-relay.conf && \
+             $REMOTE_SUDO chmod 640 /var/ossec/etc/wsl-relay.conf && \
+             rm -f /tmp/wsl-relay.conf" 2>/dev/null
 
         if [ $? -eq 0 ]; then
-            sshpass -p "$SSH_PASS" ssh \
-                -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-                -p "$CURRENT_SSH_PORT" \
-                "${CURRENT_SSH_USER}@${CURRENT_MGR_IP}" \
-                "sudo cp /tmp/wsl-relay.conf /var/ossec/etc/wsl-relay.conf && \
-                 sudo chown root:wazuh /var/ossec/etc/wsl-relay.conf && \
-                 sudo chmod 640 /var/ossec/etc/wsl-relay.conf && \
-                 rm -f /tmp/wsl-relay.conf" 2>/dev/null
-
-            if [ $? -eq 0 ]; then
-                ok "Configuración desplegada exitosamente al Manager."
-                DEPLOY_OK=true
-            else
-                fail "Error al mover el archivo en el Manager."
-            fi
+            ok "Configuración desplegada exitosamente al Manager."
+            DEPLOY_OK=true
         else
-            fail "Error al copiar archivo al Manager."
+            fail "Error al mover el archivo en el Manager."
         fi
     else
-        if [ -z "$SSH_PASS" ]; then
-            warn "WAZUH_VM_SSH_PASS no definido en .env."
-        elif ! command -v sshpass &>/dev/null; then
-            warn "sshpass no instalado."
-        fi
+        fail "Error al copiar archivo al Manager."
     fi
 else
     warn "WAZUH_SERVER_IP no definido. No se puede desplegar al Manager."
@@ -586,8 +591,8 @@ AUTH_TEST=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
 if [ "$AUTH_TEST" = "401" ]; then
     echo -e "${ROJO}[KEY RECHAZADA - la key del .env no coincide con el relay]${NC}"
     warn "El relay puede estar usando una key diferente. Verificar /etc/wazuh-waha/relay.env"
-elif [ "$AUTH_TEST" = "400" ]; then
-    echo -e "${VERDE}[KEY ACEPTADA - auth OK (400 = JSON inválido, pero auth pasó)]${NC}"
+elif [ "$AUTH_TEST" = "400" ] || [ "$AUTH_TEST" = "200" ]; then
+    echo -e "${VERDE}[KEY ACEPTADA - auth OK (HTTP $AUTH_TEST)]${NC}"
 elif [ "$AUTH_TEST" = "000" ]; then
     echo -e "${ROJO}[SIN RESPUESTA]${NC}"
 else

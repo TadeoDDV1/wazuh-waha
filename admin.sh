@@ -217,7 +217,7 @@ wazuh_svc() {
                     fail "$nombre: reinicio enviado pero no quedó activo (revisar en la VM)"
                 fi
             else
-                fail "Sin acceso SSH a la VM. Instalá una clave (ssh-copy-id) o definí WAZUH_VM_SSH_PASS en .env."
+                fail "Sin acceso SSH a la VM. Instalá una clave (ssh-copy-id) o pasá WAZUH_VM_SSH_PASS en runtime (variable de entorno, no en .env)."
             fi
         fi
     else
@@ -329,7 +329,7 @@ estado_servicios() {
 
     echo -e "\n  ${BLANCO}── Servicios Wazuh (local o VM ${WAZUH_VM_SSH_HOST:-$WAZUH_SERVER_IP}) ──${NC}"
     if ! cargar_estado_vm 2>/dev/null; then
-        info "VM ${WAZUH_VM_SSH_HOST:-$WAZUH_SERVER_IP}: sin acceso SSH (falta clave o WAZUH_VM_SSH_PASS en .env)."
+        info "VM ${WAZUH_VM_SSH_HOST:-$WAZUH_SERVER_IP}: sin acceso SSH (falta clave o WAZUH_VM_SSH_PASS en runtime)."
     fi
     check_servicio_wazuh "Wazuh Manager"              "wazuh-manager"
     check_servicio_wazuh "Wazuh Indexer"              "wazuh-indexer"
@@ -1219,7 +1219,7 @@ vista_estado_wazuh() {
     limpiar
     titulo "SERVICIOS WAZUH — LOCAL Y VM (${WAZUH_VM_SSH_USER:-root}@${WAZUH_VM_SSH_HOST:-$WAZUH_SERVER_IP})"
     if ! cargar_estado_vm 2>/dev/null; then
-        warn "VM sin acceso SSH: configurar clave (ssh-copy-id) o WAZUH_VM_SSH_PASS en .env."
+        warn "VM sin acceso SSH: configurar clave (ssh-copy-id) o WAZUH_VM_SSH_PASS en runtime."
     fi
     check_servicio_wazuh "Wazuh Manager"   "wazuh-manager"
     check_servicio_wazuh "Wazuh Indexer"   "wazuh-indexer"
