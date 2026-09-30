@@ -28,7 +28,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from ..common.logging import log
 from ..config import ENV_FILE, settings
-from .deps import verify_api_key
+from .deps import verify_api_key, verify_write
 
 router = APIRouter(tags=["dashboard"])
 
@@ -1037,7 +1037,7 @@ async def dashboard_config(request: Request):
 @router.post("/api/v1/dashboard/auto-detect-phone")
 async def auto_detect_phone(request: Request):
     """Detecta el número de teléfono del admin desde la sesión WAHA activa y lo guarda en .env."""
-    await verify_api_key(request)
+    await verify_write(request)
     if not settings.waha_host:
         return {"ok": False, "result": "WAHA_HOST no configurado"}
     try:
@@ -1078,7 +1078,7 @@ async def auto_detect_phone(request: Request):
 @router.post("/api/v1/dashboard/toggle")
 async def dashboard_toggle(request: Request):
     """Toggle un componente on/off. Body: { target, enabled }"""
-    await verify_api_key(request)
+    await verify_write(request)
     body = await request.json()
     target: str = body.get("target", "")
     enabled: bool = body.get("enabled", True)
@@ -1131,7 +1131,7 @@ async def dashboard_toggle(request: Request):
 @router.post("/api/v1/dashboard/action")
 async def dashboard_action(request: Request):
     """Perform an action on a component. Body: { target, action }"""
-    await verify_api_key(request)
+    await verify_write(request)
     body = await request.json()
     target: str = body.get("target", "")
     action: str = body.get("action", "")
@@ -1325,7 +1325,7 @@ def _sync_relay_env() -> bool:
 @router.post("/api/v1/dashboard/config/update")
 async def dashboard_config_update(request: Request):
     """Escribe una clave editable en el .env (con backup) y la aplica en memoria."""
-    await verify_api_key(request)
+    await verify_write(request)
     body = await request.json()
     key: str = str(body.get("key", "")).strip()
     value: str = str(body.get("value", "")).strip()
@@ -1354,7 +1354,7 @@ async def dashboard_config_update(request: Request):
 @router.post("/api/v1/dashboard/config/batch")
 async def dashboard_config_batch(request: Request):
     """Escribe múltiples claves editables en el .env en un solo paso atómico."""
-    await verify_api_key(request)
+    await verify_write(request)
     body = await request.json()
     raw_settings = body.get("settings", body)
     if not isinstance(raw_settings, dict):
@@ -1407,7 +1407,7 @@ async def dashboard_config_batch(request: Request):
 @router.post("/api/v1/dashboard/test-whatsapp")
 async def dashboard_test_whatsapp(request: Request):
     """Manda un mensaje de prueba a WhatsApp via WAHA."""
-    await verify_api_key(request)
+    await verify_write(request)
     from ..infrastructure import waha_client
 
     if not settings.admin_phone:
@@ -1429,7 +1429,7 @@ async def dashboard_test_whatsapp(request: Request):
 @router.post("/api/v1/dashboard/test-wazuh")
 async def dashboard_test_wazuh(request: Request):
     """Prueba conectividad con el Manager Wazuh (puerto 1514 y opcionalmente API 55000)."""
-    await verify_api_key(request)
+    await verify_write(request)
     target_ip = settings.wazuh_server_ip or os.environ.get("WAZUH_SERVER_IP", "")
     if not target_ip:
         raise HTTPException(status_code=400, detail="WAZUH_SERVER_IP no configurada")
@@ -1452,7 +1452,7 @@ async def dashboard_test_wazuh(request: Request):
 @router.post("/api/v1/dashboard/test-email")
 async def dashboard_test_email(request: Request):
     """Manda un email de prueba con la config actual. Diagnostico inmediato."""
-    await verify_api_key(request)
+    await verify_write(request)
 
     body = {}
     try:
@@ -1557,7 +1557,7 @@ async def waha_qr(request: Request):
 @router.post("/api/v1/dashboard/waha/session")
 async def waha_session_action(request: Request):
     """Acciones sobre la sesion WAHA: create | start | stop | logout."""
-    await verify_api_key(request)
+    await verify_write(request)
     body = await request.json()
     action: str = str(body.get("action", "")).strip()
     s = settings.waha_session
@@ -1635,7 +1635,7 @@ async def get_wazuh_agents(request: Request, _: None = Depends(verify_api_key)):
 
 
 @router.post("/api/v1/dashboard/wazuh/agents")
-async def add_wazuh_agent(request: Request, _: None = Depends(verify_api_key)):
+async def add_wazuh_agent(request: Request, _: None = Depends(verify_write)):
     from ..infrastructure.notifier import _get_token
     from ..config import settings
     import httpx
@@ -1674,7 +1674,7 @@ async def add_wazuh_agent(request: Request, _: None = Depends(verify_api_key)):
 
 
 @router.delete("/api/v1/dashboard/wazuh/agents/{agent_id}")
-async def delete_wazuh_agent(agent_id: str, request: Request, _: None = Depends(verify_api_key)):
+async def delete_wazuh_agent(agent_id: str, request: Request, _: None = Depends(verify_write)):
     from ..infrastructure.notifier import _get_token
     from ..config import settings
     import httpx
@@ -1707,7 +1707,8 @@ async def delete_wazuh_agent(agent_id: str, request: Request, _: None = Depends(
 async def get_dashboard_logs(request: Request, lines: int = 100):
     """Obtiene los últimos logs del servicio systemd (journalctl)."""
     await verify_api_key(request)
-    
+    lines = max(1, min(lines, 500))
+
     # Obtenemos los logs del relay
     code, out = _run_cmd(["journalctl", "-u", "wazuh-waha", "-n", str(lines), "--no-pager", "-q"])
     
@@ -2486,7 +2487,7 @@ async def get_wazuh_recommendations(request: Request, agent_id: str = "000", _: 
 
 
 @router.post("/api/v1/dashboard/wazuh/modules/toggle")
-async def toggle_wazuh_module(request: Request, _: None = Depends(verify_api_key)):
+async def toggle_wazuh_module(request: Request, _: None = Depends(verify_write)):
     from ..infrastructure.notifier import _get_token
     from ..config import settings
     import httpx
@@ -2553,7 +2554,7 @@ async def toggle_wazuh_module(request: Request, _: None = Depends(verify_api_key
 
 
 @router.post("/api/v1/dashboard/wazuh/modules/bulk")
-async def bulk_toggle_wazuh_modules(request: Request, _: None = Depends(verify_api_key)):
+async def bulk_toggle_wazuh_modules(request: Request, _: None = Depends(verify_write)):
     from ..infrastructure.notifier import _get_token
     from ..config import settings
     import httpx
@@ -2616,7 +2617,7 @@ async def bulk_toggle_wazuh_modules(request: Request, _: None = Depends(verify_a
 
 
 @router.post("/api/v1/dashboard/wazuh/modules/apply")
-async def apply_wazuh_modules_config(request: Request, _: None = Depends(verify_api_key)):
+async def apply_wazuh_modules_config(request: Request, _: None = Depends(verify_write)):
     from ..infrastructure.notifier import _get_token
     from ..config import settings
     import httpx

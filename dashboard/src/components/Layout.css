@@ -12,3 +12,26 @@
   position: relative;
 }
 
+
+/* ── Auth gate (verificación de sesión / login) ─────────────────────────── */
+.auth-loading {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.auth-loading-spin {
+  animation: auth-spin 0.9s linear infinite;
+  color: #00e5ff;
+}
+
+@keyframes auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

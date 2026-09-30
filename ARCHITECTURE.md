@@ -28,7 +28,9 @@ del código.
 │  wazuh-waha (FastAPI + uvicorn --workers 2)                │
 │  Host: 172.44.30.8:8765                                    │
 │                                                            │
-│  1) verify_api_key  (compara X-Api-Key con RELAY_API_KEY)  │
+│  1) verify_api_key  (cookie de sesión BFF del dashboard o       │
+│                      X-Api-Key de servicios, comparación        │
+│                      constante en tiempo con RELAY_API_KEY)     │
 │  2) format_alert:                                          │
 │     a) dedup: fcntl.flock + JSON en /var/lib/wazuh-waha/   │
 │     b) templates.render(rule_id)  -> str o None            │
@@ -124,7 +126,11 @@ Defense in depth: el relay solo escribe a `/var/log/wazuh-waha` y `/var/lib/wazu
 
 - **Sin webhook entrante de WAHA.** El relay solo recibe, no escucha mensajes. Si alguien manda un WhatsApp al admin, no hay forma de procesarlo (no es requerimiento).
 - **Un solo destinatario.** Configurado en `ADMIN_PHONE`. Si querés mandar a un grupo, hay que cambiar la lógica de `waha_client.send_text()` para que use `chatId` de tipo grupo (`<id>@g.us`).
-- **Sin rate limiting.** Si Wazuh dispara 100 alertas en 1 segundo, el relay intenta mandar 100 WhatsApps. WAHA puede rate-limitar, y el counter de fallos en `waha_client` eventualmente lo va a detectar.
+- **Rate limiting solo de entrada HTTP.** El relay limita requests entrantes
+  (por IP o sesión: 600/min telemetría, 120/min `/alerts`, 5/min login), pero
+  no limita la salida hacia WAHA: si Wazuh dispara 100 alertas en 1 segundo,
+  el relay intenta mandar 100 WhatsApps. WAHA puede rate-limitar, y el counter
+  de fallos en `waha_client` eventualmente lo va a detectar.
 - **TTS sin input.** No hay forma de "responder" al WhatsApp para, por ejemplo, silenciar una regla. YAGNI por ahora.
 - **`ollama_client.py` no enchufado.** Implementado pero desactivado. Documentado en `docs/ollama.md`.
 

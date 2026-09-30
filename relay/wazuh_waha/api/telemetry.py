@@ -13,15 +13,28 @@ import time
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
-from .deps import verify_api_key
+from .deps import verify_api_key, verify_write
 from ..common.telemetry import telemetry_store
 from ..common.traffic_stream import traffic_watcher
 
 router = APIRouter(tags=["telemetry"])
 
-_SSE_MAX_CLIENTS = 20          # límite de clientes SSE simultáneos
+_SSE_MAX_CLIENTS = 20          # límite de clientes SSE en /telemetry/stream
+_TRAFFIC_SSE_MAX = 10          # límite de clientes SSE en /traffic/stream
 _sse_client_count = 0
+_traffic_sse_count = 0
+
+
+class SimulateRequest(BaseModel):
+    rule_id: str = Field("57100", pattern=r"^\d{1,16}$")
+    level: int = Field(10, ge=0, le=15)
+    description: str = Field(
+        "Tráfico de prueba generado desde la terminal", max_length=300
+    )
+    src_ip: str = Field("192.168.122.1", max_length=45)
+    src_user: str = Field("tadeou7", max_length=64)
 
 
 @router.get("/api/v1/telemetry/snapshot")
@@ -55,15 +68,16 @@ async def telemetry_stream(
     import os
     worker_id = os.getpid()
 
+    # Check + incremento sin await intermedio: es atómico dentro del event
+    # loop, así que no hay race que permita superar el límite con ráfagas.
     if _sse_client_count >= _SSE_MAX_CLIENTS:
         return JSONResponse(
             status_code=503,
             content={"error": f"Demasiados clientes SSE simultáneos (max {_SSE_MAX_CLIENTS})"},
         )
+    _sse_client_count += 1
 
     async def event_generator():
-        global _sse_client_count
-        _sse_client_count += 1
         try:
             # Evento inicial inmediato
             data = await telemetry_store.snapshot()
@@ -107,6 +121,7 @@ async def traffic_tail(
     _: None = Depends(verify_api_key),
 ) -> JSONResponse:
     """Devuelve los últimos eventos capturados de Wazuh para poblar la terminal al abrirla."""
+    limit = max(1, min(limit, 400))
     items = traffic_watcher.get_recent(limit=limit)
     return JSONResponse(content={"items": items, "count": len(items)})
 
@@ -126,9 +141,21 @@ async def traffic_stream(
     Server-Sent Events: emite cada nuevo evento de tráfico o alerta capturado por Wazuh
     en tiempo real para la terminal interactiva del dashboard.
     """
+    global _traffic_sse_count
+
+    # Cap propio: sin él, abrir N terminales agota memoria/cPU con heartbeats
+    # cada 2s para siempre (fácil DoS con una sola key válida).
+    if _traffic_sse_count >= _TRAFFIC_SSE_MAX:
+        return JSONResponse(
+            status_code=503,
+            content={"error": f"Demasiados clientes SSE de tráfico (max {_TRAFFIC_SSE_MAX})"},
+        )
+    _traffic_sse_count += 1
+
     queue = traffic_watcher.subscribe()
 
     async def event_generator():
+        global _traffic_sse_count
         try:
             # Enviar primer mensaje de conexión confirmada
             yield f"data: {json.dumps({'type': 'connected', 'msg': 'Wazuh live traffic stream conectado'})}\n\n"
@@ -145,6 +172,7 @@ async def traffic_stream(
         except asyncio.CancelledError:
             pass
         finally:
+            _traffic_sse_count -= 1
             traffic_watcher.unsubscribe(queue)
 
     return StreamingResponse(
@@ -160,17 +188,13 @@ async def traffic_stream(
 
 @router.post("/api/v1/telemetry/traffic/simulate")
 async def traffic_simulate(
-    request: Request,
-    _: None = Depends(verify_api_key),
+    body: SimulateRequest,
+    _: None = Depends(verify_write),
 ) -> JSONResponse:
     """Inyecta un evento simulado de prueba en el flujo de tráfico."""
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    rule_id = str(body.get("rule_id", "57100"))
-    level = int(body.get("level", 10))
-    desc = body.get("description", "Tráfico de prueba generado desde la terminal")
+    rule_id = body.rule_id
+    level = body.level
+    desc = body.description
 
     mock_alert = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000+0000", time.gmtime()),
@@ -182,9 +206,9 @@ async def traffic_simulate(
         },
         "agent": {"id": "001", "name": "greenalgorithm"},
         "data": {
-            "srcip": body.get("src_ip", "192.168.122.1"),
+            "srcip": body.src_ip,
             "srcport": "44321",
-            "srcuser": body.get("src_user", "tadeou7"),
+            "srcuser": body.src_user,
             "dstuser": "tadeou7",
         },
         "full_log": f"Manual test event: {desc}",

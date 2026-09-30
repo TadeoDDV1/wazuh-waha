@@ -5,6 +5,85 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+- **Hardening completo de la telemetría en vivo y del relay** (auditoría
+  completa de `/api/v1/telemetry/*`, `/debug/*`, nginx y frontend):
+  - **BFF de sesión: la API key ya no vive en el bundle JS.** Antes
+    `VITE_RELAY_API_KEY` se inyectaba en `dist/assets/*.js` (legible con
+    `curl` desde cualquier visitante) y habilitaba lectura *y* escritura de
+    todo. Ahora el usuario ingresa la key una sola vez en un login
+    (`POST /api/v1/auth/login`) y el relay emite una cookie **HttpOnly,
+    SameSite=Strict, firmada HMAC-SHA256** (`ww_session`) con TTL de 8h
+    (`SESSION_TTL_HOURS`). Firma derivada de `RELAY_API_KEY` → estado sin
+    servidor, válida en todos los workers y sobrevive restarts. Opcional:
+    `RELAY_READONLY_API_KEY` para sesiones de solo-lectura (scope `read`).
+  - **`/debug/*` ya no es anónimo.** `/debug/recent`, `/debug/workers` y
+    `/debug/backups` exigen auth (antes filtraban últimas 50 alertas con
+    IPs, usuarios y logs crudos a cualquiera). `/health` sigue público pero
+    ya no expone `worker_id` (recon).
+  - **`?api_key=` eliminado de la autenticación** (se filtraba en access
+    logs, historial del browser y proxies). SSE ahora usa la cookie (mismo
+    origen). `X-Api-Key` se mantiene para servicios (integración Wazuh,
+    `admin.sh`, `conectar.sh`).
+  - **RBAC mínimo + auditoría:** las mutaciones (config, agents, módulos,
+    simulate…) exigen scope `full` (403 con sesión read-only) y quedan en
+    `<relay_lib_dir>/audit.jsonl` (flock, rotación 5 MiB): ts, ip, sid,
+    scope, método, path y status. Login fallido también se audita.
+  - **Validación de entrada:** `POST /traffic/simulate` con modelo Pydantic
+    (level 0–15, description ≤300, rule_id numérico, src_ip ≤45) → 422 en
+    vez de 500/eventos inyectables gigantes al journal compartido.
+    `?limit=` de `/traffic/tail` acotado a 1–400 y `?lines=` de
+    `/dashboard/logs` a 1–500 (`journalctl -n` ya no acepta absurdos).
+  - **Límite de tamaño de body** (`MAX_BODY_BYTES`, default 512 KiB) como
+    middleware ASGI puro: rechaza también bodies chunked sin
+    Content-Length con 413.
+  - **SSE acotado también en `/traffic/stream`** (cap 10, antes sin límite
+    → DoS trivial con heartbeats de 2s) y race del cap de
+    `/telemetry/stream` corregido (check+incremento atómico en el event
+    loop).
+  - **Frontend: 1 sola conexión SSE por pestaña.** Nuevo `telemetryBus`
+    compartido entre Navbar, TelemetryGlobalCard y WazuhModulesControlCard
+    (antes eran 3 EventSource por pestaña; ~7 tabs agotaban el cap y
+    entraban en bucle de reintento con 503).
+  - **Comparación de key constante en tiempo** (`hmac.compare_digest` sobre
+    bytes; los valores no-ASCII ya no producen 500).
+  - **Rate limit por IP real:** lee `X-Forwarded-For` solo si el peer está
+    en `TRUSTED_PROXIES` (si no, se ignora → no se puede falsear la IP);
+    buckets por `sid` de sesión verificado (usuarios detrás del proxy de
+    nginx ya no comparten bucket); sweep periódico que depura buckets
+    huérfanos (memory leak por IPs rotando); bucket dedicado de 5/min para
+    `POST /api/v1/auth/login` (fuerza bruta).
+  - **`/docs` y `/openapi.json` desactivados por defecto** (`ENABLE_DOCS`);
+    el mapa completo de la API ya no es público.
+  - **nginx:** headers de seguridad (CSP con `frame-ancestors 'none'`,
+    `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`,
+    `Permissions-Policy`), `client_max_body_size 512k`, `server_tokens off`
+    y access log **sin query strings** (`$request_method $uri` en vez de
+    `$request`).
+  - **SSH del traffic source:** `StrictHostKeyChecking` configurable
+    (`WAZUH_VM_SSH_STRICT_HOST_KEY`); el default sigue `accept-new` pero se
+    recomienda `yes` con known_hosts pre-provisionado (evita MITM de
+    primera conexión inyectando telemetría falsa). Valor invalidado →
+    fallback controlado, sin inyección de opciones.
+  - **Minimización de datos en telemetría:** `full_log` recortado a 2 KiB y
+    `raw_json` acotado a 8 KiB (antes cada frame SSE y el journal
+    transportaban alertas crudas completas de FIM/syscollector).
+  - **`scripts/sync_relay_env.sh`:** sincroniza a prod las claves que se
+    omitían (`TRAFFIC_*`, `ALLOWED_ORIGINS`, `WAZUH_VM_SSH_*`, y las
+    nuevas de seguridad) — antes un hardening en `.env` nunca llegaba a
+    `/etc/wazuh-waha/relay.env`.
+  - **Nuevo `dashboard/vite.config.ts` con proxy dev** (`/api`, `/debug`,
+    `/health` → relay): el browser habla siempre mismo origen en dev y prod
+    (requisito de las cookies BFF; sin CORS en dev).
+  - **Tests de seguridad:** `tests/test_auth_security.py` (25) +
+    `tests/test_telemetry_security.py` (25) — auth en `/debug/*`, flujo
+    login/cookie/forja/expiración, `?api_key=` rechazado, RBAC 403, rate
+    limit con XFF, caps SSE, body limit (con y sin Content-Length),
+    validación de simulate, audit trail y truncado de datos.
+  - **Docs:** `ARCHITECTURE.md` (decía "Sin rate limiting"), README,
+    `docs/troubleshooting.md` y `docs/multi-worker.md` actualizados con
+    auth en `/debug/*`.
+
 ### Fixed
 - **Relay caído y notificaciones muertas:** `relay/.venv` quedó incompleto
   (instalación parcial con archivos root-owned a las 15:24; `uvicorn`,

@@ -106,7 +106,7 @@ sudo -u <usuario> touch /var/lib/wazuh-waha/test
 # esperado: 0, no "Permission denied"
 
 # ¿Los workers están viendo el mismo archivo?
-# Ver con: curl /debug/recent | jq '.alerts[].worker_id'
+# Ver con: curl -H "X-Api-Key: $RELAY_API_KEY" http://127.0.0.1:8765/debug/recent | jq '.alerts[].worker_id'
 # Todos los workers deben escribir al mismo path
 ```
 

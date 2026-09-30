@@ -1,23 +1,30 @@
 import axios from 'axios';
 import type { StatusResponse, ConfigResponse, ToggleAction, ActionRequest, ApiResponse } from '../types/dashboard';
+import { notifyAuthExpired } from './authService';
 
-const API_URL = import.meta.env.DEV ? (import.meta.env.VITE_API_URL || 'http://localhost:8765') : '';
-// Sin fallback hardcodeado: en dev debe existir VITE_RELAY_API_KEY en dashboard/.env
-const RELAY_API_KEY = import.meta.env.VITE_RELAY_API_KEY || '';
+// Mismo origen SIEMPRE (nginx en prod, proxy de vite en dev): la cookie
+// de sesión BFF solo fluye en same-origin y así no se necesita CORS en dev.
+const API_URL = '';
+// Sin API key en el bundle: la autenticación es por cookie de sesión (BFF).
+// El interceptor avisa a la UI cuando el relay responde 401 (sesión expirada).
 
 const api = axios.create({
   baseURL: `${API_URL}/api/v1/dashboard`,
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
 });
 
-api.interceptors.request.use((config) => {
-  if (RELAY_API_KEY) {
-    config.headers['X-Api-Key'] = RELAY_API_KEY;
-  }
-  return config;
-});
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err?.response?.status === 401 && !err?.config?.url?.includes('/auth/')) {
+      notifyAuthExpired();
+    }
+    return Promise.reject(err);
+  },
+);
 
 export const dashboardService = {
   getLogs: async (lines = 100): Promise<{ok: boolean, logs: string}> => {
@@ -159,7 +166,7 @@ export const dashboardService = {
   getRecentAlerts: async () => {
     try {
       const response = await axios.get(`${API_URL}/debug/recent`, {
-        headers: RELAY_API_KEY ? { 'X-Api-Key': RELAY_API_KEY } : {},
+        withCredentials: true,
       });
       return response.data || [];
     } catch {

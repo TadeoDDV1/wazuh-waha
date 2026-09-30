@@ -63,8 +63,9 @@ curl -H "X-Api-Key: $(grep ^WAHA_API_KEY=*** | cut -d= -f2)" http://localhost:30
 # Estado del relay
 systemctl status wazuh-waha
 curl http://localhost:8765/health
-curl http://localhost:8765/debug/recent
-curl http://localhost:8765/debug/workers
+# /debug/* exige auth (header de servicios o sesión del dashboard)
+curl -H "X-Api-Key: $RELAY_API_KEY" http://localhost:8765/debug/recent
+curl -H "X-Api-Key: $RELAY_API_KEY" http://localhost:8765/debug/workers
 
 # Ver logs del relay
 journalctl -u wazuh-waha -f

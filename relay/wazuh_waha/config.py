@@ -89,6 +89,21 @@ class Settings(BaseSettings):
     waha_recovery_max_wait_sec: int = 60
     waha_watchdog_interval_sec: int = 300
 
+    # --- Seguridad ---
+    # Tamaño máximo de body HTTP (requests mayores -> 413)
+    max_body_bytes: int = 512 * 1024
+    # TTL de la cookie de sesión (BFF): la key maestra nunca llega al browser
+    session_ttl_hours: int = 8
+    # API key opcional de solo-lectura (login con scope "read": ve dashboard
+    # y telemetría pero no puede mutar config/agents/módulos)
+    relay_readonly_api_key: str = ""
+    # IPs/redes desde las que se confía X-Forwarded-For (proxy: nginx)
+    trusted_proxies: str = "127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8"
+    # Documentación interactiva (/docs, /openapi.json): apagada en prod
+    enable_docs: bool = False
+    # SSH del traffic source: yes = exigir known_hosts pre-provisionado
+    wazuh_vm_ssh_strict_host_key: str = "accept-new"  # yes | accept-new | no
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
@@ -113,6 +128,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
+    @property
+    def trusted_proxies_list(self) -> list[str]:
+        return [p.strip() for p in self.trusted_proxies.split(",") if p.strip()]
 
 
 settings = Settings()

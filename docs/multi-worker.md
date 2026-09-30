@@ -69,8 +69,9 @@ uvicorn incluye en el log message).
 systemctl status wazuh-waha --no-pager
 # PIDs en la lista de procesos hijos de uvicorn
 
-curl http://127.0.0.1:8765/debug/workers
+curl -H "X-Api-Key: $RELAY_API_KEY" http://127.0.0.1:8765/debug/workers
 # devuelve {"worker_id": 1234, "pid": 1234, "started_at": "...", "uptime_sec": ...}
+# (requiere auth: header X-Api-Key de servicios o cookie de sesión del dashboard)
 
 # Para ver la lista de TODOS los workers, hay que hacer N requests
 # (uno por worker) o leer journalctl.

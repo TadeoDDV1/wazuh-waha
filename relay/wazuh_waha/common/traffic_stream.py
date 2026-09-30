@@ -30,6 +30,48 @@ from .traffic_journal import get_journal
 
 _log = logging.getLogger("wazuh-waha.traffic")
 
+# Límites de tamaño para lo que viaja por SSE / traffic.jsonl: cada frame se
+# emite a todos los clientes conectados, y el journal crece en disco.
+_MAX_TEXT_CHARS = 2048
+_MAX_RAW_JSON_BYTES = 8 * 1024
+
+
+def _clip_text(value: Any, limit: int = _MAX_TEXT_CHARS) -> str:
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + " …[truncado]"
+
+
+def _clip_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    """Copia de la alerta cruda con campos acotados.
+
+    - Recorta full_log siempre (los logs de FIM/syscollector pueden ser MB).
+    - Si aun así supera _MAX_RAW_JSON_BYTES, se queda solo con los campos
+      esenciales para la vista JSON de la terminal.
+    Nunca muta el dict original del caller.
+    """
+    try:
+        if isinstance(raw.get("full_log"), str) and len(raw["full_log"]) > _MAX_TEXT_CHARS:
+            raw = {**raw, "full_log": _clip_text(raw["full_log"])}
+        if len(json.dumps(raw, ensure_ascii=False, default=str)) <= _MAX_RAW_JSON_BYTES:
+            return raw
+        rule = raw.get("rule") or {}
+        return {
+            "timestamp": raw.get("timestamp"),
+            "rule": {
+                "id": rule.get("id"),
+                "level": rule.get("level"),
+                "description": rule.get("description"),
+            },
+            "agent": raw.get("agent"),
+            "location": raw.get("location"),
+            "full_log": _clip_text(raw.get("full_log") or ""),
+            "_clipped": True,
+        }
+    except Exception:
+        return {"_clipped": True, "raw": "no-serializable"}
+
 
 def normalize_wazuh_event(raw: dict[str, Any]) -> dict[str, Any]:
     """Normaliza un evento en formato estándar para la terminal y telemetría."""
@@ -72,10 +114,10 @@ def normalize_wazuh_event(raw: dict[str, Any]) -> dict[str, Any]:
         "mitre_ids": mitre.get("id", []) or [],
         "mitre_tactics": mitre.get("tactic", []) or [],
         "mitre_techniques": mitre.get("technique", []) or [],
-        "full_log": raw.get("full_log") or description,
+        "full_log": _clip_text(raw.get("full_log") or description),
         "groups": rule.get("groups", []) or [],
         "source": raw.get("_source", "unknown"),
-        "raw_json": raw,
+        "raw_json": _clip_raw(raw),
     }
 
 
@@ -423,14 +465,23 @@ class TrafficStreamWatcher:
 
     # ── fuente SSH (alerts.json en la VM manager) ──────────────────────────
 
+    # WAZUH_VM_SSH_STRICT_HOST_KEY: "yes" exige known_hosts pre-provisionado
+    # (recomendado en prod: "accept-new" acepta la primera key sin verificar,
+    # lo que permite un MITM de primera conexión inyectar telemetría falsa).
+    _STRICT_HOST_KEYS = {"yes", "accept-new", "no"}
+
     def _ssh_base_cmd(self) -> list[str]:
         host = settings.wazuh_server_ip
         user = settings.wazuh_vm_ssh_user
         port = str(settings.wazuh_vm_ssh_port)
+        strict = str(settings.wazuh_vm_ssh_strict_host_key).lower()
+        if strict not in self._STRICT_HOST_KEYS:
+            _log.warning("ssh_strict_host_key_invalid=%s (usando accept-new)", strict)
+            strict = "accept-new"
         cmd = [
             "ssh",
             "-p", port,
-            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", f"StrictHostKeyChecking={strict}",
             "-o", "ConnectTimeout=5",
             "-o", "BatchMode=yes",
             "-o", "LogLevel=ERROR",

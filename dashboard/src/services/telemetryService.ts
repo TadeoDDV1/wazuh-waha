@@ -1,56 +1,59 @@
 /**
  * TelemetryService — gestiona la conexión SSE al relay y el fallback a polling.
  *
- * La API key se inyecta como query param porque EventSource no permite headers
- * personalizados (limitación del estándar). El relay verifica X-Api-Key en headers
- * para REST, pero aceptará ?api_key= como alternativa en el endpoint SSE.
+ * Autenticación: cookie de sesión (BFF). Como el dashboard y la API comparten
+ * origen (nginx en prod, vite proxy en dev), EventSource y fetch envían la
+ * cookie automáticamente — no hay ?api_key= en URLs (quedaba en logs e
+ * historial) ni X-Api-Key en headers.
  *
  * Fallback: si SSE falla 3 veces consecutivas → polling cada 3s sobre /snapshot.
  */
 
 import type { TelemetrySnapshot, TrafficEvent, TrafficSourceInfo } from '../types/telemetry';
+import { notifyAuthExpired } from './authService';
 
-const API_URL = import.meta.env.DEV ? (import.meta.env.VITE_API_URL || 'http://localhost:8765') : '';
-// Sin fallback hardcodeado: en dev usa VITE_RELAY_API_KEY; en prod nginx no inyecta
-// la key (el browser solo manda ?api_key= en SSE o X-Api-Key en REST si está seteada).
-const RELAY_API_KEY = import.meta.env.VITE_RELAY_API_KEY || '';
+// Mismo origen SIEMPRE (nginx en prod, proxy de vite en dev): la cookie
+// de sesión BFF solo fluye en same-origin y así no se necesita CORS en dev.
+const API_URL = '';
 
 const TELEMETRY_BASE = `${API_URL}/api/v1/telemetry`;
+
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+function checkAuth(res: Response): void {
+  if (res.status === 401) notifyAuthExpired();
+}
 
 // ── REST snapshot (para polling fallback) ──────────────────────────────────
 
 export async function fetchTelemetrySnapshot(): Promise<TelemetrySnapshot> {
   const res = await fetch(`${TELEMETRY_BASE}/snapshot`, {
-    headers: {
-      'X-Api-Key': RELAY_API_KEY,
-      'Content-Type': 'application/json',
-    },
+    headers: JSON_HEADERS,
+    credentials: 'same-origin',
   });
+  checkAuth(res);
   if (!res.ok) throw new Error(`Telemetry snapshot failed: ${res.status}`);
   return res.json() as Promise<TelemetrySnapshot>;
 }
 
-// ── SSE URL (api_key como query param) ────────────────────────────────────
+// ── SSE URL (la cookie va sola: mismo origen) ──────────────────────────────
 
 export function buildSSEUrl(): string {
-  const params = new URLSearchParams({ api_key: RELAY_API_KEY });
-  return `${TELEMETRY_BASE}/stream?${params.toString()}`;
+  return `${TELEMETRY_BASE}/stream`;
 }
 
 // ── Streaming y Tail de Todo el Tráfico de Wazuh (Terminal en Vivo) ──────────
 
 export function buildTrafficStreamUrl(): string {
-  const params = new URLSearchParams({ api_key: RELAY_API_KEY });
-  return `${TELEMETRY_BASE}/traffic/stream?${params.toString()}`;
+  return `${TELEMETRY_BASE}/traffic/stream`;
 }
 
 export async function fetchTrafficTail(limit: number = 100): Promise<TrafficEvent[]> {
   const res = await fetch(`${TELEMETRY_BASE}/traffic/tail?limit=${limit}`, {
-    headers: {
-      'X-Api-Key': RELAY_API_KEY,
-      'Content-Type': 'application/json',
-    },
+    headers: JSON_HEADERS,
+    credentials: 'same-origin',
   });
+  checkAuth(res);
   if (!res.ok) throw new Error(`Error al consultar tail de tráfico: ${res.status}`);
   const data = await res.json();
   return (data.items || []) as TrafficEvent[];
@@ -59,23 +62,20 @@ export async function fetchTrafficTail(limit: number = 100): Promise<TrafficEven
 export async function simulateTrafficEvent(payload: Partial<TrafficEvent> = {}): Promise<void> {
   const res = await fetch(`${TELEMETRY_BASE}/traffic/simulate`, {
     method: 'POST',
-    headers: {
-      'X-Api-Key': RELAY_API_KEY,
-      'Content-Type': 'application/json',
-    },
+    headers: JSON_HEADERS,
+    credentials: 'same-origin',
     body: JSON.stringify(payload),
   });
+  checkAuth(res);
   if (!res.ok) throw new Error(`Error al simular evento: ${res.status}`);
 }
 
 export async function fetchTrafficSource(): Promise<TrafficSourceInfo> {
   const res = await fetch(`${TELEMETRY_BASE}/traffic/source`, {
-    headers: {
-      'X-Api-Key': RELAY_API_KEY,
-      'Content-Type': 'application/json',
-    },
+    headers: JSON_HEADERS,
+    credentials: 'same-origin',
   });
+  checkAuth(res);
   if (!res.ok) throw new Error(`Error al consultar fuente de tráfico: ${res.status}`);
   return res.json() as Promise<TrafficSourceInfo>;
 }
-
