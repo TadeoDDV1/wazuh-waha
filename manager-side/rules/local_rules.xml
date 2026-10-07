@@ -27,7 +27,7 @@
   =============================================================================
 -->
 
-<group name="local,authentication_success,waha_health,">
+<group name="local,authentication_success,waha_health">
 
   <!-- 57100: SSH login exitoso - se cuelga de la regla stock 5715 (level 3 -> 10) -->
   <rule id="57100" level="10">
@@ -131,14 +131,12 @@
     <group>vulnerability_detector,cve,clear</group>
   </rule>
 
-  <!-- 999001: Health event de WAHA. El relay inyecta estas alertas via -->
-  <!-- POST al manager (puerto 55000 /alerts). El body trae descripcion con -->
-  <!-- "WAHA session ..." y level 10 (recovered) o 15 (failed). Esta regla -->
-  <!-- matchea por regex en la descripcion y etiqueta con grupos waha_health. -->
+  <!-- 999001: Health event de WAHA / Relay / Agente. El relay inyecta estas alertas -->
+  <!-- via POST al manager (puerto 55000 /events). -->
   <rule id="999001" level="10">
     <decoded_as>json</decoded_as>
-    <match>WAHA session</match>
-    <description>WAHA health event (relay)</description>
+    <match>WAHA session|wazuh-waha|wazuh-agent|watchdog</match>
+    <description>Wazuh-WAHA infrastructure health event</description>
     <group>waha_health,auto_recovery</group>
   </rule>
 

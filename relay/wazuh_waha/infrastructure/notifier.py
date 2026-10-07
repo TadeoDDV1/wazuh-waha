@@ -215,13 +215,20 @@ async def notify_health(description: str, level: int = 15, **fields) -> None:
         body_lines.append(f"{k:12s} {v}")
     body = "\n".join(body_lines)
 
-    email_tasks = []
+    extra_tasks = []
     if settings.email_provider == "hyvor_relay":
-        email_tasks.append(notify_email_hyvor(subject, body))
-    else:
-        email_tasks.append(asyncio.to_thread(notify_email, subject, body))
+        extra_tasks.append(notify_email_hyvor(subject, body))
+    elif settings.email_provider not in ("off", "none", "disabled", ""):
+        extra_tasks.append(asyncio.to_thread(notify_email, subject, body))
+
+    # Notificar a Telegram si está activo
+    try:
+        from .telegram_bot import send_health_notice
+        extra_tasks.append(send_health_notice(description, level, **fields))
+    except Exception as _tg_err:
+        log.debug("telegram_health_notify_err err=%s", _tg_err)
 
     await asyncio.gather(
         notify_wazuh_manager(description, level, **fields),
-        *email_tasks,
+        *extra_tasks,
     )

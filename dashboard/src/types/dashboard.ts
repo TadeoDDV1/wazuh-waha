@@ -93,6 +93,10 @@ export interface FormConfig {
   ollama_host?: string;
   ollama_model?: string;
   ollama_timeout?: number;
+  telegram_enabled?: boolean;
+  telegram_bot_token_set?: boolean;
+  telegram_chat_id?: string;
+  telegram_min_level?: number;
   relay_port?: number;
   relay_dedup_ttl?: number;
   relay_min_level_unknown?: number;

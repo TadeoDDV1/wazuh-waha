@@ -245,8 +245,6 @@ else
                 read -rp "  ¿Actualizar WAZUH_SERVER_IP a $DETECTED_MGR_IP? (S/n): " update_ip
                 if [[ ! "$update_ip" =~ ^[nN]$ ]]; then
                     set_env_val "WAZUH_SERVER_IP" "$DETECTED_MGR_IP"
-                    set_env_val "WAZUH_MANAGER_HOST" "$DETECTED_MGR_IP"
-                    set_env_val "WAZUH_VM_SSH_HOST" "$DETECTED_MGR_IP"
                     CURRENT_MGR_IP="$DETECTED_MGR_IP"
                     ok "IP actualizada a $DETECTED_MGR_IP"
                 fi
@@ -508,6 +506,14 @@ elif [ -n "$CURRENT_MGR_IP" ]; then
         if [ $? -eq 0 ]; then
             ok "Configuración desplegada exitosamente al Manager."
             DEPLOY_OK=true
+            if [ "$FIX_CONNECTION" = false ]; then
+                info "Reiniciando Wazuh Manager en el host remoto..."
+                if "${SSHX[@]}" "${CURRENT_SSH_USER}@${CURRENT_MGR_IP}" "$REMOTE_SUDO systemctl restart wazuh-manager" 2>/dev/null; then
+                    ok "Wazuh Manager reiniciado en el host remoto."
+                else
+                    warn "No se pudo reiniciar wazuh-manager en el Manager remoto (puede requerir sudo sin password)."
+                fi
+            fi
         else
             fail "Error al mover el archivo en el Manager."
         fi

@@ -57,20 +57,23 @@ ENV_FILE="$PROJECT_ROOT/.env"
 mkdir -p "$BACKUP_DIR"
 
 # Cargar variables del .env si existe
-if [ -f "$ENV_FILE" ]; then
-    set -a
-    source "$ENV_FILE" 2>/dev/null
-    set +a
-fi
+recargar_env() {
+    if [ -f "$ENV_FILE" ]; then
+        set -a
+        source "$ENV_FILE" 2>/dev/null
+        set +a
+    fi
 
-WAHA_HOST="${WAHA_HOST:-http://localhost:3001}"
-RELAY_HOST="${RELAY_HOST:-http://localhost:8765}"
-WAZUH_SERVER_IP="${WAZUH_SERVER_IP:-192.168.122.142}"
-WAZUH_MANAGER_API_PORT="${WAZUH_MANAGER_API_PORT:-55000}"
-WAZUH_MANAGER_API_USER="${WAZUH_MANAGER_API_USER:-wazuh}"
-WAZUH_MANAGER_API_PASS="${WAZUH_MANAGER_API_PASS:-}"
-RELAY_API_KEY="${RELAY_API_KEY:-}"
-ADMIN_EMAIL="${ADMIN_EMAIL:-}"
+    WAHA_HOST="${WAHA_HOST:-http://localhost:3001}"
+    RELAY_HOST="${RELAY_HOST:-http://localhost:8765}"
+    WAZUH_SERVER_IP="${WAZUH_SERVER_IP:-192.168.122.142}"
+    WAZUH_MANAGER_API_PORT="${WAZUH_MANAGER_API_PORT:-55000}"
+    WAZUH_MANAGER_API_USER="${WAZUH_MANAGER_API_USER:-wazuh}"
+    WAZUH_MANAGER_API_PASS="${WAZUH_MANAGER_API_PASS:-}"
+    RELAY_API_KEY="${RELAY_API_KEY:-}"
+    ADMIN_EMAIL="${ADMIN_EMAIL:-}"
+}
+recargar_env
 
 # ── Funciones Auxiliares ─────────────────────────────────────────────────────
 limpiar() {
@@ -871,18 +874,190 @@ except Exception as e:
 # ==============================================================================
 # 7. WHATSAPP (WAHA) Y NOTIFICACIONES
 # ==============================================================================
+configurar_telegram() {
+    limpiar
+    titulo "CONFIGURACIÓN E INICIO DE SESIÓN EN TELEGRAM BOT"
+
+    local current_token current_chat current_enabled
+    current_token=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"'\')
+    current_chat=$(grep -E '^TELEGRAM_CHAT_ID=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"'\')
+    current_enabled=$(grep -E '^TELEGRAM_ENABLED=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"'\')
+
+    echo -e "  ${BLANCO}Estado actual en .env:${NC}"
+    echo -e "    • Token configurado: $([ -n "$current_token" ] && echo -e "${VERDE}Sí${NC}" || echo -e "${ROJO}No${NC}")"
+    echo -e "    • Chat ID:          ${CYAN}${current_chat:-no vinculado}${NC}"
+    echo -e "    • Habilitado:       $([ "$current_enabled" = "true" ] && echo -e "${VERDE}Sí${NC}" || echo -e "${AMARILLO}No${NC}")"
+    echo ""
+    echo -e "  ${GRIS}Para crear un bot, abre Telegram, habla con @BotFather y crea un nuevo bot (/newbot).${NC}"
+    echo ""
+
+    read -rp "  Ingresa el Token del Bot (o Enter para conservar): " in_token
+    local final_token="${in_token:-$current_token}"
+
+    if [ -z "$final_token" ]; then
+        warn "No se ingresó token. Operación cancelada."
+        pausar
+        return
+    fi
+
+    info "Validando token con la API de Telegram..."
+    local get_me_res
+    get_me_res=$(curl -s -m 10 "https://api.telegram.org/bot${final_token}/getMe" 2>/dev/null)
+
+    if ! echo "$get_me_res" | grep -q '"ok":true'; then
+        fail "Token inválido o sin conexión con Telegram: $get_me_res"
+        pausar
+        return
+    fi
+
+    local bot_user
+    bot_user=$(echo "$get_me_res" | grep -o '"username":"[^"]*' | cut -d'"' -f4)
+    ok "¡Bot verificado exitosamente!: @$bot_user"
+    echo ""
+
+    echo -e "  ¿Deseas iniciar sesión y emparejar automáticamente tu cuenta?"
+    echo -e "  (${AMARILLO}Abre Telegram y envía /start a @$bot_user${NC})"
+    read -rp "  ¿Esperar mensaje /start ahora? (S/n): " in_pair
+
+    local final_chat="$current_chat"
+    if [[ ! "$in_pair" =~ ^[nN]$ ]]; then
+        info "Esperando mensaje en @$bot_user (hasta 30s)..."
+        local deadline=$((SECONDS + 30))
+        local detected_chat=""
+        local detected_name=""
+
+        while [ $SECONDS -lt $deadline ]; do
+            local updates
+            updates=$(curl -s -m 5 "https://api.telegram.org/bot${final_token}/getUpdates?limit=5" 2>/dev/null)
+            if echo "$updates" | grep -q '"chat"'; then
+                detected_chat=$(echo "$updates" | grep -o '"id":-[0-9]*\|"id":[0-9]*' | tail -1 | cut -d':' -f2)
+                detected_name=$(echo "$updates" | grep -o '"first_name":"[^"]*' | tail -1 | cut -d'"' -f4)
+                if [ -n "$detected_chat" ]; then
+                    break
+                fi
+            fi
+            sleep 2
+            echo -n "."
+        done
+        echo ""
+
+        if [ -n "$detected_chat" ]; then
+            ok "¡Usuario detectado!: ${detected_name:-Admin} (Chat ID: $detected_chat)"
+            final_chat="$detected_chat"
+            curl -s -X POST "https://api.telegram.org/bot${final_token}/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d "{\"chat_id\":\"$final_chat\",\"text\":\"✅ ¡Conexión establecida con éxito con el servidor wazuh-waha! A partir de ahora recibirás alertas y puedes usar /status, /servicios y /alertas.\"}" >/dev/null 2>&1
+        else
+            warn "No se recibió mensaje en el tiempo límite."
+            read -rp "  Ingresa el Chat ID manualmente (o Enter para omitir): " manual_chat
+            if [ -n "$manual_chat" ]; then
+                final_chat="$manual_chat"
+            fi
+        fi
+    else
+        read -rp "  Ingresa el Chat ID manualmente (o Enter para omitir): " manual_chat
+        if [ -n "$manual_chat" ]; then
+            final_chat="$manual_chat"
+        fi
+    fi
+
+    set_env_k() {
+        local k="$1" v="$2"
+        if grep -qE "^${k}=" "$ENV_FILE"; then
+            sed -i "s|^${k}=.*|${k}=${v}|" "$ENV_FILE"
+        else
+            echo "${k}=${v}" >> "$ENV_FILE"
+        fi
+    }
+    set_env_k "TELEGRAM_BOT_TOKEN" "$final_token"
+    set_env_k "TELEGRAM_CHAT_ID" "$final_chat"
+    set_env_k "TELEGRAM_ENABLED" "true"
+
+    if [ -x "$PROJECT_ROOT/scripts/sync_relay_env.sh" ]; then
+        sudo bash "$PROJECT_ROOT/scripts/sync_relay_env.sh" apply >/dev/null 2>&1 || true
+    fi
+
+    sudo systemctl restart wazuh-waha 2>/dev/null || true
+    ok "Configuración de Telegram guardada y servicio relay reiniciado."
+    log "TELEGRAM: Bot configurado (@$bot_user, Chat ID: $final_chat)."
+    pausar
+}
+
+probar_telegram() {
+    limpiar
+    titulo "ENVIAR MENSAJE DE PRUEBA A TELEGRAM"
+    local current_token current_chat
+    current_token=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"'\')
+    current_chat=$(grep -E '^TELEGRAM_CHAT_ID=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"'\')
+
+    if [ -z "$current_token" ] || [ -z "$current_chat" ]; then
+        fail "Telegram no está completamente configurado (Token o Chat ID vacíos)."
+        info "Usa la opción para configurar el bot primero."
+        pausar
+        return
+    fi
+
+    info "Enviando mensaje de prueba al chat $current_chat..."
+    local test_msg="🛡️ [Prueba Wazuh SOC] Notificación enviada desde el Administrador de Terminal a Telegram."
+    local resp
+    resp=$(curl -s -X POST "https://api.telegram.org/bot${current_token}/sendMessage" \
+        -H "Content-Type: application/json" \
+        -d "{\"chat_id\":\"$current_chat\",\"text\":\"$test_msg\"}" 2>/dev/null)
+
+    if echo "$resp" | grep -q '"ok":true'; then
+        ok "¡Mensaje enviado con éxito a Telegram!"
+        log "TELEGRAM: Mensaje de prueba enviado con éxito."
+    else
+        fail "Error al enviar mensaje: $resp"
+    fi
+    pausar
+}
+
+estado_telegram() {
+    limpiar
+    titulo "ESTADO DEL BOT DE TELEGRAM"
+    local current_token current_chat current_enabled
+    current_token=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"'\')
+    current_chat=$(grep -E '^TELEGRAM_CHAT_ID=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"'\')
+    current_enabled=$(grep -E '^TELEGRAM_ENABLED=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"'\')
+
+    echo -e "  • Habilitado:   $([ "$current_enabled" = "true" ] && echo -e "${VERDE}Sí${NC}" || echo -e "${AMARILLO}No${NC}")"
+    echo -e "  • Chat ID:      ${CYAN}${current_chat:-no configurado}${NC}"
+
+    if [ -n "$current_token" ]; then
+        info "Consultando información del bot con Telegram API..."
+        local me
+        me=$(curl -s -m 8 "https://api.telegram.org/bot${current_token}/getMe" 2>/dev/null)
+        if echo "$me" | grep -q '"ok":true'; then
+            local bname buser
+            bname=$(echo "$me" | grep -o '"first_name":"[^"]*' | cut -d'"' -f4)
+            buser=$(echo "$me" | grep -o '"username":"[^"]*' | cut -d'"' -f4)
+            echo -e "  • Bot:          ${VERDE}$bname (@$buser)${NC}"
+            echo -e "  • Conectividad: ${VERDE}[ONLINE]${NC}"
+        else
+            echo -e "  • Conectividad: ${ROJO}[ERROR EN TOKEN O SIN RED]${NC}"
+        fi
+    else
+        echo -e "  • Token:        ${ROJO}[NO CONFIGURADO]${NC}"
+    fi
+    pausar
+}
+
 menu_notificaciones() {
     limpiar
-    titulo "GESTIÓN DE WHATSAPP (WAHA) Y NOTIFICACIONES"
-    echo -e "  ${AMARILLO}1)${NC} Ver estado detallado de la sesión WhatsApp"
+    titulo "GESTIÓN DE NOTIFICACIONES (WHATSAPP, TELEGRAM, EMAIL)"
+    echo -e "  ${AMARILLO}1)${NC} Ver estado detallado de la sesión WhatsApp (WAHA)"
     echo -e "  ${AMARILLO}2)${NC} Vincular WhatsApp (Mostrar Código QR en Terminal)"
     echo -e "  ${AMARILLO}3)${NC} Enviar mensaje de alerta simulado a WhatsApp"
-    echo -e "  ${AMARILLO}4)${NC} Enviar correo de prueba (Google SMTP a $ADMIN_EMAIL)"
-    echo -e "  ${AMARILLO}5)${NC} Iniciar / Reiniciar sesión WAHA"
-    echo -e "  ${AMARILLO}6)${NC} Detener sesión WAHA"
-    echo -e "  ${ROJO}7)${NC} Volver al menú principal"
+    echo -e "  ${AMARILLO}4)${NC} Iniciar / Reiniciar sesión WAHA"
+    echo -e "  ${AMARILLO}5)${NC} Detener sesión WAHA"
+    echo -e "  ${AMARILLO}6)${NC} Enviar correo de prueba (Google SMTP a $ADMIN_EMAIL)"
+    echo -e "  ${CYAN}7)${NC} ✈️ Configurar e Iniciar Sesión en Telegram Bot (@BotFather)"
+    echo -e "  ${CYAN}8)${NC} ✈️ Enviar mensaje de prueba a Telegram"
+    echo -e "  ${CYAN}9)${NC} ✈️ Ver estado de Telegram Bot y Monitoreo"
+    echo -e "  ${ROJO}10)${NC} Volver al menú principal"
     separador
-    read -rp "  Seleccione [1-7]: " opc_not
+    read -rp "  Seleccione [1-10]: " opc_not
 
     local RELAY_AUTH_HEADER=()
     if [ -n "$RELAY_API_KEY" ]; then
@@ -932,7 +1107,7 @@ menu_notificaciones() {
                     ok "¡La sesión ya se encuentra VINCULADA y ACTIVA (WORKING)!"
                 else
                     warn "WAHA no ha generado un QR nuevo en este momento (Estado: ${status_msg:-desconocido})."
-                    echo "  Inicie la sesión primero (opción 5) si está detenida."
+                    echo "  Inicie la sesión primero (opción 4) si está detenida."
                 fi
             fi
             pausar
@@ -959,6 +1134,22 @@ menu_notificaciones() {
             ;;
 
         4)
+            info "Iniciando / Reiniciando sesión WAHA..."
+            curl -s -m 8 -X POST -H "X-Api-Key: ${WAHA_API_KEY:-}" "$WAHA_HOST/api/sessions/default/restart" 2>/dev/null || \
+            curl -s -m 8 -X POST -H "X-Api-Key: ${WAHA_API_KEY:-}" "$WAHA_HOST/api/sessions/default/start" 2>/dev/null
+            sleep 3
+            ok "Orden de inicio enviada a WAHA."
+            pausar
+            ;;
+
+        5)
+            info "Deteniendo sesión WAHA..."
+            curl -s -m 8 -X POST -H "X-Api-Key: ${WAHA_API_KEY:-}" "$WAHA_HOST/api/sessions/default/stop" 2>/dev/null
+            ok "Sesión WAHA detenida."
+            pausar
+            ;;
+
+        6)
             echo ""
             local DEST_EMAIL="$ADMIN_EMAIL"
             read -rp "  Correo destinatario [Default: ${DEST_EMAIL:-josededios3030@gmail.com}]: " INPUT_MAIL
@@ -980,22 +1171,10 @@ menu_notificaciones() {
             pausar
             ;;
 
-        5)
-            info "Iniciando / Reiniciando sesión WAHA..."
-            curl -s -m 8 -X POST -H "X-Api-Key: ${WAHA_API_KEY:-}" "$WAHA_HOST/api/sessions/default/restart" 2>/dev/null || \
-            curl -s -m 8 -X POST -H "X-Api-Key: ${WAHA_API_KEY:-}" "$WAHA_HOST/api/sessions/default/start" 2>/dev/null
-            sleep 3
-            ok "Orden de inicio enviada a WAHA."
-            pausar
-            ;;
-
-        6)
-            info "Deteniendo sesión WAHA..."
-            curl -s -m 8 -X POST -H "X-Api-Key: ${WAHA_API_KEY:-}" "$WAHA_HOST/api/sessions/default/stop" 2>/dev/null
-            ok "Sesión WAHA detenida."
-            pausar
-            ;;
-        7) return ;;
+        7) configurar_telegram ;;
+        8) probar_telegram     ;;
+        9) estado_telegram     ;;
+        10) return             ;;
         *) fail "Opción no válida"; sleep 1 ;;
     esac
 }
@@ -1528,20 +1707,85 @@ ejecutar_todo() {
 }
 
 # ==============================================================================
-# 17. VER CREDENCIALES DE ACCESO A WAZUH
+# ==============================================================================
+# 0. ASISTENTE DE CONEXIÓN, CREDENCIALES Y REINICIO
+# ==============================================================================
+menu_conectar() {
+    limpiar
+    titulo "ASISTENTE DE CONEXIÓN, CREDENCIALES Y REINICIO"
+    echo -e "  ${BLANCO}Seleccione la modalidad de ejecución:${NC}\n"
+    echo -e "  ${VERDE}1)${NC} 🔌 Modo interactivo estándar (Verifica credenciales e infraestructura)"
+    echo -e "  ${AMARILLO}2)${NC} 🔄 Forzar reinicio y regeneración total de API Keys (--force-keys)"
+    echo -e "  ${CYAN}3)${NC} ⚡ Verificación rápida de conexión y sincronización (--fix-connection)"
+    echo -e "  ${MAGENTA}4)${NC} 🤖 Modo automático sin preguntas (--auto)"
+    echo -e "  ${ROJO}0)${NC} ↩️  Volver al menú principal\n"
+
+    read -rp "  Seleccione una opción [0-4]: " sub_opc
+    case "$sub_opc" in
+        1)
+            if [ -f "$PROJECT_ROOT/conectar.sh" ]; then
+                bash "$PROJECT_ROOT/conectar.sh"
+            else
+                fail "No se encontró el script conectar.sh en $PROJECT_ROOT"
+            fi
+            ;;
+        2)
+            echo ""
+            warn "¡ATENCIÓN! Se generarán nuevas RELAY_API_KEY y WAHA_API_KEY seguras."
+            warn "Se recreará el contenedor WAHA en Docker, se actualizará /etc/wazuh-waha/relay.env,"
+            warn "se reiniciarán los servicios y se propagará la configuración al Wazuh Manager."
+            read -rp "  ¿Está seguro de continuar con la rotación forzada? (s/N): " conf_rot
+            if [[ "$conf_rot" =~ ^[sSyY]$ ]]; then
+                if [ -f "$PROJECT_ROOT/conectar.sh" ]; then
+                    bash "$PROJECT_ROOT/conectar.sh" --force-keys
+                else
+                    fail "No se encontró el script conectar.sh en $PROJECT_ROOT"
+                fi
+            else
+                info "Rotación de credenciales cancelada por el usuario."
+            fi
+            ;;
+        3)
+            if [ -f "$PROJECT_ROOT/conectar.sh" ]; then
+                bash "$PROJECT_ROOT/conectar.sh" --fix-connection
+            else
+                fail "No se encontró el script conectar.sh en $PROJECT_ROOT"
+            fi
+            ;;
+        4)
+            if [ -f "$PROJECT_ROOT/conectar.sh" ]; then
+                bash "$PROJECT_ROOT/conectar.sh" --auto
+            else
+                fail "No se encontró el script conectar.sh en $PROJECT_ROOT"
+            fi
+            ;;
+        0)
+            return
+            ;;
+        *)
+            fail "Opción no válida."
+            ;;
+    esac
+    recargar_env
+}
+
+# ==============================================================================
+# 17. VER CREDENCIALES DEL SISTEMA
 # ==============================================================================
 ver_credenciales() {
     limpiar
-    titulo "CREDENCIALES DE ACCESO A WAZUH"
+    titulo "CREDENCIALES Y SECRETOS DEL SISTEMA"
 
-    warn "Se mostrará la contraseña de la API de Wazuh EN CLARO en la pantalla."
-    read -rp "  ¿Desea continuar? (s/n): " c_sec
-    if [ "$c_sec" != "s" ] && [ "$c_sec" != "S" ]; then
+    warn "Se mostrarán las contraseñas, tokens y API keys configuradas EN CLARO."
+    read -rp "  ¿Desea continuar? (s/N): " c_sec
+    if [[ ! "$c_sec" =~ ^[sSyY]$ ]]; then
         info "Operación cancelada."
         log "CREDENCIALES: Visualización cancelada por el usuario."
         pausar
         return
     fi
+
+    recargar_env
 
     sec() {
         printf "  %-34s" "$1"
@@ -1552,18 +1796,47 @@ ver_credenciales() {
         fi
     }
 
-    echo -e "\n  ${BLANCO}── Wazuh Manager API ──${NC}"
-    sec "URL"                              "https://${WAZUH_SERVER_IP:-}:${WAZUH_MANAGER_API_PORT}"
-    sec "Usuario"                          "${WAZUH_MANAGER_API_USER:-wazuh}"
-    sec "Password"                         "${WAZUH_MANAGER_API_PASS:-}"
+    echo -e "\n  ${BLANCO}── Wazuh Manager API & Acceso ──${NC}"
+    sec "URL API Manager"                  "https://${WAZUH_SERVER_IP:-}:${WAZUH_MANAGER_API_PORT:-55000}"
+    sec "Usuario API"                      "${WAZUH_MANAGER_API_USER:-wazuh}"
+    sec "Password API"                     "${WAZUH_MANAGER_API_PASS:-}"
+    sec "SSH Manager"                      "${WAZUH_VM_SSH_USER:-root}@${WAZUH_VM_SSH_HOST:-$WAZUH_SERVER_IP}:${WAZUH_VM_SSH_PORT:-22}"
+    sec "Clave SSH (Key Path)"             "${WAZUH_VM_SSH_KEY_PATH:-(predeterminada ~/.ssh)}"
 
-    echo -e "\n  ${BLANCO}── Servidor Wazuh (VM) por SSH ──${NC}"
-    sec "Usuario@Host:Puerto"              "${WAZUH_VM_SSH_USER:-root}@${WAZUH_VM_SSH_HOST:-$WAZUH_SERVER_IP}:${WAZUH_VM_SSH_PORT:-22}"
-    info "La contraseña SSH no está en el repo: se pide al conectarse (o use clave)."
+    echo -e "\n  ${BLANCO}── Wazuh-WAHA Relay & Dashboard ──${NC}"
+    sec "URL Relay"                        "${RELAY_HOST:-http://localhost:8765}"
+    sec "RELAY_API_KEY (Master)"           "${RELAY_API_KEY:-}"
+    sec "RELAY_READONLY_API_KEY"           "${RELAY_READONLY_API_KEY:-}"
+    sec "Session Cookie Secure"            "${SESSION_COOKIE_SECURE:-false}"
+    sec "Session TTL (Horas)"              "${SESSION_TTL_HOURS:-8}"
+
+    echo -e "\n  ${BLANCO}── WAHA (WhatsApp HTTP API) ──${NC}"
+    sec "Host WAHA"                        "${WAHA_HOST:-http://localhost:3001}"
+    sec "Sesión WAHA"                      "${WAHA_SESSION:-default}"
+    sec "WAHA_API_KEY"                     "${WAHA_API_KEY:-}"
+    sec "Teléfono Destino (Alertas)"       "${ADMIN_PHONE:-}"
+
+    echo -e "\n  ${BLANCO}── Telegram Bot (Monitoreo & Alertas) ──${NC}"
+    sec "Telegram Activado"                "${TELEGRAM_ENABLED:-false}"
+    sec "Telegram Bot Token"               "${TELEGRAM_BOT_TOKEN:-}"
+    sec "Telegram Chat ID"                 "${TELEGRAM_CHAT_ID:-}"
+    sec "Nivel Mínimo Telegram"            "${TELEGRAM_MIN_LEVEL:-8}"
+
+    echo -e "\n  ${BLANCO}── Respaldos & Notificaciones Secundarias ──${NC}"
+    sec "Proveedor Notificaciones"         "${EMAIL_PROVIDER:-off}"
+    sec "Email Destino"                    "${ADMIN_EMAIL:-}"
+    if [ "${EMAIL_PROVIDER:-}" = "smtp" ]; then
+        sec "SMTP Servidor"                "${SMTP_HOST:-}:${SMTP_PORT:-587}"
+        sec "SMTP Usuario"                 "${SMTP_USER:-}"
+        sec "SMTP Password"                "${SMTP_PASS:-}"
+    elif [ "${EMAIL_PROVIDER:-}" = "hyvor_relay" ]; then
+        sec "Hyvor Base URL"               "${HYVOR_BASE_URL:-}"
+        sec "Hyvor API Key"                "${HYVOR_API_KEY:-}"
+    fi
 
     echo ""
     separador
-    log "CREDENCIALES: Visualización de credenciales de Wazuh en pantalla."
+    log "CREDENCIALES: Visualización de credenciales completas en pantalla."
     pausar
 }
 
@@ -1579,7 +1852,7 @@ while true; do
     echo -e "${AZUL}╠══════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${AZUL}║${NC}                                                                      ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}  ${VERDE}── Configuración Rápida (1-Click Setup) ───────────────────${NC}       ${AZUL}║${NC}"
-    echo -e "${AZUL}║${NC}   ${VERDE} 0)${NC} 🔑 Configurar / Sincronizar credenciales y reiniciar todo     ${AZUL}║${NC}"
+    echo -e "${AZUL}║${NC}   ${VERDE} 0)${NC} 🔑 Asistente de conexión, rotación de claves y reinicio      ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}                                                                      ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}  ${CYAN}── Monitoreo y Diagnóstico ────────────────────────────────${NC}       ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${AMARILLO} 1)${NC} Estado e información del sistema (CPU, RAM, Disco)           ${AZUL}║${NC}"
@@ -1608,7 +1881,7 @@ while true; do
     echo -e "${AZUL}║${NC}  ${CYAN}── Automatización y Auditoría ─────────────────────────────${NC}       ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${AMARILLO}15)${NC} Ver historial de auditoría (admin-wazuh-waha.log)            ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${VERDE}16)${NC} ⚡ Ejecutar TODO el mantenimiento integral                    ${AZUL}║${NC}"
-    echo -e "${AZUL}║${NC}   ${AMARILLO}17)${NC} 🔑 Ver credenciales de acceso a Wazuh                     ${AZUL}║${NC}"
+    echo -e "${AZUL}║${NC}   ${AMARILLO}17)${NC} 🔑 Ver credenciales completas (Wazuh, Relay, Telegram, WAHA)  ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${ROJO}18)${NC} Salir                                                         ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}                                                                      ${AZUL}║${NC}"
     echo -e "${AZUL}╚══════════════════════════════════════════════════════════════════════╝${NC}"
@@ -1618,14 +1891,7 @@ while true; do
     fi
 
     case $opcion in
-        0)
-            if [ -x "$PROJECT_ROOT/conectar.sh" ]; then
-                bash "$PROJECT_ROOT/conectar.sh"
-            else
-                fail "No se encontró el script conectar.sh en $PROJECT_ROOT"
-            fi
-            pausar
-            ;;
+        0)  menu_conectar;         pausar ;;
         1)  info_sistema;          pausar ;;
         2)  estado_servicios;      pausar ;;
         3)  diagnostico;           pausar ;;

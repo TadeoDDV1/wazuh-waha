@@ -12,6 +12,7 @@ from ..common.traffic_stream import traffic_watcher
 from ..config import settings
 from ..domain.pipeline import format_alert
 from ..infrastructure import waha_client
+from ..infrastructure.telegram_bot import telegram_bot
 from .deps import verify_api_key
 
 
@@ -115,6 +116,18 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
     )
     record["msg_len"] = len(message)
     record["msg_preview"] = message[:160]
+
+    # Despacho concurrente a Telegram (si está habilitado)
+    try:
+        import asyncio
+        asyncio.create_task(telegram_bot.send_alert(
+            message_text=message,
+            level=level,
+            rule_id=rule_id,
+            agent_name=agent_name,
+        ))
+    except Exception as _tg_err:
+        log.debug("telegram_dispatch_err err=%s", _tg_err)
 
     try:
         wa_resp = await waha_client.send_text(message)

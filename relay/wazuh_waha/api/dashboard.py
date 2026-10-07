@@ -947,6 +947,7 @@ async def dashboard_config(request: Request):
         "EMAIL_PROVIDER", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_FROM", "ADMIN_EMAIL", "SMTP_TLS",
         "HYVOR_BASE_URL", "HYVOR_FROM", "ADMIN_EMAIL",
         "OLLAMA_ENABLED", "OLLAMA_HOST", "OLLAMA_MODEL", "OLLAMA_TIMEOUT",
+        "TELEGRAM_ENABLED", "TELEGRAM_CHAT_ID", "TELEGRAM_MIN_LEVEL",
         "WAHA_RECOVERY_COOLDOWN_SEC", "WAHA_RECOVERY_MAX_WAIT_SEC", "WAHA_WATCHDOG_INTERVAL_SEC",
     ]:
         val = os.environ.get(key, "")
@@ -1003,6 +1004,11 @@ async def dashboard_config(request: Request):
             "ollama_host": settings.ollama_host,
             "ollama_model": settings.ollama_model,
             "ollama_timeout": settings.ollama_timeout,
+            # Telegram Bot
+            "telegram_enabled": getattr(settings, "telegram_enabled", False),
+            "telegram_bot_token_set": bool(getattr(settings, "telegram_bot_token", "")),
+            "telegram_chat_id": getattr(settings, "telegram_chat_id", ""),
+            "telegram_min_level": getattr(settings, "telegram_min_level", 8),
             # Relay params
             "relay_port": settings.relay_port,
             "relay_dedup_ttl": settings.relay_dedup_ttl,
@@ -1195,17 +1201,19 @@ _EDITABLE_ENV_KEYS = {
     "HYVOR_BASE_URL", "HYVOR_API_KEY", "HYVOR_FROM", "ADMIN_EMAIL",
     # Ollama
     "OLLAMA_ENABLED", "OLLAMA_HOST", "OLLAMA_MODEL", "OLLAMA_TIMEOUT",
+    # Telegram Bot
+    "TELEGRAM_ENABLED", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_MIN_LEVEL",
     # Relay
     "RELAY_PORT", "RELAY_DEDUP_TTL", "RELAY_MIN_LEVEL_UNKNOWN", "RELAY_WORKERS",
 }
 
 # Claves cuyo valor Settings espera como bool o int
-_BOOL_KEYS = {"SMTP_TLS", "OLLAMA_ENABLED", "WAZUH_MANAGER_API_VERIFY_TLS", "AUTO_RECONCILE"}
+_BOOL_KEYS = {"SMTP_TLS", "OLLAMA_ENABLED", "WAZUH_MANAGER_API_VERIFY_TLS", "AUTO_RECONCILE", "TELEGRAM_ENABLED"}
 _INT_KEYS = {
     "SMTP_PORT", "WAZUH_MANAGER_API_PORT", "WAHA_RECOVERY_COOLDOWN_SEC",
     "WAHA_RECOVERY_MAX_WAIT_SEC", "WAHA_WATCHDOG_INTERVAL_SEC",
     "RELAY_PORT", "RELAY_DEDUP_TTL", "RELAY_MIN_LEVEL_UNKNOWN", "RELAY_WORKERS",
-    "OLLAMA_TIMEOUT",
+    "OLLAMA_TIMEOUT", "TELEGRAM_MIN_LEVEL",
 }
 
 
@@ -1524,6 +1532,63 @@ async def dashboard_test_email(request: Request):
 
     log.info("dashboard_test_email ok=%s dest=%s detail=%s", ok, dest, detail)
     return {"ok": ok, "detail": detail}
+
+
+# ──────────────────────────────────────────────
+# Endpoints: Telegram Bot & Monitoreo
+# ──────────────────────────────────────────────
+
+@router.get("/api/v1/dashboard/telegram/status")
+async def telegram_status(request: Request):
+    """Consulta el estado del Bot de Telegram (conexión y username)."""
+    await verify_api_key(request)
+    from ..infrastructure.telegram_bot import get_bot_info
+    info = await get_bot_info()
+    return {
+        "enabled": getattr(settings, "telegram_enabled", False),
+        "configured": bool(getattr(settings, "telegram_bot_token", "")),
+        "chat_id": getattr(settings, "telegram_chat_id", ""),
+        "min_level": getattr(settings, "telegram_min_level", 8),
+        "bot_info": info,
+    }
+
+
+@router.post("/api/v1/dashboard/telegram/pair")
+async def telegram_pair(request: Request):
+    """Inicia el proceso de emparejamiento con Telegram para detectar chat_id."""
+    await verify_write(request)
+    from ..infrastructure.telegram_bot import pair_session, telegram_bot
+    res = await pair_session()
+    if res.get("ok") and res.get("chat_id"):
+        cid = str(res["chat_id"])
+        _write_env_batch({"TELEGRAM_CHAT_ID": cid, "TELEGRAM_ENABLED": "true"})
+        setattr(settings, "telegram_chat_id", cid)
+        setattr(settings, "telegram_enabled", True)
+        telegram_bot.start()
+    return res
+
+
+@router.post("/api/v1/dashboard/telegram/test")
+async def telegram_test(request: Request):
+    """Envía un mensaje de prueba al chat de Telegram configurado."""
+    await verify_write(request)
+    from ..infrastructure.telegram_bot import send_message
+    if not settings.telegram_bot_token or not settings.telegram_chat_id:
+        return {"ok": False, "detail": "Token o Chat ID de Telegram no configurados"}
+
+    import platform
+    txt = (
+        "🛡️ *Wazuh-WAHA Security Relay*\n\n"
+        "✅ *Mensaje de prueba exitoso.*\n"
+        f"🖥️ *Servidor:* `{platform.node()}`\n"
+        f"⏰ *Hora:* {time.strftime('%Y-%m-%d %H:%M:%S %z')}\n\n"
+        "El canal de Telegram está listo para recibir alertas de seguridad y responder a `/status`."
+    )
+    ok = await send_message(txt)
+    return {
+        "ok": ok,
+        "detail": "Mensaje enviado exitosamente a Telegram" if ok else "Fallo al enviar mensaje a Telegram (revisa token y chat_id)",
+    }
 
 
 # ──────────────────────────────────────────────

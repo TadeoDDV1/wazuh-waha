@@ -91,8 +91,7 @@ def cookie_kwargs(max_age: int) -> dict:
         "max_age": max_age,
         "path": "/",
         "httponly": True,
-        # Sin TLS en la red local: Secure rompería la cookie en http://.
-        # Si algún día se agrega TLS, cambiar a True.
+        # False por defecto para red local http://; configurable a True para TLS/HTTPS
         "samesite": "strict",
-        "secure": False,
+        "secure": settings.session_cookie_secure,
     }

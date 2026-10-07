@@ -103,6 +103,13 @@ class Settings(BaseSettings):
     enable_docs: bool = False
     # SSH del traffic source: yes = exigir known_hosts pre-provisionado
     wazuh_vm_ssh_strict_host_key: str = "accept-new"  # yes | accept-new | no
+    session_cookie_secure: bool = False
+
+    # --- Telegram Bot (monitoreo y notificaciones) ---
+    telegram_enabled: bool = False
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    telegram_min_level: int = 8
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),

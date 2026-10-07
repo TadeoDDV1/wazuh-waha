@@ -107,15 +107,16 @@ def main():
     # Snapshot + parche
     orig_email_provider = settings.email_provider
     orig_smtp_host = settings.smtp_host
+    orig_admin_email = settings.admin_email
     orig_hyvor = settings.hyvor_base_url
     orig_waha = (settings.waha_host, settings.waha_session)
 
     if args.no_email:
+        settings.email_provider = "off"
         settings.smtp_host = ""
-        settings.smtp_to = ""
+        settings.admin_email = ""
         settings.hyvor_base_url = ""
         settings.hyvor_api_key = ""
-        settings.hyvor_to = ""
 
     if args.no_whatsapp:
         # Forzar waha_client a fallar limpiamente seteando un host invalido.
@@ -129,6 +130,7 @@ def main():
         # Restaurar (por si el proceso sigue vivo, ej. tests)
         settings.email_provider = orig_email_provider
         settings.smtp_host = orig_smtp_host
+        settings.admin_email = orig_admin_email
         settings.hyvor_base_url = orig_hyvor
         settings.waha_host, settings.waha_session = orig_waha
 

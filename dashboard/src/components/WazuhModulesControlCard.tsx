@@ -465,7 +465,7 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
   }, [fetchData]);
 
   // ── Sección de telemetría en vivo por módulo ──────────────────────────────
-  const LiveModuleSection = () => (
+  const renderLiveModuleSection = () => (
     <div style={{
       background: 'rgba(0,188,212,0.04)',
       border: '1px solid rgba(0,188,212,0.12)',
@@ -559,7 +559,7 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
     const list = Array.isArray(data) ? data : [];
     return (
       <div style={{ marginTop: '8px' }}>
-        <LiveModuleSection />
+        {renderLiveModuleSection()}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <FileSearch size={12} />
@@ -607,7 +607,7 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
     const list = Array.isArray(data) ? data : [];
     return (
       <div style={{ marginTop: '8px' }}>
-        <LiveModuleSection />
+        {renderLiveModuleSection()}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <ShieldCheck size={12} />
@@ -649,7 +649,7 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
     const ports = Array.isArray(data?.ports) ? data.ports : [];
     return (
       <div style={{ marginTop: '8px' }}>
-        <LiveModuleSection />
+        {renderLiveModuleSection()}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Cpu size={12} />
@@ -696,7 +696,7 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
     const list = Array.isArray(data) ? data : [];
     return (
       <div style={{ marginTop: '8px' }}>
-        <LiveModuleSection />
+        {renderLiveModuleSection()}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Search size={12} />
@@ -728,7 +728,7 @@ const LiveDataPanel: React.FC<{ moduleId: string; selectedAgent: string }> = ({ 
 
   return (
     <div style={{ marginTop: '8px' }}>
-      <LiveModuleSection />
+      {renderLiveModuleSection()}
       <div style={{ padding: '10px 12px', background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-subtle)', fontSize: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--green-healthy)' }}>
           <CheckCircle2 size={14} />

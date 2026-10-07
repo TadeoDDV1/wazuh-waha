@@ -173,4 +173,19 @@ export const dashboardService = {
       return [];
     }
   },
+
+  getTelegramStatus: async (): Promise<any> => {
+    const response = await api.get('/telegram/status');
+    return response.data;
+  },
+
+  pairTelegram: async (): Promise<any> => {
+    const response = await api.post('/telegram/pair');
+    return response.data;
+  },
+
+  testTelegram: async (): Promise<any> => {
+    const response = await api.post('/telegram/test');
+    return response.data;
+  },
 };

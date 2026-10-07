@@ -6,9 +6,9 @@
 </integration>
 
 <!--
-  NOTA: Wazuh ejecuta el script via <options>--script ...</options>.
+  NOTA: Wazuh ejecuta el script mediante la etiqueta <options>.
   El script lee la URL del relay y API key desde /var/ossec/etc/wsl-relay.conf.
-  No usar <hook_url> ni <api_key> en este bloque -- Wazuh 4.x no las inyecta
+  No usar hook_url ni api_key en este bloque: Wazuh 4.x no las inyecta
   como env vars al script.
   Ver manager-side/wsl-relay.conf.example para la config requerida.
 -->

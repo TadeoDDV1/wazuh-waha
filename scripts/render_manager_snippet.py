@@ -36,7 +36,11 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_SNIPPET = REPO_ROOT / "manager" / "ossec.conf.snippet.xml"
+DEFAULT_SNIPPET = (
+    REPO_ROOT / "manager-side" / "ossec.conf.snippet.xml"
+    if (REPO_ROOT / "manager-side" / "ossec.conf.snippet.xml").exists()
+    else REPO_ROOT / "manager" / "ossec.conf.snippet.xml"
+)
 ENV_PATHS = [
     REPO_ROOT / ".env",
     Path.home() / "Desktop" / "wazuh-waha" / ".env",
