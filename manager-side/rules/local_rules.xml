@@ -144,7 +144,7 @@
 
   <!-- 57121: Ejecución remota sospechosa por tubería (curl | bash, wget | sh) -->
   <rule id="57121" level="12">
-    <if_sid>5402, 5407, 57104</if_sid>
+    <if_sid>5402, 5403, 5407, 57104</if_sid>
     <match>curl | bash|wget | bash|curl | sh|wget | sh|python -c|perl -e</match>
     <description>Ejecucion remota sospechosa por tuberia (curl/wget a bash/sh)</description>
     <group>attack,remote_execution</group>
@@ -152,7 +152,7 @@
 
   <!-- 57122: Ejecución sospechosa de script/binario en /tmp, /dev/shm o /var/tmp -->
   <rule id="57122" level="11">
-    <if_sid>5402, 5407, 57104</if_sid>
+    <if_sid>5402, 5403, 5407, 57104</if_sid>
     <match>/tmp/|/dev/shm/|/var/tmp/</match>
     <description>Ejecucion de comando o binario en directorio temporal sospechoso</description>
     <group>suspicious_execution</group>
@@ -268,7 +268,7 @@
 
   <!-- 57138: Intento crítico de Reverse Shell o tubería de red interactiva -->
   <rule id="57138" level="13">
-    <if_sid>5402, 5407, 57104</if_sid>
+    <if_sid>5402, 5403, 5407, 57104</if_sid>
     <match>/dev/tcp/|/dev/udp/|mkfifo|nc -e|nc -c|socat exec|bash -i &gt;&amp;</match>
     <description>Intento critico de ejecucion de Reverse Shell o tuberia de red interactiva</description>
     <group>attack,reverse_shell,critical</group>
@@ -276,7 +276,7 @@
 
   <!-- 57139: Ejecución de herramientas de escaneo de red / sniffing en el servidor -->
   <rule id="57139" level="10">
-    <if_sid>5402, 5407, 57104</if_sid>
+    <if_sid>5402, 5403, 5407, 57104</if_sid>
     <match>nmap|masscan|tcpdump|tshark|wireshark|netcat -l|nc -l|socat -</match>
     <description>Ejecucion de herramientas de escaneo de red o captura de paquetes en el servidor</description>
     <group>suspicious_execution,network_recon</group>
@@ -284,7 +284,7 @@
 
   <!-- 57140: Intento de manipulación o borrado de logs del sistema o detención de defensas -->
   <rule id="57140" level="12">
-    <if_sid>5402, 5407, 57104</if_sid>
+    <if_sid>5402, 5403, 5407, 57104</if_sid>
     <match>rm -rf /var/log|truncate -s 0 /var/log|iptables -F|ufw disable|systemctl stop ufw</match>
     <description>Intento de manipulacion o borrado de logs de seguridad / parada de defensas</description>
     <group>defense_evasion,anti_forensics</group>
