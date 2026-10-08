@@ -326,7 +326,7 @@ def _sync_popular_domains_ips():
 
 def _classify_network_site(ip: str, port: int, hostname: str = "", process: str = "") -> dict[str, Any]:
     """Clasifica un destino de red en un sitio web, servicio conocido y categoría en español."""
-    ip = str(ip).strip()
+    ip = str(ip or "").replace("::ffff:", "").strip()
     port = int(port or 0)
     h = str(hostname or "").lower()
     proc = str(process or "").lower()
@@ -1056,9 +1056,12 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
         rem = p.get("remote") if isinstance(p.get("remote"), dict) else {}
 
         proto = (p.get("protocol") or "tcp").upper()
-        loc_ip = loc.get("ip") or p.get("local_ip") or "0.0.0.0"
+        raw_loc = loc.get("ip") or p.get("local_ip") or "0.0.0.0"
+        loc_ip = str(raw_loc).replace("::ffff:", "").strip()
         loc_port = loc.get("port") if loc.get("port") is not None else p.get("local_port", 0)
-        rem_ip = rem.get("ip") or p.get("remote_ip") or "-"
+
+        raw_rem = rem.get("ip") or p.get("remote_ip") or "-"
+        rem_ip = str(raw_rem).replace("::ffff:", "").strip()
         rem_port = rem.get("port") if rem.get("port") is not None else p.get("remote_port", 0)
 
         proc_name = p.get("process") or p.get("program_name") or "sistema"
@@ -1068,7 +1071,7 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
         aname = p.get("_agent_name") or "host"
         aip = p.get("_agent_ip") or loc_ip
 
-        if rem_ip and rem_ip not in ("-", "0.0.0.0", "::", "127.0.0.1", "::1"):
+        if rem_ip and rem_ip not in ("-", "0.0.0.0", "::", "::0", "127.0.0.1", "::1", "localhost") and not rem_ip.startswith("127."):
             unique_remote_ips.add(rem_ip)
 
         normalized_ports.append({
