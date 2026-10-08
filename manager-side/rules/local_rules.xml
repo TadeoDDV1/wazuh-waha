@@ -135,9 +135,9 @@
     Nuevas Reglas de Seguridad Avanzadas (57120 - 57130)
     ========================================================================= -->
 
-  <!-- 57120: Ataque de fuerza bruta SSH persistente (más de 10 fallos en 2 min) -->
-  <rule id="57120" level="12" frequency="10" timeframe="120">
-    <if_matched_sid>5710, 5711</if_matched_sid>
+  <!-- 57120: Ataque de fuerza bruta SSH persistente (más de 8 fallos en 2 min) -->
+  <rule id="57120" level="12" frequency="8" timeframe="120">
+    <if_matched_sid>5710</if_matched_sid>
     <description>Ataque de fuerza bruta SSH persistente detectado</description>
     <group>authentication_failures,sshd,brute_force</group>
   </rule>
@@ -196,7 +196,7 @@
   </rule>
 
   <!-- 57128: Escaneo de puertos detectado / bloqueado por firewall -->
-  <rule id="57128" level="10" frequency="12" timeframe="60">
+  <rule id="57128" level="10">
     <match>UFW BLOCK|iptables denied|connection refused</match>
     <description>Escaneo de puertos o conexion bloqueada masiva por Firewall</description>
     <group>firewall,port_scan,reconnaissance</group>
