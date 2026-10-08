@@ -45,6 +45,18 @@ class TestNetworkSiteClassification(unittest.TestCase):
         res = tel_mod._classify_network_site("192.168.122.1", 22, "gateway.local", "sshd")
         self.assertEqual(res["category"], "ssh")
 
+    def test_classify_youtube_cdn_subnet(self):
+        res = tel_mod._classify_network_site("142.251.153.4", 443, "", "chrome")
+        self.assertEqual(res["category"], "web")
+        self.assertIn("YouTube", res["site_name"])
+        self.assertTrue(res["is_web"])
+
+    def test_classify_youtube_video_stream(self):
+        res = tel_mod._classify_network_site("192.178.56.86", 443, "", "chrome")
+        self.assertEqual(res["category"], "web")
+        self.assertIn("YouTube", res["site_name"])
+        self.assertTrue(res["is_web"])
+
 
 class TestNetworkSitesEndpoints(unittest.TestCase):
     def setUp(self):
@@ -54,7 +66,7 @@ class TestNetworkSitesEndpoints(unittest.TestCase):
         r = self.client.get("/api/v1/telemetry/network/sites")
         self.assertEqual(r.status_code, 401)
 
-    def test_sites_endpoint_success(self):
+    def test_sites_endpoint_success_and_no_localhost(self):
         r = self.client.get("/api/v1/telemetry/network/sites?agent_id=all", headers=AUTH)
         self.assertEqual(r.status_code, 200)
         data = r.json()
@@ -64,6 +76,11 @@ class TestNetworkSitesEndpoints(unittest.TestCase):
         self.assertIn("total_sites", data)
         self.assertIn("web_sites_count", data)
 
+        # Verificar que ningún sitio en sites_activity sea localhost o servicio interno
+        for s in data["sites"]:
+            self.assertNotEqual(s.get("category"), "local", f"Sitio no debe ser local: {s}")
+            self.assertNotIn(s.get("remote_ip"), ("127.0.0.1", "::1", "localhost", "::0", "0.0.0.0"))
+
     def test_agent_traffic_endpoint_contains_sites(self):
         r = self.client.get("/api/v1/telemetry/agents/000/traffic", headers=AUTH)
         self.assertEqual(r.status_code, 200)
@@ -72,6 +89,18 @@ class TestNetworkSitesEndpoints(unittest.TestCase):
         self.assertIn("sites_activity", data)
         self.assertIn("ports", data)
         self.assertIn("kpis", data)
+
+    def test_network_stream_auth_and_cap(self):
+        r_unauth = self.client.get("/api/v1/telemetry/network/stream")
+        self.assertEqual(r_unauth.status_code, 401)
+
+        old = tel_mod._network_sse_count
+        tel_mod._network_sse_count = tel_mod._NETWORK_SSE_MAX
+        try:
+            r_cap = self.client.get("/api/v1/telemetry/network/stream", headers=AUTH)
+            self.assertEqual(r_cap.status_code, 503)
+        finally:
+            tel_mod._network_sse_count = old
 
 
 class TestTelegramBotSitesCommand(unittest.IsolatedAsyncioTestCase):

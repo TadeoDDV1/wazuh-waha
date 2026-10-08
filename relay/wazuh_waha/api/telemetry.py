@@ -27,8 +27,10 @@ router = APIRouter(tags=["telemetry"])
 
 _SSE_MAX_CLIENTS = 20          # límite de clientes SSE en /telemetry/stream
 _TRAFFIC_SSE_MAX = 10          # límite de clientes SSE en /traffic/stream
+_NETWORK_SSE_MAX = 20          # límite de clientes SSE en /network/stream
 _sse_client_count = 0
 _traffic_sse_count = 0
+_network_sse_count = 0
 
 
 class SimulateRequest(BaseModel):
@@ -274,6 +276,53 @@ async def _resolve_ip_hostname(ip: str) -> str:
 _SITES_HISTORY_CACHE: dict[str, dict[str, Any]] = {}
 _SITES_CACHE_TTL = 1800  # 30 minutos de retención
 
+_POPULAR_DOMAINS_MAP: dict[str, tuple[str, str, str, str]] = {}
+_LAST_DOMAINS_SYNC: float = 0.0
+
+POPULAR_DOMAINS_DEF = [
+    ("youtube.com", "YouTube (Streaming de Video)", "web", "video"),
+    ("www.youtube.com", "YouTube (Streaming de Video)", "web", "video"),
+    ("googlevideo.com", "YouTube Video Stream (Google CDN)", "web", "video"),
+    ("m.youtube.com", "YouTube Móvil / Web", "web", "video"),
+    ("google.com", "Google (Búsqueda & Web)", "web", "globe"),
+    ("www.google.com", "Google (Búsqueda & Web)", "web", "globe"),
+    ("web.whatsapp.com", "WhatsApp Web (Chat)", "messaging", "message-square"),
+    ("whatsapp.com", "WhatsApp (Mensajería)", "messaging", "message-square"),
+    ("facebook.com", "Facebook (Red Social)", "messaging", "globe"),
+    ("instagram.com", "Instagram (Red Social)", "messaging", "globe"),
+    ("telegram.org", "Telegram Messenger", "messaging", "message-square"),
+    ("netflix.com", "Netflix (Streaming)", "web", "video"),
+    ("spotify.com", "Spotify (Streaming Música)", "web", "globe"),
+    ("github.com", "GitHub (Código & Repos)", "web", "globe"),
+    ("x.com", "X / Twitter (Red Social)", "web", "globe"),
+    ("twitter.com", "Twitter (Red Social)", "web", "globe"),
+    ("tiktok.com", "TikTok (Videos Cortos)", "web", "video"),
+    ("discord.com", "Discord (Chat & Voz)", "messaging", "message-square"),
+    ("reddit.com", "Reddit (Comunidad)", "web", "globe"),
+    ("chatgpt.com", "ChatGPT / OpenAI", "web", "globe"),
+    ("openai.com", "OpenAI (IA)", "web", "globe"),
+    ("twitch.tv", "Twitch (Streaming en Vivo)", "web", "video"),
+    ("amazon.com", "Amazon (Compras / AWS)", "web", "globe"),
+    ("wikipedia.org", "Wikipedia (Enciclopedia)", "web", "globe"),
+]
+
+
+def _sync_popular_domains_ips():
+    """Resuelve hacia adelante las IPs de dominios populares conocidos en caché."""
+    global _LAST_DOMAINS_SYNC
+    now = time.time()
+    if now - _LAST_DOMAINS_SYNC < 1800 and _POPULAR_DOMAINS_MAP:
+        return
+    _LAST_DOMAINS_SYNC = now
+    for dom, name, cat, icon in POPULAR_DOMAINS_DEF:
+        try:
+            res = socket.getaddrinfo(dom, 443)
+            for r in res:
+                ip_addr = r[4][0]
+                _POPULAR_DOMAINS_MAP[ip_addr] = (name, dom, cat, icon)
+        except Exception:
+            pass
+
 
 def _classify_network_site(ip: str, port: int, hostname: str = "", process: str = "") -> dict[str, Any]:
     """Clasifica un destino de red en un sitio web, servicio conocido y categoría en español."""
@@ -339,16 +388,54 @@ def _classify_network_site(ip: str, port: int, hostname: str = "", process: str 
             "icon": "terminal",
         }
 
+    # 5.1 Coincidencia exacta con dominios populares pre-resueltos
+    if ip in _POPULAR_DOMAINS_MAP:
+        p_name, p_dom, p_cat, p_icon = _POPULAR_DOMAINS_MAP[ip]
+        lbl = (
+            "Video Streaming & Navegación (YouTube)" if "YouTube" in p_name
+            else "Navegación / Servicios Web" if p_cat == "web"
+            else f"Mensajería & Redes ({p_name})" if p_cat == "messaging"
+            else p_name
+        )
+        return {
+            "site_name": p_name,
+            "domain": p_dom,
+            "category": p_cat,
+            "category_label": lbl,
+            "is_web": True,
+            "icon": p_icon,
+        }
+
     # 6. YouTube (Streaming de Video)
-    # Detecta YouTube por hostname, SNI, o combinación de IPs de Google + browser/puerto o palabras clave
-    is_google_ip = (
-        ip.startswith(("142.250.", "142.251.", "172.217.", "172.253.", "192.178.", "216.58.", "74.125.", "64.233.", "173.194."))
-        or any(k in h for k in ("1e100.net", "google", "gstatic"))
+    # Detecta YouTube por hostname, subredes de CDN de YouTube de Google o procesos de navegador conectando a streaming
+    is_yt_subnet = (
+        ip.startswith((
+            "142.251.150.", "142.251.151.", "142.251.152.", "142.251.153.",
+            "142.251.154.", "142.251.155.", "142.251.156.", "142.251.157.",
+            "192.178.56.", "192.178.164.", "172.217.112.", "172.217.113.",
+            "172.217.116.", "172.217.117."
+        ))
     )
     is_yt_host = any(k in h for k in ("youtube", "googlevideo", "ytimg", "youtu.be"))
     is_browser = proc in ("chrome", "firefox", "brave", "edge", "opera", "chromium", "curl")
 
-    if is_yt_host or (is_google_ip and any(k in h for k in ("video", "youtube", "play"))):
+    if is_yt_host or (is_yt_subnet and (is_browser or port in (443, 80))):
+        clean_yt_dom = h if ("youtube" in h or "googlevideo" in h) else "youtube.com"
+        return {
+            "site_name": "YouTube (Streaming de Video)",
+            "domain": clean_yt_dom,
+            "category": "web",
+            "category_label": "Video Streaming & Navegación (YouTube)",
+            "is_web": True,
+            "icon": "video",
+        }
+
+    is_google_ip = (
+        ip.startswith(("142.250.", "142.251.", "172.217.", "172.253.", "192.178.", "216.58.", "74.125.", "64.233.", "173.194."))
+        or any(k in h for k in ("1e100.net", "google", "gstatic"))
+    )
+
+    if is_google_ip and any(k in h for k in ("video", "youtube", "play")):
         clean_yt_dom = h if ("youtube" in h or "googlevideo" in h) else "youtube.com"
         return {
             "site_name": "YouTube (Streaming de Video)",
@@ -890,50 +977,56 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
     # Consultar API de Wazuh si está disponible
     if mgr_host and settings.wazuh_manager_api_pass:
         try:
-            async with httpx.AsyncClient(timeout=4, verify=verify) as client:
+            async with httpx.AsyncClient(timeout=12.0, verify=verify) as client:
                 token = await _get_token(client)
                 if token:
                     headers = {"Authorization": f"Bearer {token}"}
-                    for ag in target_agents:
-                        aid = str(ag.get("id", "000"))
-                        ag_name = ag.get("name", "host")
-                        ag_ip = ag.get("ip", "127.0.0.1")
 
-                        # 1. Puertos / sockets del agente en Wazuh Syscollector
-                        try:
-                            r_ports = await client.get(f"{base}/syscollector/{aid}/ports?limit=500", headers=headers)
-                            if r_ports.is_success:
-                                items = r_ports.json().get("data", {}).get("affected_items", [])
-                                for p in items:
-                                    p["_agent_id"] = aid
-                                    p["_agent_name"] = ag_name
-                                    p["_agent_ip"] = ag_ip
-                                all_raw_ports.extend(items)
-                        except Exception:
-                            pass
+                    async def fetch_one_agent_syscollector(ag_dict: dict[str, Any]):
+                        aid = str(ag_dict.get("id", "000"))
+                        ag_name = ag_dict.get("name", "host")
+                        ag_ip = ag_dict.get("ip", "127.0.0.1")
 
-                        # 2. Interfaces de red
-                        try:
-                            r_if = await client.get(f"{base}/syscollector/{aid}/netiface", headers=headers)
-                            if r_if.is_success:
-                                items = r_if.json().get("data", {}).get("affected_items", [])
-                                for iface in items:
-                                    iface["_agent_id"] = aid
-                                    iface["_agent_name"] = ag_name
-                                all_raw_ifaces.extend(items)
-                        except Exception:
-                            pass
+                        req_ports = client.get(f"{base}/syscollector/{aid}/ports?limit=500", headers=headers)
+                        req_iface = client.get(f"{base}/syscollector/{aid}/netiface", headers=headers)
+                        req_procs = client.get(f"{base}/syscollector/{aid}/processes?limit=100", headers=headers)
 
-                        # 3. Procesos
-                        try:
-                            r_pr = await client.get(f"{base}/syscollector/{aid}/processes?limit=100", headers=headers)
-                            if r_pr.is_success:
-                                items = r_pr.json().get("data", {}).get("affected_items", [])
-                                for pr in items:
-                                    pr["_agent_id"] = aid
-                                all_raw_procs.extend(items)
-                        except Exception:
-                            pass
+                        r_p, r_i, r_pr = await asyncio.gather(req_ports, req_iface, req_procs, return_exceptions=True)
+
+                        raw_p, raw_i, raw_pr = [], [], []
+                        if isinstance(r_p, httpx.Response) and r_p.is_success:
+                            items = r_p.json().get("data", {}).get("affected_items", [])
+                            for p in items:
+                                p["_agent_id"] = aid
+                                p["_agent_name"] = ag_name
+                                p["_agent_ip"] = ag_ip
+                            raw_p = items
+
+                        if isinstance(r_i, httpx.Response) and r_i.is_success:
+                            items = r_i.json().get("data", {}).get("affected_items", [])
+                            for iface in items:
+                                iface["_agent_id"] = aid
+                                iface["_agent_name"] = ag_name
+                            raw_i = items
+
+                        if isinstance(r_pr, httpx.Response) and r_pr.is_success:
+                            items = r_pr.json().get("data", {}).get("affected_items", [])
+                            for pr in items:
+                                pr["_agent_id"] = aid
+                            raw_pr = items
+
+                        return raw_p, raw_i, raw_pr
+
+                    agent_results = await asyncio.gather(
+                        *[fetch_one_agent_syscollector(ag) for ag in target_agents],
+                        return_exceptions=True,
+                    )
+                    for res in agent_results:
+                        if isinstance(res, tuple) and len(res) == 3:
+                            p_list, i_list, pr_list = res
+                            all_raw_ports.extend(p_list)
+                            all_raw_ifaces.extend(i_list)
+                            all_raw_procs.extend(pr_list)
         except Exception:
             pass
 
@@ -975,7 +1068,7 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
         aname = p.get("_agent_name") or "host"
         aip = p.get("_agent_ip") or loc_ip
 
-        if rem_ip and rem_ip not in ("-", "0.0.0.0", "::"):
+        if rem_ip and rem_ip not in ("-", "0.0.0.0", "::", "127.0.0.1", "::1"):
             unique_remote_ips.add(rem_ip)
 
         normalized_ports.append({
@@ -1026,10 +1119,19 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
         sock["is_web"] = classification["is_web"]
         sock["icon"] = classification["icon"]
 
-        # Si el socket tiene destino remoto o es una conexión activa, registrarlo en la actividad de sitios
-        if rem_ip not in ("-", "0.0.0.0", "::") and rem_port > 0:
+        # Filtrar sockets locales o sin destino: solo destinos remotos reales entran en Sitios Web & Destinos
+        is_loopback = (
+            rem_ip in ("-", "0.0.0.0", "::", "::0", "127.0.0.1", "::1", "localhost")
+            or rem_ip.startswith("127.")
+            or classification["category"] == "local"
+        )
+        if not is_loopback and rem_port > 0:
             site_key = f"{sock['agent_id']}:{classification['domain']}:{rem_port}:{sock['protocol']}"
-            is_estab = "estab" in sock["state"] or "syn" in sock["state"]
+            is_estab = (
+                "estab" in sock["state"]
+                or "syn" in sock["state"]
+                or (sock["protocol"] == "UDP" and rem_port in (443, 80, 53))
+            )
             state_lbl = "CONEXIÓN ACTIVA" if is_estab else "EN ESPERA" if "wait" in sock["state"] else sock["state"].upper()
 
             rec = {
@@ -1283,14 +1385,13 @@ async def network_stream(
                     }
                     yield f"data: {json.dumps({'type': 'network_event', 'data': net_evt})}\n\n"
                 except asyncio.TimeoutError:
-                    pass
+                    yield f"data: {json.dumps({'type': 'heartbeat', 'ts': now})}\n\n"
 
-                # 2. Periódicamente emitir actividad de sitios y conexiones de los agentes
+                # 2. Periódicamente emitir actividad de sitios y conexiones de los agentes desde caché
                 if step % 2 == 0:
                     try:
-                        traffic_snap = await _fetch_agent_traffic_details("all")
-                        active_sites = traffic_snap.get("sites_activity", [])
-                        for site in active_sites[:6]:
+                        active_sites = list(_SITES_HISTORY_CACHE.values())
+                        for site in active_sites[:10]:
                             site_evt = {
                                 "type": "site_activity",
                                 "subtype": "web_connection",
@@ -1311,12 +1412,16 @@ async def network_stream(
                                 "category": site["category"],
                                 "category_label": site["category_label"],
                                 "is_web": site["is_web"],
-                                "status": "ACTIVA" if "estab" in site["state"].lower() else "REGISTRADA",
+                                "status": "ACTIVA" if ("estab" in site["state"].lower() or "activa" in site.get("state_label", "").lower()) else "REGISTRADA",
                                 "description": f"[{site['process']}] Destino: {site['site_name']} ({site['domain']})",
                             }
                             yield f"data: {json.dumps({'type': 'network_event', 'data': site_evt})}\n\n"
                     except Exception:
                         pass
+
+                # Refresco asíncrono no bloqueante del inventario de red
+                if step % 10 == 0:
+                    asyncio.create_task(_fetch_agent_traffic_details("all"))
 
                 # 3. Pulso de heartbeat de agentes
                 if step % 3 == 0:
