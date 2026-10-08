@@ -282,6 +282,82 @@ TEMPLATES: dict[str, TemplateFn] = {
         f"Log: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
         f"Hora: `{a.get('timestamp', '?')}`"
     ),
+    "57131": lambda a: (
+        f"🔐 *Intento fallido de autenticación por SSH*\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Usuario intentado: `{_field(a, 'dstuser', default=_field(a, 'srcuser', default='?'))}`\n"
+        f"Origen: `{_field(a, 'srcip')}:{_field(a, 'srcport', default='?')}`\n"
+        f"Log: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
+        f"Hora: `{a.get('timestamp', '?')}`"
+    ),
+    "57132": lambda a: (
+        f"⚠️ *Intento de acceso SSH con usuario no existente*\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Usuario no válido: `{_field(a, 'srcuser', default=_field(a, 'dstuser', default='?'))}`\n"
+        f"Origen: `{_field(a, 'srcip')}:{_field(a, 'srcport', default='?')}`\n"
+        f"Log: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
+        f"Hora: `{a.get('timestamp', '?')}`"
+    ),
+    "57133": lambda a: (
+        f"🌐 *Escaneo / Sondeo de red en puerto SSH (Probe scan)*\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Origen: `{_field(a, 'srcip')}:{_field(a, 'srcport', default='?')}`\n"
+        f"Detección: `Intento de conexión o sondeo sin identificación válida de protocolo`\n"
+        f"Log: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
+        f"Hora: `{a.get('timestamp', '?')}`"
+    ),
+    "57134": lambda a: (
+        f"🚨 *Múltiples conexiones cerradas en SSH (Escaneo de puertos detectado)*\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Origen: `{_field(a, 'srcip')}`\n"
+        f"Detección: `Ráfaga de desconexiones preauth en puerto 22 (posible barrido de puertos)`\n"
+        f"Hora: `{a.get('timestamp', '?')}`"
+    ),
+    "57135": lambda a: (
+        f"🔥 *Escaneo masivo de puertos detectado por Firewall* (CRÍTICO)\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Origen sospechoso: `{_field(a, 'srcip')}`\n"
+        f"Detección: `Múltiples paquetes bloqueados a puertos cerrados en menos de 30 segundos`\n"
+        f"Log: `{a.get('full_log', '')[:160]}`\n"
+        f"Hora: `{a.get('timestamp', '?')}`\n"
+        f"⚠️ Se recomienda bloqueo preventivo en Firewall."
+    ),
+    "57136": lambda a: (
+        f"⚠️ *Usuario o grupo eliminado del sistema*\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Detalle: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
+        f"Hora: `{a.get('timestamp', '?')}`"
+    ),
+    "57137": lambda a: (
+        f"⏰ *Modificación en tareas programadas Crontab*\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Detalle: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
+        f"Hora: `{a.get('timestamp', '?')}`\n"
+        f"⚠️ Verificar si la tarea programada es legítima."
+    ),
+    "57138": lambda a: (
+        f"🚨 *Intento crítico de Reverse Shell o Tubería de red* (CRÍTICO)\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
+        f"Comando sospechoso: `{_field(a, 'command', default=_field(a, 'full_log', default='?'))[:140]}`\n"
+        f"Hora: `{a.get('timestamp', '?')}`\n"
+        f"⚠️ Intento activo de evasión o conexión reversa hacia atacante."
+    ),
+    "57139": lambda a: (
+        f"📡 *Herramienta de escaneo de red o captura ejecutada en el servidor*\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
+        f"Herramienta detectada: `{_field(a, 'command', default='?')[:120]}`\n"
+        f"Hora: `{a.get('timestamp', '?')}`"
+    ),
+    "57140": lambda a: (
+        f"🚨 *Intento de borrado de logs o desactivación de cortafuegos* (CRÍTICO)\n"
+        f"Agente: `{_agent(a)}`\n"
+        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
+        f"Acción detectada: `{_field(a, 'command', default=_field(a, 'full_log', default='?'))[:140]}`\n"
+        f"Hora: `{a.get('timestamp', '?')}`\n"
+        f"⚠️ Intento de evasión de defensas o eliminación de evidencias forenses."
+    ),
 }
 
 

@@ -197,7 +197,7 @@
 
   <!-- 57128: Escaneo de puertos detectado / bloqueado por firewall -->
   <rule id="57128" level="10">
-    <match>UFW BLOCK|iptables denied|connection refused</match>
+    <match>UFW BLOCK|iptables denied|IPTABLES SCAN|connection refused</match>
     <description>Escaneo de puertos o conexion bloqueada masiva por Firewall</description>
     <group>firewall,port_scan,reconnaissance</group>
   </rule>
@@ -215,6 +215,79 @@
     <match>container died|container exited with code|die container</match>
     <description>Contenedor Docker detenido o en fallo de ejecucion</description>
     <group>docker,container_health</group>
+  </rule>
+
+  <!-- 57131: Intento fallido de autenticación SSH individual (eleva 5760 de L5 a L8) -->
+  <rule id="57131" level="8">
+    <if_sid>5760</if_sid>
+    <description>Intento fallido de autenticacion por SSH (credenciales erroneas)</description>
+    <group>authentication_failed,sshd</group>
+  </rule>
+
+  <!-- 57132: Intento de acceso SSH con usuario inexistente (eleva 5710 de L5 a L9) -->
+  <rule id="57132" level="9">
+    <if_sid>5710</if_sid>
+    <description>Intento de acceso por SSH con usuario inexistente en el sistema</description>
+    <group>authentication_failed,sshd,invalid_login</group>
+  </rule>
+
+  <!-- 57133: Escaneo o sondeo inseguro detectado en SSH (eleva 5706 de L6 a L10) -->
+  <rule id="57133" level="10">
+    <if_sid>5706</if_sid>
+    <description>Escaneo o sondeo de red detectado en puerto SSH (insecure probe / nmap scan)</description>
+    <group>recon,sshd,port_scan</group>
+  </rule>
+
+  <!-- 57134: Múltiples desconexiones inmediatas en SSH (indicativo de escaneo SYN o fingerprinting de puertos) -->
+  <rule id="57134" level="10" frequency="5" timeframe="60">
+    <if_matched_sid>5722</if_matched_sid>
+    <description>Multiples desconexiones inmediatas en SSH (escaneo de puertos)</description>
+    <group>recon,sshd,port_scan</group>
+  </rule>
+
+  <!-- 57135: Escaneo de puertos agresivo / masivo detectado por Firewall (más de 4 bloqueos en 30s) -->
+  <rule id="57135" level="12" frequency="4" timeframe="30">
+    <if_matched_sid>57128</if_matched_sid>
+    <description>Escaneo de puertos masivo y agresivo detectado por Firewall</description>
+    <group>firewall,port_scan,reconnaissance,attack</group>
+  </rule>
+
+  <!-- 57136: Usuario o grupo eliminado del sistema (eleva 5903 de L3 a L9) -->
+  <rule id="57136" level="9">
+    <if_sid>5903</if_sid>
+    <description>Usuario o grupo eliminado del sistema</description>
+    <group>syslog,user_management,anomaly</group>
+  </rule>
+
+  <!-- 57137: Modificación o creación de tareas programadas Crontab (eleva 2832 de L5 a L8) -->
+  <rule id="57137" level="8">
+    <if_sid>2832</if_sid>
+    <description>Modificacion de tareas programadas Crontab (posible persistencia)</description>
+    <group>syslog,cron,persistence</group>
+  </rule>
+
+  <!-- 57138: Intento crítico de Reverse Shell o tubería de red interactiva -->
+  <rule id="57138" level="13">
+    <if_sid>5402, 5407, 57104</if_sid>
+    <match>/dev/tcp/|/dev/udp/|mkfifo|nc -e|nc -c|socat exec|bash -i &gt;&amp;</match>
+    <description>Intento critico de ejecucion de Reverse Shell o tuberia de red interactiva</description>
+    <group>attack,reverse_shell,critical</group>
+  </rule>
+
+  <!-- 57139: Ejecución de herramientas de escaneo de red / sniffing en el servidor -->
+  <rule id="57139" level="10">
+    <if_sid>5402, 5407, 57104</if_sid>
+    <match>nmap|masscan|tcpdump|tshark|wireshark|netcat -l|nc -l|socat -</match>
+    <description>Ejecucion de herramientas de escaneo de red o captura de paquetes en el servidor</description>
+    <group>suspicious_execution,network_recon</group>
+  </rule>
+
+  <!-- 57140: Intento de manipulación o borrado de logs del sistema o detención de defensas -->
+  <rule id="57140" level="12">
+    <if_sid>5402, 5407, 57104</if_sid>
+    <match>rm -rf /var/log|truncate -s 0 /var/log|iptables -F|ufw disable|systemctl stop ufw</match>
+    <description>Intento de manipulacion o borrado de logs de seguridad / parada de defensas</description>
+    <group>defense_evasion,anti_forensics</group>
   </rule>
 
   <!-- 999001: Health event de WAHA / Relay / Agente. El relay inyecta estas alertas -->

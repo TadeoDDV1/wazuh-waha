@@ -29,8 +29,11 @@ def test_local_rules_xml_validity():
         assert cve_rule_id in rules, f"Rule {cve_rule_id} missing"
         assert int(rules[cve_rule_id].attrib.get("level", 0)) >= 8
 
-    # Advanced security rules
-    for adv_rule_id in ("57120", "57121", "57122", "57123", "57124", "57125", "57126", "57127", "57128", "57129", "57130"):
+    # Advanced security rules (57120 - 57140)
+    for adv_rule_id in (
+        "57120", "57121", "57122", "57123", "57124", "57125", "57126", "57127", "57128", "57129", "57130",
+        "57131", "57132", "57133", "57134", "57135", "57136", "57137", "57138", "57139", "57140",
+    ):
         assert adv_rule_id in rules, f"Rule {adv_rule_id} missing"
         assert int(rules[adv_rule_id].attrib.get("level", 0)) >= 8
 

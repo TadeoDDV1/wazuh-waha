@@ -785,6 +785,16 @@ def _get_rules_summary() -> str:
         "• `57128` [L10] Escaneo de puertos detectado por Firewall\n"
         "• `57129` [L11] Modificación en authorized_keys de SSH\n"
         "• `57130` [L9]  Contenedor Docker caído abruptamente\n"
+        "• `57131` [L8]  Intento fallido de autenticación SSH (credenciales erróneas)\n"
+        "• `57132` [L9]  Intento de login SSH con usuario inexistente\n"
+        "• `57133` [L10] Escaneo/sondeo inseguro en puerto SSH (Probe scan)\n"
+        "• `57134` [L10] Ráfaga de desconexiones preauth SSH (Port scan)\n"
+        "• `57135` [L12] Escaneo masivo y agresivo detectado por Firewall\n"
+        "• `57136` [L9]  Usuario o grupo eliminado del sistema\n"
+        "• `57137` [L8]  Modificación de tareas programadas Crontab\n"
+        "• `57138` [L13] Intento crítico de Reverse Shell o tubería de red\n"
+        "• `57139` [L10] Herramienta de escaneo de red o captura ejecutada\n"
+        "• `57140` [L12] Intento de manipulación de logs o parada de defensas\n"
         "• `999001`[L10] Evento de salud de la infraestructura WAHA"
     )
 
