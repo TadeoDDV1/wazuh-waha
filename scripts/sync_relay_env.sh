@@ -117,6 +117,8 @@ KEYS=(
   TELEGRAM_BOT_TOKEN
   TELEGRAM_CHAT_ID
   TELEGRAM_MIN_LEVEL
+  WHATSAPP_ENABLED
+  EMAIL_ALERTS_ENABLED
 )
 
 # Parsear .env (ignorar comentarios / líneas vacías)

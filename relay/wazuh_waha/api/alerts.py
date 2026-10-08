@@ -12,6 +12,7 @@ from ..common.traffic_stream import traffic_watcher
 from ..config import settings
 from ..domain.pipeline import format_alert
 from ..infrastructure import waha_client
+from ..infrastructure.notifier import notify_alert_email
 from ..infrastructure.telegram_bot import telegram_bot
 from .deps import verify_api_key
 
@@ -117,48 +118,88 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
     record["msg_len"] = len(message)
     record["msg_preview"] = message[:160]
 
-    # Despacho concurrente a Telegram (si está habilitado)
-    try:
-        import asyncio
-        asyncio.create_task(telegram_bot.send_alert(
-            message_text=message,
-            level=level,
-            rule_id=rule_id,
-            agent_name=agent_name,
-        ))
-    except Exception as _tg_err:
-        log.debug("telegram_dispatch_err err=%s", _tg_err)
+    import asyncio
 
-    try:
-        wa_resp = await waha_client.send_text(message)
-    except waha_client.WAHAError as e:
-        log.exception("waha_send_failed rule=%s agent=%s err=%s", rule_id, agent_id, e)
-        record["result"] = "waha_error"
-        record["error"] = str(e)
+    channels_sent: list[str] = []
+    channels_errors: list[str] = []
+    msg_id: str | None = None
+
+    # 1. Despacho por Telegram (si está habilitado)
+    if getattr(settings, "telegram_enabled", False):
+        try:
+            asyncio.create_task(telegram_bot.send_alert(
+                message_text=message,
+                level=level,
+                rule_id=rule_id,
+                agent_name=agent_name,
+            ))
+            channels_sent.append("telegram")
+        except Exception as _tg_err:
+            log.warning("telegram_dispatch_err err=%s", _tg_err)
+            channels_errors.append(f"telegram: {_tg_err}")
+
+    # 2. Despacho por Correo Electrónico (si está habilitado)
+    if getattr(settings, "email_alerts_enabled", False) and settings.admin_email:
+        try:
+            subject = f"🚨 [Wazuh Alerta Nivel {level}] {agent_name} - Regla #{rule_id}"
+            asyncio.create_task(notify_alert_email(
+                subject=subject,
+                message=message,
+                rule_id=rule_id,
+                level=level,
+                agent_name=agent_name,
+            ))
+            channels_sent.append("email")
+        except Exception as _em_err:
+            log.warning("email_dispatch_err err=%s", _em_err)
+            channels_errors.append(f"email: {_em_err}")
+
+    # 3. Despacho por WhatsApp (si está habilitado)
+    if getattr(settings, "whatsapp_enabled", True):
+        try:
+            wa_resp = await waha_client.send_text(message)
+            msg_id = wa_resp.get("id", {}).get("id") if isinstance(wa_resp, dict) else None
+            channels_sent.append("whatsapp")
+        except waha_client.WAHAError as e:
+            log.exception("waha_send_failed rule=%s agent=%s err=%s", rule_id, agent_id, e)
+            channels_errors.append(f"whatsapp: {e}")
+            # Si solo estaba activo WhatsApp (o ninguno otro pudo procesar), reportar error 502
+            if not channels_sent:
+                record["result"] = "waha_error"
+                record["error"] = str(e)
+                _finish_record(record, alert)
+                asyncio.create_task(telemetry_store.record(
+                    rule_id=rule_id, level=level,
+                    agent_id=agent_id, agent_name=agent_name,
+                    description=description, decision="waha_error",
+                    alert_timestamp=ts_alert,
+                ))
+                raise HTTPException(status_code=502, detail=f"waha error: {e}")
+
+    # Si ningún canal está habilitado en configuración
+    if not channels_sent and not getattr(settings, "whatsapp_enabled", True):
+        log.info("alert_ignored_all_channels_disabled rule=%s agent=%s", rule_id, agent_id)
+        record["result"] = "no_channels_enabled"
         _finish_record(record, alert)
-        # ── telemetría ──
-        import asyncio
-        asyncio.create_task(telemetry_store.record(
-            rule_id=rule_id, level=level,
-            agent_id=agent_id, agent_name=agent_name,
-            description=description, decision="waha_error",
-            alert_timestamp=ts_alert,
-        ))
-        raise HTTPException(status_code=502, detail=f"waha error: {e}")
+        return {
+            "status": "ignored",
+            "reason": "no_channels_enabled",
+            "message": "Ningún canal de notificación activo (WhatsApp/Telegram/Email desactivados)",
+            "meta": meta,
+        }
 
     elapsed_ms = int((time.time() - t_start) * 1000)
-    msg_id = wa_resp.get("id", {}).get("id") if isinstance(wa_resp, dict) else None
     log.info(
-        "alert_sent rule=%s agent=%s decision=%s waha_id=%s total_ms=%d worker=%s",
-        rule_id, agent_id, meta.get("decision"), msg_id, elapsed_ms, WORKER_ID,
+        "alert_sent rule=%s agent=%s decision=%s channels=%s total_ms=%d worker=%s",
+        rule_id, agent_id, meta.get("decision"), ",".join(channels_sent), elapsed_ms, WORKER_ID,
     )
     record["result"] = "sent"
+    record["channels"] = channels_sent
     record["waha_id"] = msg_id
     record["total_ms"] = elapsed_ms
     _finish_record(record, alert)
 
     # ── telemetría ──
-    import asyncio
     asyncio.create_task(telemetry_store.record(
         rule_id=rule_id, level=level,
         agent_id=agent_id, agent_name=agent_name,
@@ -169,7 +210,9 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
 
     return {
         "status": "sent",
+        "channels": channels_sent,
         "message_id": msg_id,
         "worker_id": WORKER_ID,
-        "meta": {**meta, "total_ms": elapsed_ms},
+        "meta": {**meta, "total_ms": elapsed_ms, "channels": channels_sent},
     }
+

@@ -6,6 +6,7 @@ import Dashboard from './Dashboard';
 import RecentAlertsDrawer from './RecentAlertsDrawer';
 import SettingsSection from './SettingsSection';
 import LiveTrafficTerminal from './LiveTrafficTerminal';
+import NetworkAgentsTerminal from './NetworkAgentsTerminal';
 import LoginScreen from './LoginScreen';
 import { Toaster } from 'sonner';
 import { useDashboardContext } from '../context/DashboardContext';
@@ -13,12 +14,25 @@ import { Loader2 } from 'lucide-react';
 import './Layout.css';
 
 const LayoutContent: React.FC = () => {
-  const { showSettings, showTrafficTerminal, setShowTrafficTerminal } = useDashboardContext();
+  const {
+    showSettings,
+    showTrafficTerminal,
+    setShowTrafficTerminal,
+    showNetworkTerminal,
+    setShowNetworkTerminal,
+  } = useDashboardContext();
+
   return (
     <div className="app-layout">
       <Navbar />
       <main className="app-main">
-        {showTrafficTerminal ? (
+        {showNetworkTerminal ? (
+          <NetworkAgentsTerminal
+            isOpen
+            onClose={() => setShowNetworkTerminal(false)}
+            asPanel
+          />
+        ) : showTrafficTerminal ? (
           <LiveTrafficTerminal
             isOpen
             onClose={() => setShowTrafficTerminal(false)}

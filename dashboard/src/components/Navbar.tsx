@@ -19,6 +19,7 @@ import {
   Clock,
   ExternalLink,
   TerminalSquare,
+  Network,
 } from 'lucide-react';
 
 function formatUptime(sec: number): string {
@@ -41,8 +42,8 @@ export const Navbar: React.FC = () => {
     setAutoRefreshInterval,
     setShowSettings,
     setShowRecentAlerts,
-    showTrafficTerminal,
-    setShowTrafficTerminal,
+    activeView,
+    setActiveView,
     refresh,
     config,
   } = useDashboardContext();
@@ -101,7 +102,7 @@ export const Navbar: React.FC = () => {
             </div>
           )}
 
-          {/* Navigation View Tabs (Dashboard vs Live Traffic Terminal) */}
+          {/* Navigation View Tabs (Dashboard vs Live Traffic Terminal vs Network & Agents Terminal) */}
           <div
             style={{
               display: 'flex',
@@ -115,8 +116,8 @@ export const Navbar: React.FC = () => {
           >
             <button
               type="button"
-              className={`nav-tab-btn ${!showTrafficTerminal ? 'active' : ''}`}
-              onClick={() => setShowTrafficTerminal(false)}
+              className={`nav-tab-btn ${activeView === 'dashboard' ? 'active' : ''}`}
+              onClick={() => setActiveView('dashboard')}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -124,10 +125,10 @@ export const Navbar: React.FC = () => {
                 padding: '6px 14px',
                 borderRadius: '8px',
                 fontSize: '12px',
-                fontWeight: !showTrafficTerminal ? 700 : 500,
-                border: !showTrafficTerminal ? '1px solid var(--cyan-accent)' : '1px solid transparent',
-                background: !showTrafficTerminal ? 'rgba(0, 229, 255, 0.18)' : 'transparent',
-                color: !showTrafficTerminal ? 'var(--cyan-accent)' : 'var(--text-secondary)',
+                fontWeight: activeView === 'dashboard' ? 700 : 500,
+                border: activeView === 'dashboard' ? '1px solid var(--cyan-accent)' : '1px solid transparent',
+                background: activeView === 'dashboard' ? 'rgba(0, 229, 255, 0.18)' : 'transparent',
+                color: activeView === 'dashboard' ? 'var(--cyan-accent)' : 'var(--text-secondary)',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
               }}
@@ -138,8 +139,8 @@ export const Navbar: React.FC = () => {
 
             <button
               type="button"
-              className={`nav-tab-btn ${showTrafficTerminal ? 'active' : ''}`}
-              onClick={() => setShowTrafficTerminal(true)}
+              className={`nav-tab-btn ${activeView === 'traffic' ? 'active' : ''}`}
+              onClick={() => setActiveView('traffic')}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -147,28 +148,64 @@ export const Navbar: React.FC = () => {
                 padding: '6px 14px',
                 borderRadius: '8px',
                 fontSize: '12px',
-                fontWeight: 700,
-                border: showTrafficTerminal ? '1px solid #00e5ff' : '1px solid rgba(0, 229, 255, 0.4)',
-                background: showTrafficTerminal
+                fontWeight: activeView === 'traffic' ? 700 : 500,
+                border: activeView === 'traffic' ? '1px solid #00e5ff' : '1px solid transparent',
+                background: activeView === 'traffic'
                   ? 'linear-gradient(135deg, rgba(0, 229, 255, 0.3), rgba(59, 130, 246, 0.35))'
-                  : 'rgba(0, 229, 255, 0.08)',
-                color: showTrafficTerminal ? '#00e5ff' : '#67e8f9',
-                boxShadow: showTrafficTerminal ? '0 0 16px rgba(0, 229, 255, 0.4)' : 'none',
+                  : 'transparent',
+                color: activeView === 'traffic' ? '#00e5ff' : 'var(--text-secondary)',
+                boxShadow: activeView === 'traffic' ? '0 0 16px rgba(0, 229, 255, 0.4)' : 'none',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
               }}
               title="Abrir Terminal de Telemetría y Tráfico Wazuh en Vivo"
             >
-              <TerminalSquare size={14} style={{ color: '#00e5ff' }} />
-              <span>Terminal de Tráfico (LIVE)</span>
+              <TerminalSquare size={14} style={{ color: activeView === 'traffic' ? '#00e5ff' : 'currentColor' }} />
+              <span>Terminal de Tráfico</span>
               <span
                 style={{
-                  width: '8px',
-                  height: '8px',
+                  width: '7px',
+                  height: '7px',
                   borderRadius: '50%',
                   background: telConnected ? 'var(--green-healthy)' : 'var(--yellow-warning)',
                   display: 'inline-block',
-                  animation: telConnected ? 'pulse 2s infinite' : 'none',
+                }}
+              />
+            </button>
+
+            <button
+              type="button"
+              className={`nav-tab-btn ${activeView === 'network_agents' ? 'active' : ''}`}
+              onClick={() => setActiveView('network_agents')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: activeView === 'network_agents' ? 700 : 500,
+                border: activeView === 'network_agents' ? '1px solid #10b981' : '1px solid transparent',
+                background: activeView === 'network_agents'
+                  ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.3), rgba(6, 182, 212, 0.35))'
+                  : 'transparent',
+                color: activeView === 'network_agents' ? '#34d399' : 'var(--text-secondary)',
+                boxShadow: activeView === 'network_agents' ? '0 0 16px rgba(16, 185, 129, 0.4)' : 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              title="Abrir Terminal de Tráfico de Red y Equipos de Agentes Conectados"
+            >
+              <Network size={14} style={{ color: activeView === 'network_agents' ? '#34d399' : 'currentColor' }} />
+              <span>Terminal Red & Agentes (LIVE)</span>
+              <span
+                style={{
+                  width: '7px',
+                  height: '7px',
+                  borderRadius: '50%',
+                  background: 'var(--green-healthy)',
+                  display: 'inline-block',
+                  animation: 'pulse 2s infinite',
                 }}
               />
             </button>
@@ -255,8 +292,8 @@ export const Navbar: React.FC = () => {
 
             <button
               className="nav-btn"
-              style={{ position: 'relative', ...(showTrafficTerminal ? { borderColor: 'var(--cyan-accent)', color: 'var(--cyan-accent)' } : {}) }}
-              onClick={() => setShowTrafficTerminal(!showTrafficTerminal)}
+              style={{ position: 'relative', ...(activeView === 'traffic' ? { borderColor: 'var(--cyan-accent)', color: 'var(--cyan-accent)' } : {}) }}
+              onClick={() => setActiveView(activeView === 'traffic' ? 'dashboard' : 'traffic')}
               title="Terminal de telemetría y tráfico Wazuh en vivo"
             >
               <TerminalSquare size={15} />

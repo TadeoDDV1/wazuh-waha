@@ -31,6 +31,8 @@ export const SettingsSection: React.FC = () => {
   const [autoReconcile, setAutoReconcile] = useState(false);
   const [ollamaEnabled, setOllamaEnabled] = useState(false);
   const [telegramEnabled, setTelegramEnabled] = useState(false);
+  const [whatsappEnabled, setWhatsappEnabled] = useState(true);
+  const [emailAlertsEnabled, setEmailAlertsEnabled] = useState(false);
   const [wazuhVerifyTls, setWazuhVerifyTls] = useState(false);
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
@@ -82,6 +84,8 @@ export const SettingsSection: React.FC = () => {
     setAutoReconcile(Boolean(form.auto_reconcile));
     setOllamaEnabled(Boolean(form.ollama_enabled));
     setTelegramEnabled(Boolean(form.telegram_enabled));
+    setWhatsappEnabled(form.whatsapp_enabled !== undefined ? Boolean(form.whatsapp_enabled) : true);
+    setEmailAlertsEnabled(Boolean(form.email_alerts_enabled));
     setWazuhVerifyTls(Boolean(form.wazuh_manager_api_verify_tls));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form ? JSON.stringify(form) : null]);
@@ -132,13 +136,15 @@ export const SettingsSection: React.FC = () => {
         WAZUH_MANAGER_API_USER: values.WAZUH_MANAGER_API_USER || 'wazuh',
         WAZUH_MANAGER_API_VERIFY_TLS: wazuhVerifyTls ? 'true' : 'false',
 
-        // WhatsApp Watchdog / Recovery
+        // WhatsApp Watchdog / Recovery & Notificaciones
+        WHATSAPP_ENABLED: whatsappEnabled ? 'true' : 'false',
         WAHA_WATCHDOG_INTERVAL_SEC: values.WAHA_WATCHDOG_INTERVAL_SEC || '300',
         WAHA_RECOVERY_COOLDOWN_SEC: values.WAHA_RECOVERY_COOLDOWN_SEC || '300',
         WAHA_RECOVERY_MAX_WAIT_SEC: values.WAHA_RECOVERY_MAX_WAIT_SEC || '60',
 
         // Email Destinatario y Servidor SMTP
         EMAIL_PROVIDER: 'smtp',
+        EMAIL_ALERTS_ENABLED: emailAlertsEnabled ? 'true' : 'false',
         SMTP_HOST: values.SMTP_HOST || 'smtp.gmail.com',
         SMTP_PORT: values.SMTP_PORT || '587',
         SMTP_USER: values.SMTP_USER || 'josededios3030@gmail.com',
@@ -446,8 +452,21 @@ export const SettingsSection: React.FC = () => {
           {activeTab === 'whatsapp' && (
             <div className="settings-block">
               <div className="block-header">
-                <h3>Auto-Recuperación y Watchdog de WhatsApp (WAHA)</h3>
-                <span className="block-tag">Watchdog</span>
+                <h3>Auto-Recuperación y Notificaciones de WhatsApp (WAHA)</h3>
+                <span className="block-tag">WhatsApp</span>
+              </div>
+
+              <div className="checkbox-row highlight-box" style={{ marginBottom: '16px' }}>
+                <input
+                  type="checkbox"
+                  id="whatsapp_enabled"
+                  checked={whatsappEnabled}
+                  onChange={(e) => setWhatsappEnabled(e.target.checked)}
+                />
+                <label htmlFor="whatsapp_enabled">
+                  Habilitar notificaciones y alertas por WhatsApp (WHATSAPP_ENABLED)
+                  <span className="field-hint">Activa el despacho de alertas de seguridad a través del gateway de WhatsApp</span>
+                </label>
               </div>
               
               <div className="highlight-box" style={{ padding: '14px', marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
@@ -643,6 +662,19 @@ export const SettingsSection: React.FC = () => {
               <p className="block-desc">
                 Ingresa la dirección de correo a la cual se despacharán los reportes, alertas de seguridad e incidentes de salud del stack.
               </p>
+
+              <div className="checkbox-row highlight-box" style={{ marginBottom: '16px' }}>
+                <input
+                  type="checkbox"
+                  id="email_alerts_enabled"
+                  checked={emailAlertsEnabled}
+                  onChange={(e) => setEmailAlertsEnabled(e.target.checked)}
+                />
+                <label htmlFor="email_alerts_enabled">
+                  Habilitar despacho de alertas por Correo Electrónico (EMAIL_ALERTS_ENABLED)
+                  <span className="field-hint">Envía cada alerta generada en Wazuh directamente al correo configurado</span>
+                </label>
+              </div>
 
               <div className="field-group highlight-box" style={{ padding: '16px', marginBottom: '16px' }}>
                 <label style={{ fontWeight: 700, color: 'var(--cyan-accent)', fontSize: '13px' }}>

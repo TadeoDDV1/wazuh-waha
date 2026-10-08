@@ -17,7 +17,20 @@ export const useDashboard = () => {
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(10_000); // 10s default
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [showRecentAlerts, setShowRecentAlerts] = useState<boolean>(false);
-  const [showTrafficTerminal, setShowTrafficTerminal] = useState<boolean>(false);
+
+  // Vistas principales: Dashboard SOC, Terminal de Tráfico (Alertas), Terminal de Red & Agentes
+  type ActiveView = 'dashboard' | 'traffic' | 'network_agents';
+  const [activeView, setActiveView] = useState<ActiveView>('dashboard');
+
+  const showTrafficTerminal = activeView === 'traffic';
+  const setShowTrafficTerminal = useCallback((show: boolean) => {
+    setActiveView(show ? 'traffic' : 'dashboard');
+  }, []);
+
+  const showNetworkTerminal = activeView === 'network_agents';
+  const setShowNetworkTerminal = useCallback((show: boolean) => {
+    setActiveView(show ? 'network_agents' : 'dashboard');
+  }, []);
 
   // Fetch status, config and recent alerts
   const fetchData = useCallback(async (isBackground = false) => {
@@ -122,8 +135,12 @@ export const useDashboard = () => {
     setShowSettings,
     showRecentAlerts,
     setShowRecentAlerts,
+    activeView,
+    setActiveView,
     showTrafficTerminal,
     setShowTrafficTerminal,
+    showNetworkTerminal,
+    setShowNetworkTerminal,
     fetchData,
     toggleComponent,
     performAction,

@@ -947,6 +947,7 @@ async def dashboard_config(request: Request):
         "EMAIL_PROVIDER", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_FROM", "ADMIN_EMAIL", "SMTP_TLS",
         "HYVOR_BASE_URL", "HYVOR_FROM", "ADMIN_EMAIL",
         "OLLAMA_ENABLED", "OLLAMA_HOST", "OLLAMA_MODEL", "OLLAMA_TIMEOUT",
+        "WHATSAPP_ENABLED", "EMAIL_ALERTS_ENABLED",
         "TELEGRAM_ENABLED", "TELEGRAM_CHAT_ID", "TELEGRAM_MIN_LEVEL",
         "WAHA_RECOVERY_COOLDOWN_SEC", "WAHA_RECOVERY_MAX_WAIT_SEC", "WAHA_WATCHDOG_INTERVAL_SEC",
     ]:
@@ -1004,6 +1005,9 @@ async def dashboard_config(request: Request):
             "ollama_host": settings.ollama_host,
             "ollama_model": settings.ollama_model,
             "ollama_timeout": settings.ollama_timeout,
+            # Canales de Notificación (WhatsApp, Telegram, Email)
+            "whatsapp_enabled": getattr(settings, "whatsapp_enabled", True),
+            "email_alerts_enabled": getattr(settings, "email_alerts_enabled", False),
             # Telegram Bot
             "telegram_enabled": getattr(settings, "telegram_enabled", False),
             "telegram_bot_token_set": bool(getattr(settings, "telegram_bot_token", "")),
@@ -1201,6 +1205,8 @@ _EDITABLE_ENV_KEYS = {
     "HYVOR_BASE_URL", "HYVOR_API_KEY", "HYVOR_FROM", "ADMIN_EMAIL",
     # Ollama
     "OLLAMA_ENABLED", "OLLAMA_HOST", "OLLAMA_MODEL", "OLLAMA_TIMEOUT",
+    # Canales de Notificación
+    "WHATSAPP_ENABLED", "EMAIL_ALERTS_ENABLED",
     # Telegram Bot
     "TELEGRAM_ENABLED", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_MIN_LEVEL",
     # Relay
@@ -1208,7 +1214,10 @@ _EDITABLE_ENV_KEYS = {
 }
 
 # Claves cuyo valor Settings espera como bool o int
-_BOOL_KEYS = {"SMTP_TLS", "OLLAMA_ENABLED", "WAZUH_MANAGER_API_VERIFY_TLS", "AUTO_RECONCILE", "TELEGRAM_ENABLED"}
+_BOOL_KEYS = {
+    "SMTP_TLS", "OLLAMA_ENABLED", "WAZUH_MANAGER_API_VERIFY_TLS", "AUTO_RECONCILE",
+    "TELEGRAM_ENABLED", "WHATSAPP_ENABLED", "EMAIL_ALERTS_ENABLED",
+}
 _INT_KEYS = {
     "SMTP_PORT", "WAZUH_MANAGER_API_PORT", "WAHA_RECOVERY_COOLDOWN_SEC",
     "WAHA_RECOVERY_MAX_WAIT_SEC", "WAHA_WATCHDOG_INTERVAL_SEC",
@@ -1589,6 +1598,51 @@ async def telegram_test(request: Request):
         "ok": ok,
         "detail": "Mensaje enviado exitosamente a Telegram" if ok else "Fallo al enviar mensaje a Telegram (revisa token y chat_id)",
     }
+
+
+@router.post("/api/v1/dashboard/notifications/channels")
+async def update_notification_channels(request: Request):
+    """Actualiza la selección activa de canales de notificación (WhatsApp, Telegram, Correo)."""
+    await verify_write(request)
+    body = await request.json()
+    updates = {}
+
+    if "whatsapp_enabled" in body:
+        val = bool(body["whatsapp_enabled"])
+        setattr(settings, "whatsapp_enabled", val)
+        updates["WHATSAPP_ENABLED"] = "true" if val else "false"
+
+    if "telegram_enabled" in body:
+        val = bool(body["telegram_enabled"])
+        setattr(settings, "telegram_enabled", val)
+        updates["TELEGRAM_ENABLED"] = "true" if val else "false"
+        try:
+            from ..infrastructure.telegram_bot import telegram_bot
+            if val:
+                telegram_bot.start()
+            else:
+                import asyncio
+                asyncio.create_task(telegram_bot.stop())
+        except Exception as _e:
+            log.warning("error toggling telegram bot worker: %s", _e)
+
+    if "email_alerts_enabled" in body:
+        val = bool(body["email_alerts_enabled"])
+        setattr(settings, "email_alerts_enabled", val)
+        updates["EMAIL_ALERTS_ENABLED"] = "true" if val else "false"
+
+    if updates:
+        _write_env_batch(updates)
+
+    return {
+        "ok": True,
+        "channels": {
+            "whatsapp_enabled": getattr(settings, "whatsapp_enabled", True),
+            "telegram_enabled": getattr(settings, "telegram_enabled", False),
+            "email_alerts_enabled": getattr(settings, "email_alerts_enabled", False),
+        },
+    }
+
 
 
 # ──────────────────────────────────────────────

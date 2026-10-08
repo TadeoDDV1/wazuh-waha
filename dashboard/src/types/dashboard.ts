@@ -70,6 +70,8 @@ export interface FormConfig {
   wazuh_manager_api_pass_set?: boolean;
   wazuh_manager_api_verify_tls?: boolean;
   admin_phone: string;
+  whatsapp_enabled?: boolean;
+  email_alerts_enabled?: boolean;
   waha_host?: string;
   waha_session?: string;
   waha_api_key_set?: boolean;
@@ -157,3 +159,48 @@ export interface RecentAlert {
   total_ms?: number;
   error?: string;
 }
+
+export interface NetworkPortService {
+  port: number;
+  service: string;
+  desc: string;
+  open: boolean;
+}
+
+export interface NetworkSummary {
+  ok: boolean;
+  manager_host: string;
+  total_agents: number;
+  active_agents: number;
+  agents: any[];
+  services_ports: NetworkPortService[];
+  timestamp: number;
+}
+
+export interface AgentNetworkEvent {
+  type: 'network_traffic' | 'agent_heartbeat' | 'stream_tick' | 'connected';
+  subtype?: string;
+  id?: string;
+  timestamp?: string;
+  agent_id?: string;
+  agent_name?: string;
+  agent_ip?: string;
+  src_ip?: string;
+  src_port?: string;
+  dst_ip?: string;
+  dst_port?: string;
+  protocol?: string;
+  rule_id?: string;
+  level?: number;
+  description?: string;
+  status?: string;
+  bytes?: number;
+  latency_ms?: number;
+  rx_packets?: number;
+  tx_packets?: number;
+  connection_socket?: string;
+  os?: string;
+  version?: string;
+  msg?: string;
+}
+

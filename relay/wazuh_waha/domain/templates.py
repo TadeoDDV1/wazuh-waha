@@ -206,6 +206,59 @@ TEMPLATES: dict[str, TemplateFn] = {
 }
 
 
+_COMMON_TRANSLATIONS = [
+    ("sshd: Authentication failed", "Fallo de autenticación por SSH"),
+    ("sshd: Insecure connection attempt", "Intento de conexión SSH insegura"),
+    ("sshd: Attempt to login using a non-existent user", "Intento de login SSH con usuario inexistente"),
+    ("Multiple failed logins from the same source", "Múltiples logins fallidos desde la misma IP"),
+    ("Integrity checksum changed", "Integridad de archivo alterada (FIM)"),
+    ("File added to the system", "Nuevo archivo añadido al sistema (FIM)"),
+    ("File deleted", "Archivo eliminado del sistema (FIM)"),
+    ("Host-based anomaly detection event", "Anomalía detectada en el host (Rootcheck)"),
+    ("Maximum number of failed login attempts exceeded", "Límite máximo de logins fallidos superado"),
+    ("System user successfully logged in", "Inicio de sesión de usuario del sistema exitoso"),
+    ("PAM: User login failed", "PAM: Error de inicio de sesión"),
+    ("PAM: Login session opened", "PAM: Sesión abierta en el sistema"),
+    ("PAM: Login session closed", "PAM: Sesión cerrada en el sistema"),
+    ("Sudo command executed", "Comando ejecutado mediante sudo"),
+    ("Service was started", "Servicio del sistema iniciado"),
+    ("Service was stopped", "Servicio del sistema detenido"),
+    ("High severity vulnerability", "Vulnerabilidad de seguridad de nivel ALTO"),
+    ("Critical severity vulnerability", "Vulnerabilidad de seguridad de nivel CRÍTICO"),
+    ("Medium severity vulnerability", "Vulnerabilidad de seguridad de nivel MEDIO"),
+    ("Low severity vulnerability", "Vulnerabilidad de seguridad de nivel BAJO"),
+    ("Vulnerability detected", "Vulnerabilidad detectada en el equipo"),
+    ("Package database changed", "Base de datos de paquetes del sistema modificada"),
+    ("Active response", "Respuesta Activa ejecutada"),
+    ("WAHA session", "Evento de salud de la sesión WhatsApp (WAHA)"),
+    ("wazuh-agent", "Evento de estado del Agente Wazuh"),
+    ("wazuh-waha", "Evento de estado del Relay Wazuh-WAHA"),
+]
+
+
+def _translate_description_es(desc: str) -> str:
+    if not desc:
+        return "Alerta de seguridad sin descripción"
+    for eng, esp in _COMMON_TRANSLATIONS:
+        if eng.lower() in desc.lower():
+            return esp
+    return desc
+
+
+def _format_level_es(level: int | str) -> str:
+    try:
+        lvl = int(level)
+    except Exception:
+        lvl = 0
+    if lvl >= 12:
+        return f"[L{lvl}] 🔴 CRÍTICO"
+    elif lvl >= 8:
+        return f"[L{lvl}] 🟠 ALTO"
+    elif lvl >= 4:
+        return f"[L{lvl}] 🟡 MEDIO"
+    return f"[L{lvl}] 🟢 BAJO"
+
+
 def render(rule_id: str, alert: dict) -> str | None:
     fn = TEMPLATES.get(str(rule_id))
     if fn is None:
@@ -217,11 +270,28 @@ def render(rule_id: str, alert: dict) -> str | None:
 
 
 def render_default(alert: dict) -> str:
-    return (
-        f"🚨 *Alerta Wazuh*\n"
-        f"Regla: `{alert.get('rule', {}).get('id', '?')} - "
-        f"{alert.get('rule', {}).get('description', '?')}`\n"
-        f"Nivel: `{alert.get('rule', {}).get('level', '?')}`\n"
-        f"Agente: `{_agent(alert)}`\n"
-        f"Hora: `{alert.get('timestamp', '?')}`"
-    )
+    rule = alert.get("rule", {}) or {}
+    rule_id = rule.get("id", "?")
+    raw_desc = rule.get("description", "?")
+    desc_es = _translate_description_es(raw_desc)
+    level = rule.get("level", 0)
+    level_es = _format_level_es(level)
+    agent = _agent(alert)
+    timestamp = alert.get("timestamp", "?")
+    src_ip = _field(alert, "srcip", default="")
+    user = _field(alert, "dstuser", default="")
+
+    lines = [
+        "🚨 *ALERTA DE SEGURIDAD WAZUH*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"📊 *Nivel:* {level_es}",
+        f"🛡️ *Regla:* `#{rule_id}` - *{desc_es}*",
+        f"🖥️ *Equipo / Agente:* `{agent}`",
+    ]
+    if src_ip and src_ip != "?":
+        lines.append(f"🌐 *IP Origen:* `{src_ip}`")
+    if user and user != "?":
+        lines.append(f"👤 *Usuario:* `{user}`")
+    lines.append(f"⏰ *Hora:* `{timestamp}`")
+    return "\n".join(lines)
+

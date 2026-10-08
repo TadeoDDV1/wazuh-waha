@@ -5,6 +5,8 @@ import { WazuhServicesCard } from './WazuhServicesCard';
 import { WazuhAgentsCard } from './WazuhAgentsCard';
 import { WazuhModulesControlCard } from './WazuhModulesControlCard';
 import { WhatsappCard } from './WhatsappCard';
+import { TelegramCard } from './TelegramCard';
+import { NotificationChannelsCard } from './NotificationChannelsCard';
 import { TelemetryGlobalCard } from './TelemetryGlobalCard';
 import {
   Loader2,
@@ -62,22 +64,33 @@ export const Dashboard: React.FC = () => {
       {/* ── 3. Módulos de Wazuh Integrados con Reglas y Datos en Vivo ── */}
       <WazuhModulesControlCard />
 
-      {/* ── 3. Pasarela y Sesión de WhatsApp (WAHA) con Código QR ── */}
-      {wahaComponent && (
-        <div style={{ margin: '0 24px 30px' }}>
-          <div style={{ marginBottom: '14px' }}>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>📱</span> Sesión y Gateway de WhatsApp (WAHA)
-            </h3>
-            <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
-              Inicia o detén la sesión de WhatsApp, o genera el código QR para vincular el dispositivo que enviará las alertas.
-            </p>
-          </div>
-          <div style={{ maxWidth: '650px' }}>
-            <WhatsappCard component={wahaComponent} />
-          </div>
+      {/* ── 4. Selección de Canales de Notificación (WhatsApp, Telegram, Correo) ── */}
+      <div style={{ margin: '0 24px 30px' }}>
+        <NotificationChannelsCard />
+      </div>
+
+      {/* ── 5. Pasarelas de Mensajería: Vinculación WhatsApp y Telegram ── */}
+      <div style={{ margin: '0 24px 30px' }}>
+        <div style={{ marginBottom: '16px' }}>
+          <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>📡</span> Pasarelas de Mensajería y Vinculación de Dispositivos
+          </h3>
+          <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+            Vincula el código QR de WhatsApp (WAHA) o sincroniza el Bot de Telegram (@BotFather) para despachar alertas y recibir comandos del SOC.
+          </p>
         </div>
-      )}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
+            gap: '20px',
+            alignItems: 'start',
+          }}
+        >
+          {wahaComponent && <WhatsappCard component={wahaComponent} />}
+          <TelegramCard />
+        </div>
+      </div>
     </div>
   );
 };

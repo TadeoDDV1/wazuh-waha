@@ -188,4 +188,28 @@ export const dashboardService = {
     const response = await api.post('/telegram/test');
     return response.data;
   },
+
+  updateNotificationChannels: async (channels: {
+    whatsapp_enabled?: boolean;
+    telegram_enabled?: boolean;
+    email_alerts_enabled?: boolean;
+  }): Promise<{ ok: boolean; channels: any }> => {
+    const response = await api.post('/notifications/channels', channels);
+    return response.data;
+  },
+
+  getNetworkSummary: async (): Promise<any> => {
+    const response = await axios.get('/api/v1/telemetry/network/summary', { withCredentials: true });
+    return response.data;
+  },
+
+  probeNetwork: async (): Promise<any> => {
+    const response = await axios.post('/api/v1/telemetry/network/probe', {}, { withCredentials: true });
+    return response.data;
+  },
 };
+
+export function buildNetworkStreamUrl(): string {
+  return '/api/v1/telemetry/network/stream';
+}
+

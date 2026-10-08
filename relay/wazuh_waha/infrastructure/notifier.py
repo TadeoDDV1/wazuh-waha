@@ -202,17 +202,37 @@ async def notify_email_hyvor(subject: str, body_text: str) -> bool:
         return False
 
 
+async def notify_alert_email(
+    subject: str,
+    message: str,
+    rule_id: str = "0",
+    level: int = 0,
+    agent_name: str = "?",
+) -> bool:
+    """Envía alerta de seguridad por correo si el canal de email está activo."""
+    if not settings.admin_email or not settings.email_alerts_enabled:
+        return False
+    if settings.email_provider == "hyvor_relay":
+        return await notify_email_hyvor(subject, message)
+    elif settings.email_provider not in ("off", "none", "disabled", ""):
+        return await asyncio.to_thread(notify_email, subject, message)
+    return False
+
+
 async def notify_health(description: str, level: int = 15, **fields) -> None:
-    subject = f"[wazuh-waha] {description}"
+    subject = f"[Wazuh-WAHA] Evento de Salud: {description}"
     body_lines = [
-        f"WAHA Health Event",
-        f"Description: {description}",
-        f"Rule:        {HEALTH_RULE_ID}",
-        f"Level:       {level}",
-        f"Time:        {time.strftime('%Y-%m-%d %H:%M:%S %z')}",
+        "🛡️ Evento de Salud de la Infraestructura Wazuh-WAHA",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"Descripción: {description}",
+        f"Regla:       {HEALTH_RULE_ID}",
+        f"Nivel:       {level}",
+        f"Fecha/Hora:  {time.strftime('%Y-%m-%d %H:%M:%S %z')}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "Detalles:",
     ]
     for k, v in fields.items():
-        body_lines.append(f"{k:12s} {v}")
+        body_lines.append(f"• {k}: {v}")
     body = "\n".join(body_lines)
 
     extra_tasks = []
@@ -232,3 +252,4 @@ async def notify_health(description: str, level: int = 15, **fields) -> None:
         notify_wazuh_manager(description, level, **fields),
         *extra_tasks,
     )
+

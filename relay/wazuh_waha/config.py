@@ -105,6 +105,10 @@ class Settings(BaseSettings):
     wazuh_vm_ssh_strict_host_key: str = "accept-new"  # yes | accept-new | no
     session_cookie_secure: bool = False
 
+    # --- Canales de Notificación (WhatsApp, Telegram, Correo) ---
+    whatsapp_enabled: bool = True
+    email_alerts_enabled: bool = False
+
     # --- Telegram Bot (monitoreo y notificaciones) ---
     telegram_enabled: bool = False
     telegram_bot_token: str = ""
