@@ -81,6 +81,7 @@ async def telemetry_stream(
     _sse_client_count += 1
 
     async def event_generator():
+        global _sse_client_count
         try:
             # Evento inicial inmediato
             data = await telemetry_store.snapshot()
