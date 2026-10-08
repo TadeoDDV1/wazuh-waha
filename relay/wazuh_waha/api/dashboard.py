@@ -2413,7 +2413,7 @@ async def get_wazuh_syscollector(request: Request, agent_id: str = "000", _: Non
 
             headers = {"Authorization": f"Bearer {token}"}
             r_os = await client.get(f"{base}/syscollector/{agent_id}/os", headers=headers)
-            r_ports = await client.get(f"{base}/syscollector/{agent_id}/ports?limit=40", headers=headers)
+            r_ports = await client.get(f"{base}/syscollector/{agent_id}/ports?limit=500", headers=headers)
             r_hw = await client.get(f"{base}/syscollector/{agent_id}/hardware", headers=headers)
 
             os_data = r_os.json().get("data", {}).get("affected_items", [{}])[0] if r_os.is_success else {}
@@ -2559,7 +2559,7 @@ async def get_wazuh_recommendations(request: Request, agent_id: str = "000", _: 
 
             # 5. Syscollector / Higiene informática
             try:
-                r_ports = await client.get(f"{base}/syscollector/{agent_id}/ports?limit=40", headers=headers)
+                r_ports = await client.get(f"{base}/syscollector/{agent_id}/ports?limit=500", headers=headers)
                 if r_ports.is_success:
                     ports = r_ports.json().get("data", {}).get("affected_items", [])
                     open_all = [p for p in ports if p.get("local", {}).get("ip") in ("0.0.0.0", "::") and p.get("state") == "listening"]

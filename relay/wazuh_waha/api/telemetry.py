@@ -270,6 +270,11 @@ async def _resolve_ip_hostname(ip: str) -> str:
     return val
 
 
+# Buffer en memoria de sitios visitados recientemente (ventana de retención: 30 min)
+_SITES_HISTORY_CACHE: dict[str, dict[str, Any]] = {}
+_SITES_CACHE_TTL = 1800  # 30 minutos de retención
+
+
 def _classify_network_site(ip: str, port: int, hostname: str = "", process: str = "") -> dict[str, Any]:
     """Clasifica un destino de red en un sitio web, servicio conocido y categoría en español."""
     ip = str(ip).strip()
@@ -277,116 +282,11 @@ def _classify_network_site(ip: str, port: int, hostname: str = "", process: str 
     h = str(hostname or "").lower()
     proc = str(process or "").lower()
 
-    # 1. Google / YouTube
-    if any(k in h for k in ("1e100.net", "google", "youtube", "googlevideo", "gstatic", "googleapis")) or ip in ("8.8.8.8", "8.8.4.4") or ip.startswith("142.250.") or ip.startswith("172.217.") or ip.startswith("216.58."):
-        if port == 53 or ip in ("8.8.8.8", "8.8.4.4"):
-            return {
-                "site_name": "Google Public DNS",
-                "domain": "dns.google",
-                "category": "dns",
-                "category_label": "Servidor DNS (Google)",
-                "is_web": False,
-                "icon": "globe",
-            }
+    # 1. Wazuh Remoted / Authd (Agentes conectando a canal seguro de Wazuh)
+    # IMPORTANTE: Verificar por puertos/procesos específicos ANTES de filtros generales
+    if port in (1514, 1515) or proc in ("wazuh-agentd", "wazuh-remoted", "wazuh-authd"):
         return {
-            "site_name": "Google / YouTube",
-            "domain": "google.com",
-            "category": "web",
-            "category_label": "Navegación Web (Google)",
-            "is_web": True,
-            "icon": "globe",
-        }
-
-    # 2. Cloudflare
-    if "cloudflare" in h or ip in ("1.1.1.1", "1.0.0.1") or ip.startswith("104.16.") or ip.startswith("104.17.") or ip.startswith("172.67."):
-        if port == 53 or ip in ("1.1.1.1", "1.0.0.1"):
-            return {
-                "site_name": "Cloudflare 1.1.1.1 DNS",
-                "domain": "one.one.one.one",
-                "category": "dns",
-                "category_label": "Servidor DNS (Cloudflare)",
-                "is_web": False,
-                "icon": "globe",
-            }
-        return {
-            "site_name": "Cloudflare CDN / Web",
-            "domain": "cloudflare.com",
-            "category": "web",
-            "category_label": "Navegación / CDN (Cloudflare)",
-            "is_web": True,
-            "icon": "globe",
-        }
-
-    # 3. GitHub
-    if "github" in h or ip.startswith("140.82.") or ip.startswith("185.199."):
-        return {
-            "site_name": "GitHub Services",
-            "domain": "github.com",
-            "category": "web",
-            "category_label": "Repositorio & Git (GitHub)",
-            "is_web": True,
-            "icon": "globe",
-        }
-
-    # 4. WhatsApp / Meta
-    if any(k in h for k in ("whatsapp", "fbcdn", "facebook", "instagram")) or ip.startswith("157.240.") or ip.startswith("31.13."):
-        return {
-            "site_name": "WhatsApp / Meta",
-            "domain": "whatsapp.net",
-            "category": "messaging",
-            "category_label": "Mensajería (WhatsApp/Meta)",
-            "is_web": True,
-            "icon": "message-square",
-        }
-
-    # 5. Telegram
-    if "telegram" in h or ip.startswith("149.154.") or ip.startswith("91.108."):
-        return {
-            "site_name": "Telegram Messenger",
-            "domain": "telegram.org",
-            "category": "messaging",
-            "category_label": "Mensajería (Telegram API)",
-            "is_web": True,
-            "icon": "message-square",
-        }
-
-    # 6. Microsoft / Azure
-    if any(k in h for k in ("microsoft", "azure", "windows", "bing", "live.com", "office.com")):
-        return {
-            "site_name": "Microsoft / Azure",
-            "domain": "microsoft.com",
-            "category": "web",
-            "category_label": "Servicios Microsoft / Azure",
-            "is_web": True,
-            "icon": "globe",
-        }
-
-    # 7. Amazon / AWS
-    if any(k in h for k in ("amazonaws", "amazon", "cloudfront")):
-        return {
-            "site_name": "Amazon Web Services (AWS)",
-            "domain": "amazonaws.com",
-            "category": "web",
-            "category_label": "Servicios Nube (AWS/Cloudfront)",
-            "is_web": True,
-            "icon": "globe",
-        }
-
-    # 8. Repositorios Linux (Arch Linux, Ubuntu, Debian)
-    if any(k in h for k in ("archlinux", "ubuntu", "debian", "canonical")):
-        return {
-            "site_name": "Repositorios de Actualización Linux",
-            "domain": h if h else "repositorio-linux.org",
-            "category": "update",
-            "category_label": "Actualizaciones del Sistema",
-            "is_web": True,
-            "icon": "server",
-        }
-
-    # 9. Wazuh Remoted / Authd
-    if port in (1514, 1515) or "192.168.122.142" in ip or "wazuh" in proc:
-        return {
-            "site_name": "Wazuh Manager SOC",
+            "site_name": "Wazuh Manager SOC (Canal Agentes)",
             "domain": "wazuh-manager.local",
             "category": "sync",
             "category_label": "Sincronización Wazuh Remoted (1514)",
@@ -394,8 +294,41 @@ def _classify_network_site(ip: str, port: int, hostname: str = "", process: str 
             "icon": "shield",
         }
 
-    # 10. SSH
-    if port == 22 or "ssh" in proc:
+    # 2. Wazuh REST API (Puerto 55000)
+    if port == 55000 or "wazuh-apid" in proc:
+        return {
+            "site_name": "Wazuh Manager REST API",
+            "domain": "wazuh-api.local",
+            "category": "sync",
+            "category_label": "API REST Wazuh (55000/HTTPS)",
+            "is_web": True,
+            "icon": "shield",
+        }
+
+    # 3. SOC Dashboard Web (Puerto 8001)
+    if port == 8001 or "dashboard" in proc:
+        return {
+            "site_name": "Panel SOC Dashboard Web",
+            "domain": "soc-dashboard.local",
+            "category": "web",
+            "category_label": "Panel SOC Dashboard (8001/HTTP)",
+            "is_web": True,
+            "icon": "globe",
+        }
+
+    # 4. WAHA WhatsApp Gateway (Puerto 3001)
+    if port == 3001 or "waha" in proc:
+        return {
+            "site_name": "WAHA WhatsApp API Gateway",
+            "domain": "waha.local",
+            "category": "messaging",
+            "category_label": "Gateway WAHA WhatsApp (3001)",
+            "is_web": True,
+            "icon": "message-square",
+        }
+
+    # 5. SSH (Puerto 22)
+    if port == 22 or proc in ("ssh", "sshd"):
         dom = h or ip
         return {
             "site_name": f"Terminal Remota SSH ({dom})",
@@ -406,19 +339,202 @@ def _classify_network_site(ip: str, port: int, hostname: str = "", process: str 
             "icon": "terminal",
         }
 
-    # 11. DNS genérico
-    if port == 53 or "systemd-resolved" in proc:
-        dom = h or ip
+    # 6. YouTube (Streaming de Video)
+    # Detecta YouTube por hostname, SNI, o combinación de IPs de Google + browser/puerto o palabras clave
+    is_google_ip = (
+        ip.startswith(("142.250.", "142.251.", "172.217.", "172.253.", "192.178.", "216.58.", "74.125.", "64.233.", "173.194."))
+        or any(k in h for k in ("1e100.net", "google", "gstatic"))
+    )
+    is_yt_host = any(k in h for k in ("youtube", "googlevideo", "ytimg", "youtu.be"))
+    is_browser = proc in ("chrome", "firefox", "brave", "edge", "opera", "chromium", "curl")
+
+    if is_yt_host or (is_google_ip and any(k in h for k in ("video", "youtube", "play"))):
+        clean_yt_dom = h if ("youtube" in h or "googlevideo" in h) else "youtube.com"
         return {
-            "site_name": f"Servidor DNS ({dom})",
-            "domain": dom,
-            "category": "dns",
-            "category_label": "Resolución de Nombres DNS (53)",
-            "is_web": False,
+            "site_name": "YouTube (Streaming de Video)",
+            "domain": clean_yt_dom,
+            "category": "web",
+            "category_label": "Video Streaming & Navegación (YouTube)",
+            "is_web": True,
+            "icon": "video",
+        }
+
+    # 7. Google Servicios / Búsqueda / Cloud
+    if is_google_ip or ip in ("8.8.8.8", "8.8.4.4") or ip.startswith("34.54."):
+        if port == 53 or ip in ("8.8.8.8", "8.8.4.4"):
+            return {
+                "site_name": "Google Public DNS",
+                "domain": "dns.google",
+                "category": "dns",
+                "category_label": "Servidor DNS (Google 8.8.8.8)",
+                "is_web": False,
+                "icon": "globe",
+            }
+        if port == 5228:
+            return {
+                "site_name": "Google Cloud / Chrome Push Services",
+                "domain": "google.com",
+                "category": "web",
+                "category_label": "Servicios Cloud / Push (Google)",
+                "is_web": True,
+                "icon": "globe",
+            }
+        clean_g_dom = h if (h and not h.replace('.', '').isdigit() and "1e100" not in h) else "google.com"
+        return {
+            "site_name": "Google (Búsqueda & Web)",
+            "domain": clean_g_dom,
+            "category": "web",
+            "category_label": "Navegación / Servicios Web (Google)",
+            "is_web": True,
             "icon": "globe",
         }
 
-    # 12. Bases de Datos
+    # 8. WhatsApp / Meta / Facebook / Instagram
+    if any(k in h for k in ("whatsapp", "fbcdn", "facebook", "instagram")) or ip.startswith(("157.240.", "31.13.", "179.60.", "185.89.")):
+        plat = "WhatsApp" if "whatsapp" in h else "Instagram" if "instagram" in h else "Facebook / Meta"
+        return {
+            "site_name": f"{plat} (Red Social / Chat)",
+            "domain": h if h else "whatsapp.net",
+            "category": "messaging",
+            "category_label": f"Mensajería & Redes ({plat})",
+            "is_web": True,
+            "icon": "message-square",
+        }
+
+    # 9. Telegram Messenger
+    if "telegram" in h or ip.startswith(("149.154.", "91.108.")):
+        return {
+            "site_name": "Telegram Messenger",
+            "domain": "telegram.org",
+            "category": "messaging",
+            "category_label": "Mensajería (Telegram API/Web)",
+            "is_web": True,
+            "icon": "message-square",
+        }
+
+    # 10. Cloudflare CDN / DNS
+    if "cloudflare" in h or ip in ("1.1.1.1", "1.0.0.1") or ip.startswith(("104.16.", "104.17.", "104.18.", "104.19.", "104.20.", "104.21.", "104.22.", "104.23.", "104.24.", "104.25.", "104.26.", "104.27.", "104.28.", "172.64.", "172.65.", "172.66.", "172.67.", "162.159.")):
+        if port == 53 or ip in ("1.1.1.1", "1.0.0.1"):
+            return {
+                "site_name": "Cloudflare 1.1.1.1 DNS",
+                "domain": "one.one.one.one",
+                "category": "dns",
+                "category_label": "Servidor DNS Seguro (Cloudflare)",
+                "is_web": False,
+                "icon": "globe",
+            }
+        return {
+            "site_name": "Cloudflare CDN / Red Web",
+            "domain": h if (h and "cloudflare" not in h) else "cloudflare.com",
+            "category": "web",
+            "category_label": "Aceleración / CDN Web (Cloudflare)",
+            "is_web": True,
+            "icon": "globe",
+        }
+
+    # 11. OpenAI / ChatGPT
+    if any(k in h for k in ("openai", "chatgpt", "oaistatic")) or ip.startswith("104.18.32."):
+        return {
+            "site_name": "OpenAI / ChatGPT",
+            "domain": "chatgpt.com",
+            "category": "web",
+            "category_label": "Inteligencia Artificial (OpenAI)",
+            "is_web": True,
+            "icon": "globe",
+        }
+
+    # 12. GitHub
+    if "github" in h or ip.startswith(("140.82.", "185.199.", "20.201.", "20.205.")):
+        return {
+            "site_name": "GitHub (Repositorios & Código)",
+            "domain": "github.com",
+            "category": "web",
+            "category_label": "Repositorios de Código (GitHub)",
+            "is_web": True,
+            "icon": "globe",
+        }
+
+    # 13. Microsoft / Azure
+    if any(k in h for k in ("microsoft", "azure", "windows", "bing", "live.com", "office.com")) or ip.startswith(("20.", "40.", "52.", "13.")):
+        return {
+            "site_name": "Microsoft / Azure Cloud",
+            "domain": h if h else "microsoft.com",
+            "category": "web",
+            "category_label": "Servicios Microsoft / Azure",
+            "is_web": True,
+            "icon": "globe",
+        }
+
+    # 14. Amazon / AWS
+    if any(k in h for k in ("amazonaws", "amazon", "cloudfront")) or ip.startswith(("54.", "3.", "18.", "35.", "44.", "99.84.", "99.86.")):
+        return {
+            "site_name": "Amazon Web Services (AWS)",
+            "domain": h if h else "amazonaws.com",
+            "category": "web",
+            "category_label": "Servicios Nube (AWS/Cloudfront)",
+            "is_web": True,
+            "icon": "globe",
+        }
+
+    # 15. Wikipedia / Redes y Plataformas Populares
+    if any(k in h for k in ("wikimedia", "wikipedia")):
+        return {
+            "site_name": "Wikipedia (Enciclopedia Libre)",
+            "domain": "wikipedia.org",
+            "category": "web",
+            "category_label": "Portal Web (Wikipedia)",
+            "is_web": True,
+            "icon": "globe",
+        }
+    if any(k in h for k in ("netflix", "nflxvideo")):
+        return {
+            "site_name": "Netflix (Streaming)",
+            "domain": "netflix.com",
+            "category": "web",
+            "category_label": "Streaming de Video (Netflix)",
+            "is_web": True,
+            "icon": "video",
+        }
+    if any(k in h for k in ("twitter", "twimg", "x.com")) or ip.startswith("104.244."):
+        return {
+            "site_name": "X / Twitter",
+            "domain": "x.com",
+            "category": "web",
+            "category_label": "Red Social (X / Twitter)",
+            "is_web": True,
+            "icon": "globe",
+        }
+    if any(k in h for k in ("spotify", "scdn.co")):
+        return {
+            "site_name": "Spotify (Streaming de Música)",
+            "domain": "spotify.com",
+            "category": "web",
+            "category_label": "Música / Streaming (Spotify)",
+            "is_web": True,
+            "icon": "globe",
+        }
+    if any(k in h for k in ("reddit", "redd.it")):
+        return {
+            "site_name": "Reddit",
+            "domain": "reddit.com",
+            "category": "web",
+            "category_label": "Comunidad Web (Reddit)",
+            "is_web": True,
+            "icon": "globe",
+        }
+
+    # 16. Repositorios Linux (Arch Linux, Ubuntu, Debian, Kali)
+    if any(k in h for k in ("archlinux", "ubuntu", "debian", "canonical", "kali.org")):
+        return {
+            "site_name": "Repositorios de Actualización Linux",
+            "domain": h if h else "repositorio-linux.org",
+            "category": "update",
+            "category_label": "Actualizaciones del Sistema (Linux)",
+            "is_web": True,
+            "icon": "server",
+        }
+
+    # 17. Bases de Datos
     if port in (3306, 5432, 6379, 27017) or proc in ("mariadbd", "postgres", "redis-server", "mongod"):
         db_name = "MySQL/MariaDB" if port == 3306 or "maria" in proc else "PostgreSQL" if port == 5432 or "postgre" in proc else "Redis" if port == 6379 else "Base de Datos"
         return {
@@ -430,30 +546,20 @@ def _classify_network_site(ip: str, port: int, hostname: str = "", process: str 
             "icon": "database",
         }
 
-    # 13. WAHA WhatsApp Gateway
-    if port == 3001 or "waha" in proc:
+    # 18. DNS genérico
+    if port == 53 or "systemd-resolved" in proc:
+        dom = h or ip
         return {
-            "site_name": "WAHA WhatsApp API Gateway",
-            "domain": "waha.local",
-            "category": "messaging",
-            "category_label": "Gateway WAHA WhatsApp (3001)",
-            "is_web": True,
-            "icon": "message-square",
-        }
-
-    # 14. SOC Dashboard Web
-    if port == 8001 or "dashboard" in proc:
-        return {
-            "site_name": "SOC Dashboard Web",
-            "domain": "soc-dashboard.local",
-            "category": "web",
-            "category_label": "Panel SOC Dashboard (8001)",
-            "is_web": True,
+            "site_name": f"Servidor DNS ({dom})",
+            "domain": dom,
+            "category": "dns",
+            "category_label": "Resolución de Nombres DNS (53)",
+            "is_web": False,
             "icon": "globe",
         }
 
-    # 15. Red Local WiFi / LAN
-    if ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172.16."):
+    # 19. Red Local WiFi / LAN
+    if ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172.16.") or ip.startswith("172.44."):
         return {
             "site_name": f"Equipo Red Local WiFi ({ip})",
             "domain": h or ip,
@@ -463,11 +569,12 @@ def _classify_network_site(ip: str, port: int, hostname: str = "", process: str 
             "icon": "wifi",
         }
 
-    # 16. Web genérico HTTPS / HTTP
+    # 20. Web genérico HTTPS / HTTP
     if port == 443:
-        dom = h or ip
+        dom = h if (h and not h.replace('.', '').isdigit()) else ip
+        site_title = f"Sitio Web Seguro ({dom})" if dom != ip else f"Sitio Web HTTPS ({ip})"
         return {
-            "site_name": f"Sitio Web Seguro HTTPS ({dom})",
+            "site_name": site_title,
             "domain": dom,
             "category": "web",
             "category_label": "Navegación Web Segura (443/HTTPS)",
@@ -475,9 +582,10 @@ def _classify_network_site(ip: str, port: int, hostname: str = "", process: str 
             "icon": "globe",
         }
     elif port in (80, 8080, 8443):
-        dom = h or ip
+        dom = h if (h and not h.replace('.', '').isdigit()) else ip
+        site_title = f"Sitio Web ({dom})" if dom != ip else f"Sitio Web HTTP ({ip})"
         return {
-            "site_name": f"Sitio Web HTTP ({dom})",
+            "site_name": site_title,
             "domain": dom,
             "category": "web",
             "category_label": f"Navegación Web ({port}/HTTP)",
@@ -485,7 +593,7 @@ def _classify_network_site(ip: str, port: int, hostname: str = "", process: str 
             "icon": "globe",
         }
 
-    # 17. Localhost
+    # 21. Localhost
     if ip in ("127.0.0.1", "::1", "localhost"):
         return {
             "site_name": "Servicio Interno (Localhost)",
@@ -793,7 +901,7 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
 
                         # 1. Puertos / sockets del agente en Wazuh Syscollector
                         try:
-                            r_ports = await client.get(f"{base}/syscollector/{aid}/ports?limit=60", headers=headers)
+                            r_ports = await client.get(f"{base}/syscollector/{aid}/ports?limit=500", headers=headers)
                             if r_ports.is_success:
                                 items = r_ports.json().get("data", {}).get("affected_items", [])
                                 for p in items:
@@ -818,7 +926,7 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
 
                         # 3. Procesos
                         try:
-                            r_pr = await client.get(f"{base}/syscollector/{aid}/processes?limit=25", headers=headers)
+                            r_pr = await client.get(f"{base}/syscollector/{aid}/processes?limit=100", headers=headers)
                             if r_pr.is_success:
                                 items = r_pr.json().get("data", {}).get("affected_items", [])
                                 for pr in items:
@@ -921,30 +1029,58 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
         # Si el socket tiene destino remoto o es una conexión activa, registrarlo en la actividad de sitios
         if rem_ip not in ("-", "0.0.0.0", "::") and rem_port > 0:
             site_key = f"{sock['agent_id']}:{classification['domain']}:{rem_port}:{sock['protocol']}"
+            is_estab = "estab" in sock["state"] or "syn" in sock["state"]
+            state_lbl = "CONEXIÓN ACTIVA" if is_estab else "EN ESPERA" if "wait" in sock["state"] else sock["state"].upper()
+
+            rec = {
+                "site_name": classification["site_name"],
+                "domain": classification["domain"],
+                "remote_ip": rem_ip,
+                "remote_port": rem_port,
+                "protocol": sock["protocol"],
+                "process": proc,
+                "pid": sock["pid"],
+                "category": classification["category"],
+                "category_label": classification["category_label"],
+                "is_web": classification["is_web"],
+                "state": sock["state"],
+                "state_label": state_lbl,
+                "agent_id": sock["agent_id"],
+                "agent_name": sock["agent_name"],
+                "agent_ip": sock.get("agent_ip", ""),
+                "last_seen": time.strftime("%H:%M:%S"),
+                "_ts": time.time(),
+            }
+
+            # Guardar en caché histórico para persistencia de sesión
+            _SITES_HISTORY_CACHE[site_key] = rec
+
             if site_key not in seen_sites:
                 seen_sites.add(site_key)
+                sites_activity.append(rec)
 
-                is_estab = "estab" in sock["state"] or "syn" in sock["state"]
-                state_lbl = "CONEXIÓN ACTIVA" if is_estab else "EN ESPERA" if "wait" in sock["state"] else sock["state"].upper()
+    # Incorporar sitios históricos recientemente visitados (retención de sesión de 30 min)
+    now_ts = time.time()
+    for s_key, hist_rec in list(_SITES_HISTORY_CACHE.items()):
+        if now_ts - hist_rec.get("_ts", 0) > _SITES_CACHE_TTL:
+            _SITES_HISTORY_CACHE.pop(s_key, None)
+            continue
 
-                sites_activity.append({
-                    "site_name": classification["site_name"],
-                    "domain": classification["domain"],
-                    "remote_ip": rem_ip,
-                    "remote_port": rem_port,
-                    "protocol": sock["protocol"],
-                    "process": proc,
-                    "pid": sock["pid"],
-                    "category": classification["category"],
-                    "category_label": classification["category_label"],
-                    "is_web": classification["is_web"],
-                    "state": sock["state"],
-                    "state_label": state_lbl,
-                    "agent_id": sock["agent_id"],
-                    "agent_name": sock["agent_name"],
-                    "agent_ip": sock.get("agent_ip", ""),
-                    "last_seen": time.strftime("%H:%M:%S"),
-                })
+        if s_key not in seen_sites:
+            if agent_id_str == "all" or hist_rec.get("agent_id") == agent_id_str:
+                recent_copy = dict(hist_rec)
+                recent_copy["state"] = "recent"
+                recent_copy["state_label"] = "RECIENTE"
+                sites_activity.append(recent_copy)
+                seen_sites.add(s_key)
+
+    # Ordenar: conexiones activas primero, luego recientes por timestamp
+    sites_activity.sort(
+        key=lambda x: (
+            0 if ("estab" in x.get("state", "").lower() or "activa" in x.get("state_label", "").lower()) else 1,
+            -x.get("_ts", 0),
+        )
+    )
 
     # Normalizar interfaces
     normalized_ifaces = []

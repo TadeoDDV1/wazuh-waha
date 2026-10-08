@@ -39,6 +39,7 @@ import {
   MessageSquare,
   Database,
   Terminal as TerminalIcon,
+  Video,
 } from 'lucide-react';
 
 interface NetworkAgentsTerminalProps {
@@ -266,7 +267,10 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
   }, [sitesSummary]);
 
   // Helper para íconos según categoría de sitio
-  const renderSiteIcon = (category: string, isWeb: boolean) => {
+  const renderSiteIcon = (category: string, isWeb: boolean, iconName?: string) => {
+    if (iconName === 'video') {
+      return <Video size={15} style={{ color: '#ef4444' }} />;
+    }
     switch (category) {
       case 'web':
         return <Globe size={15} style={{ color: '#38bdf8' }} />;
@@ -820,7 +824,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                                   justifyContent: 'center',
                                 }}
                               >
-                                {renderSiteIcon(site.category, site.is_web)}
+                                {renderSiteIcon(site.category, site.is_web, (site as any).icon)}
                               </div>
                               <div>
                                 <strong style={{ fontSize: '12px', color: '#fff', display: 'block' }}>
