@@ -174,7 +174,12 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
                     description=description, decision="waha_error",
                     alert_timestamp=ts_alert,
                 ))
-                raise HTTPException(status_code=502, detail=f"waha error: {e}")
+                return {
+                    "status": "error",
+                    "reason": "waha_unavailable",
+                    "detail": f"WhatsApp gateway no disponible o sesión no iniciada: {e}",
+                    "rule_id": rule_id,
+                }
 
     # Si ningún canal está habilitado en configuración
     if not channels_sent and not getattr(settings, "whatsapp_enabled", True):
