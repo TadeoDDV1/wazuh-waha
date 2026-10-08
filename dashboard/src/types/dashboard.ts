@@ -199,8 +199,92 @@ export interface AgentNetworkEvent {
   rx_packets?: number;
   tx_packets?: number;
   connection_socket?: string;
+  process?: string;
+  full_log?: string;
   os?: string;
   version?: string;
   msg?: string;
 }
+
+export interface AgentSocket {
+  protocol: string;
+  local_ip: string;
+  local_port: number;
+  remote_ip: string;
+  remote_port: number;
+  process: string;
+  pid?: number;
+  state: string;
+  tx_packets?: number;
+  rx_packets?: number;
+}
+
+export interface AgentNetInterface {
+  name: string;
+  state: string;
+  mac?: string;
+  mtu?: number;
+  type?: string;
+  tx_bytes: number;
+  rx_bytes: number;
+  tx_packets: number;
+  rx_packets: number;
+  tx_errors?: number;
+  rx_errors?: number;
+  tx_drops?: number;
+  rx_drops?: number;
+  ipv4?: string;
+}
+
+export interface AgentProcess {
+  pid: number;
+  name: string;
+  cmd?: string;
+  euser?: string;
+  state?: string;
+}
+
+export interface AgentWazuhDetection {
+  id: string;
+  timestamp: string;
+  rule_id: string;
+  level: number;
+  level_es: string;
+  description: string;
+  agent_id: string;
+  agent_name: string;
+  srcip?: string;
+  srcport?: string;
+  dstuser?: string;
+  full_log?: string;
+}
+
+export interface AgentTrafficDetails {
+  ok: boolean;
+  agent_id: string;
+  agent_info?: {
+    id: string;
+    name: string;
+    ip: string;
+    status: string;
+    os?: any;
+    version?: string;
+    lastKeepAlive?: string;
+  };
+  kpis: {
+    total_sockets: number;
+    listening_sockets: number;
+    established_connections: number;
+    active_interfaces: number;
+    total_rx_mb: number;
+    total_tx_mb: number;
+    total_wazuh_alerts: number;
+  };
+  ports: AgentSocket[];
+  ifaces: AgentNetInterface[];
+  processes: AgentProcess[];
+  wazuh_detections: AgentWazuhDetection[];
+  timestamp: number;
+}
+
 

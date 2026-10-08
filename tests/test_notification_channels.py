@@ -91,3 +91,21 @@ async def test_network_probe_endpoint(client):
     assert data["ok"] is True
     assert "probed_count" in data
     assert "results" in data
+
+
+@pytest.mark.anyio
+async def test_agent_traffic_details_endpoint(client):
+    """Verifica el endpoint de telemetria detallada por agente (sockets, interfaces, alertas)."""
+    headers = {"X-Api-Key": settings.relay_api_key}
+    response = client.get("/api/v1/telemetry/agents/001/traffic", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["agent_id"] == "001"
+    assert "ports" in data
+    assert "ifaces" in data
+    assert "processes" in data
+    assert "wazuh_detections" in data
+    assert "kpis" in data
+    assert "total_sockets" in data["kpis"]
+    assert "total_wazuh_alerts" in data["kpis"]

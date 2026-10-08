@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { StatusResponse, ConfigResponse, ToggleAction, ActionRequest, ApiResponse } from '../types/dashboard';
+import type { StatusResponse, ConfigResponse, ToggleAction, ActionRequest, ApiResponse, AgentTrafficDetails } from '../types/dashboard';
 import { notifyAuthExpired } from './authService';
 
 // Mismo origen SIEMPRE (nginx en prod, proxy de vite en dev): la cookie
@@ -205,6 +205,11 @@ export const dashboardService = {
 
   probeNetwork: async (): Promise<any> => {
     const response = await axios.post('/api/v1/telemetry/network/probe', {}, { withCredentials: true });
+    return response.data;
+  },
+
+  getAgentTrafficDetails: async (agentId: string): Promise<AgentTrafficDetails> => {
+    const response = await axios.get(`/api/v1/telemetry/agents/${agentId}/traffic`, { withCredentials: true });
     return response.data;
   },
 };

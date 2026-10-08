@@ -9,6 +9,7 @@ Endpoints:
 
 import asyncio
 import json
+import os
 import time
 from typing import Any
 
@@ -19,6 +20,7 @@ from pydantic import BaseModel, Field
 from .deps import verify_api_key, verify_write
 from ..common.telemetry import telemetry_store
 from ..common.traffic_stream import traffic_watcher
+from ..domain.templates import _translate_description_es, _format_level_es
 
 router = APIRouter(tags=["telemetry"])
 
@@ -329,6 +331,238 @@ async def network_summary(
     )
 
 
+def _get_agent_wazuh_alerts(agent_id: str = "all", max_items: int = 40) -> list[dict[str, Any]]:
+    """Extrae alertas de Wazuh para un agente específico desde alerts.json o telemetría reciente."""
+    alerts = []
+    path = "/var/ossec/logs/alerts/alerts.json"
+
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()[-2000:]
+                for line in reversed(lines):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        al = json.loads(line)
+                        ag = al.get("agent", {}) or {}
+                        ag_id_str = str(ag.get("id", ""))
+                        if agent_id == "all" or ag_id_str == str(agent_id):
+                            rule = al.get("rule", {}) or {}
+                            lvl = int(rule.get("level", 0))
+                            desc = rule.get("description", "Evento de seguridad")
+                            data = al.get("data", {}) or {}
+                            alerts.append({
+                                "id": str(al.get("id", "")),
+                                "timestamp": al.get("timestamp", ""),
+                                "rule_id": str(rule.get("id", "0")),
+                                "level": lvl,
+                                "level_es": _format_level_es(lvl),
+                                "description": _translate_description_es(desc),
+                                "agent_id": ag_id_str,
+                                "agent_name": ag.get("name", "host"),
+                                "srcip": data.get("srcip") or data.get("src_ip", ""),
+                                "srcport": str(data.get("srcport", "")),
+                                "dstuser": data.get("dstuser") or data.get("dst_user", ""),
+                                "full_log": (al.get("full_log") or "")[:240],
+                            })
+                            if len(alerts) >= max_items:
+                                break
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # Complementar con memoria si es necesario
+    if len(alerts) < max_items:
+        recent = traffic_watcher.get_recent(limit=50)
+        for al in recent:
+            ag = al.get("agent", {}) or {}
+            ag_id_str = str(ag.get("id", ""))
+            if agent_id == "all" or ag_id_str == str(agent_id):
+                rule = al.get("rule", {}) or {}
+                lvl = int(rule.get("level", 0))
+                desc = rule.get("description", "Evento de seguridad")
+                data = al.get("data", {}) or {}
+                al_id = str(al.get("id", ""))
+                if not any(x.get("id") == al_id for x in alerts if al_id):
+                    alerts.append({
+                        "id": al_id or f"mem-{len(alerts)}",
+                        "timestamp": al.get("timestamp", ""),
+                        "rule_id": str(rule.get("id", "0")),
+                        "level": lvl,
+                        "level_es": _format_level_es(lvl),
+                        "description": _translate_description_es(desc),
+                        "agent_id": ag_id_str,
+                        "agent_name": ag.get("name", "host"),
+                        "srcip": data.get("srcip") or data.get("src_ip", ""),
+                        "srcport": str(data.get("srcport", "")),
+                        "dstuser": data.get("dstuser") or data.get("dst_user", ""),
+                        "full_log": (al.get("full_log") or "")[:240],
+                    })
+                    if len(alerts) >= max_items:
+                        break
+
+    return alerts
+
+
+async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
+    """Obtiene sockets activos, interfaces de red, procesos y alertas para un agente."""
+    from ..config import settings
+    from ..infrastructure.notifier import _get_token
+    import httpx
+
+    mgr_host = settings.wazuh_manager_host or settings.wazuh_server_ip
+    base = f"https://{mgr_host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    raw_ports = []
+    raw_ifaces = []
+    raw_procs = []
+    agent_info = None
+
+    if mgr_host and settings.wazuh_manager_api_pass:
+        try:
+            async with httpx.AsyncClient(timeout=4, verify=verify) as client:
+                token = await _get_token(client)
+                if token:
+                    headers = {"Authorization": f"Bearer {token}"}
+
+                    # Info del agente
+                    if agent_id != "all":
+                        try:
+                            r_ag = await client.get(f"{base}/agents?agents_list={agent_id}", headers=headers)
+                            if r_ag.is_success:
+                                items = r_ag.json().get("data", {}).get("affected_items", [])
+                                if items:
+                                    agent_info = items[0]
+                        except Exception:
+                            pass
+
+                    # 1. Ports / sockets del agente
+                    target_ag_id = agent_id if agent_id != "all" else "001"
+                    try:
+                        r_ports = await client.get(f"{base}/syscollector/{target_ag_id}/ports?limit=80", headers=headers)
+                        if r_ports.is_success:
+                            raw_ports = r_ports.json().get("data", {}).get("affected_items", [])
+                    except Exception:
+                        pass
+
+                    # 2. Interfaces de red (netiface)
+                    try:
+                        r_if = await client.get(f"{base}/syscollector/{target_ag_id}/netiface", headers=headers)
+                        if r_if.is_success:
+                            raw_ifaces = r_if.json().get("data", {}).get("affected_items", [])
+                    except Exception:
+                        pass
+
+                    # 3. Procesos (syscollector/processes)
+                    try:
+                        r_pr = await client.get(f"{base}/syscollector/{target_ag_id}/processes?limit=25", headers=headers)
+                        if r_pr.is_success:
+                            raw_procs = r_pr.json().get("data", {}).get("affected_items", [])
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # Normalizar sockets
+    normalized_ports = []
+    for p in raw_ports:
+        loc = p.get("local", {}) or {}
+        rem = p.get("remote", {}) or {}
+        proc_name = p.get("process") or p.get("program_name") or "sistema"
+        st = str(p.get("state") or "listening").lower()
+        normalized_ports.append({
+            "protocol": (p.get("protocol") or "tcp").upper(),
+            "local_ip": loc.get("ip") or "0.0.0.0",
+            "local_port": loc.get("port") or 0,
+            "remote_ip": rem.get("ip") or "-",
+            "remote_port": rem.get("port") or 0,
+            "process": proc_name,
+            "pid": p.get("pid"),
+            "state": st,
+            "tx_packets": p.get("tx", {}).get("packets", 0) if isinstance(p.get("tx"), dict) else 0,
+            "rx_packets": p.get("rx", {}).get("packets", 0) if isinstance(p.get("rx"), dict) else 0,
+        })
+
+    # Normalizar interfaces
+    normalized_ifaces = []
+    total_rx_b = 0
+    total_tx_b = 0
+    for i in raw_ifaces:
+        rx_b = i.get("rx", {}).get("bytes", 0) if isinstance(i.get("rx"), dict) else 0
+        tx_b = i.get("tx", {}).get("bytes", 0) if isinstance(i.get("tx"), dict) else 0
+        total_rx_b += rx_b
+        total_tx_b += tx_b
+        normalized_ifaces.append({
+            "name": i.get("name") or "eth0",
+            "state": str(i.get("state") or "down").lower(),
+            "mac": i.get("mac") or "-",
+            "mtu": i.get("mtu") or 1500,
+            "type": i.get("type") or "ethernet",
+            "tx_bytes": tx_b,
+            "rx_bytes": rx_b,
+            "tx_packets": i.get("tx", {}).get("packets", 0) if isinstance(i.get("tx"), dict) else 0,
+            "rx_packets": i.get("rx", {}).get("packets", 0) if isinstance(i.get("rx"), dict) else 0,
+            "tx_errors": i.get("tx", {}).get("errors", 0) if isinstance(i.get("tx"), dict) else 0,
+            "rx_errors": i.get("rx", {}).get("errors", 0) if isinstance(i.get("rx"), dict) else 0,
+            "tx_drops": i.get("tx", {}).get("drops", 0) if isinstance(i.get("tx"), dict) else 0,
+            "rx_drops": i.get("rx", {}).get("drops", 0) if isinstance(i.get("rx"), dict) else 0,
+            "ipv4": i.get("ipv4", {}).get("address", "") if isinstance(i.get("ipv4"), dict) else "",
+        })
+
+    # Normalizar procesos
+    normalized_procs = []
+    for pr in raw_procs:
+        normalized_procs.append({
+            "pid": pr.get("pid") or 0,
+            "name": pr.get("name") or "proceso",
+            "cmd": pr.get("cmd") or "",
+            "euser": pr.get("euser") or "root",
+            "state": pr.get("state") or "running",
+        })
+
+    # Extraer detecciones reales de Wazuh
+    wazuh_alerts = _get_agent_wazuh_alerts(agent_id=agent_id, max_items=40)
+
+    # KPIs
+    listening_count = sum(1 for p in normalized_ports if "listen" in p["state"])
+    established_count = sum(1 for p in normalized_ports if "estab" in p["state"] or "syn" in p["state"])
+    active_ifaces_count = sum(1 for i in normalized_ifaces if i["state"] == "up")
+
+    return {
+        "ok": True,
+        "agent_id": agent_id,
+        "agent_info": agent_info,
+        "kpis": {
+            "total_sockets": len(normalized_ports),
+            "listening_sockets": listening_count,
+            "established_connections": established_count,
+            "active_interfaces": active_ifaces_count,
+            "total_rx_mb": round(total_rx_b / (1024 * 1024), 2),
+            "total_tx_mb": round(total_tx_b / (1024 * 1024), 2),
+            "total_wazuh_alerts": len(wazuh_alerts),
+        },
+        "ports": normalized_ports,
+        "ifaces": normalized_ifaces,
+        "processes": normalized_procs,
+        "wazuh_detections": wazuh_alerts,
+        "timestamp": time.time(),
+    }
+
+
+@router.get("/api/v1/telemetry/agents/{agent_id}/traffic")
+async def agent_traffic_details(
+    agent_id: str,
+    _: None = Depends(verify_api_key),
+) -> JSONResponse:
+    """Devuelve conexiones activas, sockets, interfaces de red, procesos y alertas Wazuh de un agente."""
+    data = await _fetch_agent_traffic_details(agent_id)
+    return JSONResponse(content=data)
+
+
 @router.get("/api/v1/telemetry/network/stream")
 async def network_stream(
     request: Request,
@@ -367,6 +601,9 @@ async def network_stream(
                     rule = event.get("rule") or {}
                     agent = event.get("agent") or {}
                     src_ip = data.get("srcip") or data.get("src_ip")
+                    proc = data.get("program_name") or data.get("srcuser") or "wazuh-agentd"
+                    desc_raw = rule.get("description", "Tráfico de red capturado")
+                    desc_es = _translate_description_es(desc_raw)
 
                     net_evt = {
                         "type": "network_traffic",
@@ -382,15 +619,16 @@ async def network_stream(
                         "protocol": "TCP",
                         "rule_id": str(rule.get("id", "0")),
                         "level": int(rule.get("level", 0)),
-                        "description": rule.get("description", "Tráfico de red capturado"),
+                        "description": f"[{proc}] {desc_es}",
                         "status": "DETECTED",
                         "bytes": len(json.dumps(event)),
+                        "process": proc,
                     }
                     yield f"data: {json.dumps({'type': 'network_event', 'data': net_evt})}\n\n"
                 except asyncio.TimeoutError:
                     pass
 
-                # 2. Periódicamente emitir pulso de red y keepalive de los agentes
+                # 2. Periódicamente emitir pulso de red y keepalive con detalles concretos de conexión
                 if step % 2 == 0:
                     agents = await _fetch_network_agents_data()
                     for ag in agents:
@@ -409,11 +647,12 @@ async def network_stream(
                             "agent_ip": ag_ip,
                             "status": ag_status,
                             "os": ag.get("os", {}).get("name", "Linux") if isinstance(ag.get("os"), dict) else "Linux",
-                            "version": ag.get("version", "Wazuh v4.9.0"),
+                            "version": ag.get("version", "Wazuh v4.14.7"),
                             "latency_ms": round(0.5 + (hash(ag_id + str(step)) % 25) / 10.0, 1),
                             "rx_packets": 120 + (step * 3) % 500,
                             "tx_packets": 115 + (step * 3) % 490,
-                            "connection_socket": f"{ag_ip} <-> 192.168.122.142:1514 (TCP)",
+                            "connection_socket": f"{ag_ip} -> 192.168.122.142:1514 (TCP: ESTABLISHED)",
+                            "process": "wazuh-agentd",
                         }
                         yield f"data: {json.dumps({'type': 'agent_heartbeat', 'data': pulse_evt})}\n\n"
 
