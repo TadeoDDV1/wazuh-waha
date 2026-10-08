@@ -49,8 +49,10 @@ def _save_fail_window(window: deque[float]) -> None:
     path = _fail_state_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.touch(mode=0o640)
         payload = json.dumps(list(window)).encode("utf-8")
-        with open(path, "rb+") as fd:
+        with open(path, "r+b") as fd:
             fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
             try:
                 fd.seek(0)

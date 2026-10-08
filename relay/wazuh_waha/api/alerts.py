@@ -127,7 +127,8 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
     # 1. Despacho por Telegram (si está habilitado)
     if getattr(settings, "telegram_enabled", False):
         try:
-            asyncio.create_task(telegram_bot.send_alert(
+            from ..infrastructure.telegram_bot import send_alert
+            asyncio.create_task(send_alert(
                 message_text=message,
                 level=level,
                 rule_id=rule_id,

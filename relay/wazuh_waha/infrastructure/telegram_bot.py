@@ -912,6 +912,24 @@ class TelegramBotWorker:
             self._task = None
         log.info("telegram_bot_worker_stopped")
 
+    async def send_alert(
+        self,
+        message_text: str,
+        level: int = 0,
+        rule_id: str = "0",
+        agent_name: str = "?",
+    ) -> bool:
+        return await send_alert(message_text, level=level, rule_id=rule_id, agent_name=agent_name)
+
+    async def send_message(
+        self,
+        text: str,
+        chat_id: str | None = None,
+        token: str | None = None,
+        parse_mode: str = "Markdown",
+    ) -> bool:
+        return await send_message(text, chat_id=chat_id, token=token, parse_mode=parse_mode)
+
     async def _poll_loop(self) -> None:
         try:
             init_updates = await get_updates(offset=0, timeout=1)
