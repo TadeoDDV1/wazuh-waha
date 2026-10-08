@@ -26,12 +26,15 @@ def get_rule_groups(rule: dict, rule_id: str) -> list[str]:
     if not rule_id:
         return groups or ["default"]
     
-    # Autenticación / Logins (5710 SSH fallido, 5712 múltiple, 5715 su, 5401 sudo, 57100-57106 logins)
-    if rule_id in ("5710", "5712", "5715", "5401") or (rule_id.isdigit() and 57100 <= int(rule_id) <= 57106):
+    # Autenticación / Logins
+    if (
+        rule_id in ("5710", "5712", "5715", "5401", "57120", "57123", "57124", "57131", "57132")
+        or (rule_id.isdigit() and 57100 <= int(rule_id) <= 57106)
+    ):
         groups.append("authentication_success")
     
-    # Integridad de archivos (Syscheck / FIM: 550 nuevo, 553 modificado, 554 eliminado)
-    if rule_id in ("550", "553", "554"):
+    # Integridad de archivos (Syscheck / FIM: 550 nuevo, 553 modificado, 554 eliminado, 57125, 57129)
+    if rule_id in ("550", "553", "554", "57125", "57129"):
         groups.append("fim")
     
     # Archivos SUID / SGID
@@ -42,13 +45,17 @@ def get_rule_groups(rule: dict, rule_id: str) -> list[str]:
     if rule_id.isdigit() and 57107 <= int(rule_id) <= 57110:
         groups.append("vulnerability_detector")
     
-    # Amenazas de Red y Descargas (2902, 2903)
-    if rule_id in ("2902", "2903"):
+    # Amenazas de Red, Escaneos y Probes
+    if rule_id in ("2902", "2903", "57128", "57133", "57134", "57135", "57139"):
         groups.append("network_threats")
         groups.append("threat_hunting")
+
+    # Reverse Shells y Comandos Sospechosos
+    if rule_id in ("57121", "57122", "57138", "57140"):
+        groups.append("threat_hunting")
     
-    # Eventos de Salud WAHA
-    if rule_id == "999001":
+    # Eventos de Salud WAHA y Sistema
+    if rule_id in ("999001", "57126", "57127", "57130"):
         groups.append("waha_health")
     
     # Active Response
@@ -92,10 +99,11 @@ async def format_alert(alert: dict) -> tuple[str, dict]:
             meta["decision"] = f"muted_rule_group:{rg}"
             return ("", meta)
 
-    if deduper.is_duplicate(rule_id, agent_id):
+    src_ip = (alert.get("data") or {}).get("srcip", "")
+    if deduper.is_duplicate(rule_id, agent_id, key_extra=src_ip):
         meta["decision"] = "duplicate"
         return ("", meta)
-    deduper.mark(rule_id, agent_id)
+    deduper.mark(rule_id, agent_id, key_extra=src_ip)
 
     msg = templates.render(rule_id, alert)
     if msg:

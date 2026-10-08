@@ -54,19 +54,20 @@ class Deduper:
         now = time.time()
         return {k: ts for k, ts in state.items() if now - ts <= self.ttl}
 
-    def is_duplicate(self, rule_id: str, agent_id: str) -> bool:
+    def is_duplicate(self, rule_id: str, agent_id: str, key_extra: str = "") -> bool:
         state = self._cleanup(self._read_state())
-        key = f"{rule_id}:{agent_id}"
+        key = f"{rule_id}:{agent_id}:{key_extra}" if key_extra else f"{rule_id}:{agent_id}"
         return key in state
 
-    def mark(self, rule_id: str, agent_id: str) -> None:
+    def mark(self, rule_id: str, agent_id: str, key_extra: str = "") -> None:
         with self._locked_state("w") as f:
             try:
                 state = json.loads(f.read().decode("utf-8") or "{}")
             except (json.JSONDecodeError, ValueError):
                 state = {}
             state = self._cleanup(state)
-            state[f"{rule_id}:{agent_id}"] = time.time()
+            key = f"{rule_id}:{agent_id}:{key_extra}" if key_extra else f"{rule_id}:{agent_id}"
+            state[key] = time.time()
             f.seek(0)
             f.truncate()
             f.write(json.dumps(state).encode("utf-8"))
