@@ -131,6 +131,92 @@
     <group>vulnerability_detector,cve,clear</group>
   </rule>
 
+  <!-- =========================================================================
+    Nuevas Reglas de Seguridad Avanzadas (57120 - 57130)
+    ========================================================================= -->
+
+  <!-- 57120: Ataque de fuerza bruta SSH persistente (más de 10 fallos en 2 min) -->
+  <rule id="57120" level="12" frequency="10" timeframe="120">
+    <if_matched_sid>5710, 5711</if_matched_sid>
+    <description>Ataque de fuerza bruta SSH persistente detectado</description>
+    <group>authentication_failures,sshd,brute_force</group>
+  </rule>
+
+  <!-- 57121: Ejecución remota sospechosa por tubería (curl | bash, wget | sh) -->
+  <rule id="57121" level="12">
+    <if_sid>5402, 5407, 57104</if_sid>
+    <match>curl | bash|wget | bash|curl | sh|wget | sh|python -c|perl -e</match>
+    <description>Ejecucion remota sospechosa por tuberia (curl/wget a bash/sh)</description>
+    <group>attack,remote_execution</group>
+  </rule>
+
+  <!-- 57122: Ejecución sospechosa de script/binario en /tmp, /dev/shm o /var/tmp -->
+  <rule id="57122" level="11">
+    <if_sid>5402, 5407, 57104</if_sid>
+    <match>/tmp/|/dev/shm/|/var/tmp/</match>
+    <description>Ejecucion de comando o binario en directorio temporal sospechoso</description>
+    <group>suspicious_execution</group>
+  </rule>
+
+  <!-- 57123: Intento no autorizado en sudoers -->
+  <rule id="57123" level="11">
+    <if_sid>5405</if_sid>
+    <description>Violacion de seguridad: usuario no autorizado ejecutando sudo</description>
+    <group>authentication_failed,sudo,privilege_escalation</group>
+  </rule>
+
+  <!-- 57124: Intento reiterado de login directo como root por SSH -->
+  <rule id="57124" level="11" frequency="4" timeframe="90">
+    <if_matched_sid>5711</if_matched_sid>
+    <match>user root|for root</match>
+    <description>Multiples intentos fallidos de acceso directo como root por SSH</description>
+    <group>authentication_failures,sshd,root_login</group>
+  </rule>
+
+  <!-- 57125: Modificación de archivos de sistema críticos (/etc/shadow, /etc/passwd, /etc/sudoers) -->
+  <rule id="57125" level="12">
+    <if_sid>550, 554</if_sid>
+    <match>/etc/shadow|/etc/passwd|/etc/sudoers|/etc/ssh/sshd_config</match>
+    <description>Modificacion no autorizada de archivo critico de autenticacion del sistema</description>
+    <group>syscheck,tampering,integrity</group>
+  </rule>
+
+  <!-- 57126: Detención o caída de servicio crítico del sistema (wazuh, ssh, iptables) -->
+  <rule id="57126" level="10">
+    <match>Stopped Wazuh|Stopped OpenBSD Secure Shell|Stopping Wazuh|Stopping OpenBSD Secure Shell</match>
+    <description>Detencion o parada de servicio critico del sistema de seguridad</description>
+    <group>service_stop,availability</group>
+  </rule>
+
+  <!-- 57127: Kernel OOM Killer activado (Memoria RAM crítica agotada) -->
+  <rule id="57127" level="10">
+    <match>Out of memory: Killed process|invoked oom-killer</match>
+    <description>Kernel OOM Killer activado: proceso terminado por agotamiento de RAM</description>
+    <group>kernel,oom_killer,system_health</group>
+  </rule>
+
+  <!-- 57128: Escaneo de puertos detectado / bloqueado por firewall -->
+  <rule id="57128" level="10" frequency="12" timeframe="60">
+    <match>UFW BLOCK|iptables denied|connection refused</match>
+    <description>Escaneo de puertos o conexion bloqueada masiva por Firewall</description>
+    <group>firewall,port_scan,reconnaissance</group>
+  </rule>
+
+  <!-- 57129: Modificación de claves autorizadas en .ssh/authorized_keys -->
+  <rule id="57129" level="11">
+    <if_sid>550, 554</if_sid>
+    <match>authorized_keys</match>
+    <description>Modificacion o adicion de claves en archivo authorized_keys de SSH</description>
+    <group>syscheck,ssh_keys,persistence</group>
+  </rule>
+
+  <!-- 57130: Contenedor Docker caído o finalizado con código de error -->
+  <rule id="57130" level="9">
+    <match>container died|container exited with code|die container</match>
+    <description>Contenedor Docker detenido o en fallo de ejecucion</description>
+    <group>docker,container_health</group>
+  </rule>
+
   <!-- 999001: Health event de WAHA / Relay / Agente. El relay inyecta estas alertas -->
   <!-- via POST al manager (puerto 55000 /events). -->
   <rule id="999001" level="10">

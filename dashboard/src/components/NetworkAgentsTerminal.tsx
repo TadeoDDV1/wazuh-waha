@@ -667,7 +667,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                         </span>
 
                         <span className="log-action">
-                          {evt.status || 'OK'}
+                          {evt.status === 'DETECTED' ? 'DETECTADO' : evt.status || 'OK'}
                         </span>
                       </div>
 
@@ -792,7 +792,15 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                               background: isEstab ? 'rgba(16, 185, 129, 0.2)' : isListen ? 'rgba(59, 130, 246, 0.2)' : 'rgba(245, 158, 11, 0.2)',
                               color: isEstab ? '#34d399' : isListen ? '#60a5fa' : '#fbbf24',
                             }}>
-                              {socket.state.toUpperCase()}
+                              {socket.state.includes('listen')
+                                ? 'ESCUCHANDO'
+                                : socket.state.includes('estab') || socket.state.includes('syn')
+                                ? 'ESTABLECIDA'
+                                : socket.state.includes('close_wait')
+                                ? 'CERRANDO'
+                                : socket.state.includes('time_wait')
+                                ? 'EN ESPERA'
+                                : socket.state.toUpperCase()}
                             </span>
                           </td>
                           <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>
@@ -868,7 +876,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                           background: isUp ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.08)',
                           color: isUp ? '#34d399' : 'var(--text-secondary)',
                         }}>
-                          {iface.state.toUpperCase()}
+                          {iface.state.toLowerCase() === 'up' ? 'ACTIVA' : 'INACTIVA'}
                         </span>
                       </div>
 
@@ -971,9 +979,10 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                         {det.dstuser && <span>Usuario: <code style={{ color: '#38bdf8' }}>{det.dstuser}</code></span>}
                       </div>
 
-                      {det.full_log && (
+                      {(det.full_log_es || det.full_log) && (
                         <div style={{ background: '#050811', padding: '8px 10px', borderRadius: '6px', fontSize: '11px', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.04)', fontFamily: 'monospace' }}>
-                          {det.full_log}
+                          <span style={{ color: '#38bdf8', fontSize: '10px', display: 'block', marginBottom: '2px' }}>Detalle del Evento (Español):</span>
+                          {det.full_log_es || det.full_log}
                         </div>
                       )}
                     </div>

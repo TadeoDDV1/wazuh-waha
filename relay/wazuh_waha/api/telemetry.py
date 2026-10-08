@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from .deps import verify_api_key, verify_write
 from ..common.telemetry import telemetry_store
 from ..common.traffic_stream import traffic_watcher
-from ..domain.templates import _translate_description_es, _format_level_es
+from ..domain.templates import _translate_description_es, _format_level_es, translate_full_log_es
 
 router = APIRouter(tags=["telemetry"])
 
@@ -352,7 +352,7 @@ def _get_agent_wazuh_alerts(agent_id: str = "all", max_items: int = 40) -> list[
                             rule = al.get("rule", {}) or {}
                             lvl = int(rule.get("level", 0))
                             desc = rule.get("description", "Evento de seguridad")
-                            data = al.get("data", {}) or {}
+                            raw_log = al.get("full_log") or ""
                             alerts.append({
                                 "id": str(al.get("id", "")),
                                 "timestamp": al.get("timestamp", ""),
@@ -365,7 +365,8 @@ def _get_agent_wazuh_alerts(agent_id: str = "all", max_items: int = 40) -> list[
                                 "srcip": data.get("srcip") or data.get("src_ip", ""),
                                 "srcport": str(data.get("srcport", "")),
                                 "dstuser": data.get("dstuser") or data.get("dst_user", ""),
-                                "full_log": (al.get("full_log") or "")[:240],
+                                "full_log": raw_log[:240],
+                                "full_log_es": translate_full_log_es(raw_log)[:240],
                             })
                             if len(alerts) >= max_items:
                                 break
@@ -386,6 +387,7 @@ def _get_agent_wazuh_alerts(agent_id: str = "all", max_items: int = 40) -> list[
                 desc = rule.get("description", "Evento de seguridad")
                 data = al.get("data", {}) or {}
                 al_id = str(al.get("id", ""))
+                raw_log = al.get("full_log") or ""
                 if not any(x.get("id") == al_id for x in alerts if al_id):
                     alerts.append({
                         "id": al_id or f"mem-{len(alerts)}",
@@ -399,7 +401,8 @@ def _get_agent_wazuh_alerts(agent_id: str = "all", max_items: int = 40) -> list[
                         "srcip": data.get("srcip") or data.get("src_ip", ""),
                         "srcport": str(data.get("srcport", "")),
                         "dstuser": data.get("dstuser") or data.get("dst_user", ""),
-                        "full_log": (al.get("full_log") or "")[:240],
+                        "full_log": raw_log[:240],
+                        "full_log_es": translate_full_log_es(raw_log)[:240],
                     })
                     if len(alerts) >= max_items:
                         break

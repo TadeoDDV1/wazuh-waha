@@ -16,6 +16,7 @@ from .api.auth import router as auth_router
 from .api.dashboard import router as dashboard_router
 from .api.debug import router as debug_router
 from .api.telemetry import router as telemetry_router
+from .api.waha_webhook import router as waha_webhook_router
 from .common.audit import get_audit_log
 from .common.body_limit import BodySizeLimitMiddleware
 from .common.context import WORKER_ID
@@ -220,3 +221,4 @@ app.include_router(alerts_router)
 app.include_router(debug_router)
 app.include_router(telemetry_router)
 app.include_router(dashboard_router)
+app.include_router(waha_webhook_router)

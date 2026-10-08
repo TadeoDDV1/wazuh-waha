@@ -1331,8 +1331,10 @@ def _sync_relay_env() -> bool:
     sync_script = PROJECT_ROOT / "scripts" / "sync_relay_env.sh"
     if not sync_script.exists():
         log.warning("sync_relay_env_missing script=%s", sync_script)
-        return False
-    code, out = _run_cmd(["sudo", "-n", "bash", str(sync_script), "apply"], timeout=15)
+    code, out = _run_cmd(["sudo", "-n", str(sync_script), "apply"], timeout=15)
+    if code != 0:
+        # Fallback si el script requiriera bash explícito
+        code, out = _run_cmd(["sudo", "-n", "bash", str(sync_script), "apply"], timeout=15)
     if code != 0:
         log.warning("sync_relay_env_failed out=%s", out[:200])
         return False
@@ -1404,6 +1406,18 @@ async def dashboard_config_batch(request: Request):
 
     for k, v in updates.items():
         _apply_setting_in_memory(k, v)
+
+    if any(k.startswith("TELEGRAM_") for k in updates):
+        try:
+            from ..infrastructure.telegram_bot import save_telegram_session
+            save_telegram_session(
+                token=updates.get("TELEGRAM_BOT_TOKEN"),
+                chat_id=updates.get("TELEGRAM_CHAT_ID"),
+                enabled=updates.get("TELEGRAM_ENABLED") == "true" if "TELEGRAM_ENABLED" in updates else None,
+                min_level=int(updates["TELEGRAM_MIN_LEVEL"]) if "TELEGRAM_MIN_LEVEL" in updates else None,
+            )
+        except Exception as _e:
+            log.warning("telegram_session_save_error: %s", _e)
 
     log.info("dashboard_config_batch updated=%d keys=%s user=%s",
              len(updates), list(updates.keys()),
@@ -1566,13 +1580,11 @@ async def telegram_status(request: Request):
 async def telegram_pair(request: Request):
     """Inicia el proceso de emparejamiento con Telegram para detectar chat_id."""
     await verify_write(request)
-    from ..infrastructure.telegram_bot import pair_session, telegram_bot
+    from ..infrastructure.telegram_bot import pair_session, telegram_bot, save_telegram_session
     res = await pair_session()
     if res.get("ok") and res.get("chat_id"):
         cid = str(res["chat_id"])
-        _write_env_batch({"TELEGRAM_CHAT_ID": cid, "TELEGRAM_ENABLED": "true"})
-        setattr(settings, "telegram_chat_id", cid)
-        setattr(settings, "telegram_enabled", True)
+        save_telegram_session(chat_id=cid, enabled=True)
         telegram_bot.start()
     return res
 
@@ -1617,7 +1629,8 @@ async def update_notification_channels(request: Request):
         setattr(settings, "telegram_enabled", val)
         updates["TELEGRAM_ENABLED"] = "true" if val else "false"
         try:
-            from ..infrastructure.telegram_bot import telegram_bot
+            from ..infrastructure.telegram_bot import telegram_bot, save_telegram_session
+            save_telegram_session(enabled=val)
             if val:
                 telegram_bot.start()
             else:

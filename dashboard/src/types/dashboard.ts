@@ -257,6 +257,7 @@ export interface AgentWazuhDetection {
   srcport?: string;
   dstuser?: string;
   full_log?: string;
+  full_log_es?: string;
 }
 
 export interface AgentTrafficDetails {
