@@ -178,8 +178,13 @@ export interface NetworkSummary {
 }
 
 export interface AgentNetworkEvent {
-  type: 'network_traffic' | 'agent_heartbeat' | 'stream_tick' | 'connected';
+  type: 'network_traffic' | 'agent_heartbeat' | 'stream_tick' | 'connected' | 'site_activity';
   subtype?: string;
+  site_name?: string;
+  domain?: string;
+  category?: string;
+  category_label?: string;
+  is_web?: boolean;
   id?: string;
   timestamp?: string;
   agent_id?: string;
@@ -217,6 +222,61 @@ export interface AgentSocket {
   state: string;
   tx_packets?: number;
   rx_packets?: number;
+  remote_hostname?: string;
+  site_name?: string;
+  domain?: string;
+  category?: string;
+  category_label?: string;
+  is_web?: boolean;
+  icon?: string;
+  agent_id?: string;
+  agent_name?: string;
+  agent_ip?: string;
+}
+
+export interface AgentSiteActivity {
+  site_name: string;
+  domain: string;
+  remote_ip: string;
+  remote_port: number;
+  protocol: string;
+  process: string;
+  pid?: number;
+  category: string;
+  category_label: string;
+  is_web: boolean;
+  state: string;
+  state_label: string;
+  agent_id: string;
+  agent_name: string;
+  agent_ip?: string;
+  last_seen: string;
+}
+
+export interface LanDeviceStatus {
+  agent_id: string;
+  agent_name: string;
+  ip: string;
+  status: string;
+  os?: string;
+  interface_name?: string;
+  mac?: string;
+  rx_mb?: number;
+  tx_mb?: number;
+  active_sites_count?: number;
+  synced?: boolean;
+}
+
+export interface NetworkSitesSummary {
+  ok: boolean;
+  agent_id?: string;
+  total_sites: number;
+  web_sites_count: number;
+  active_connections_count: number;
+  sites: AgentSiteActivity[];
+  by_category: Record<string, number>;
+  lan_devices: LanDeviceStatus[];
+  timestamp: number;
 }
 
 export interface AgentNetInterface {
@@ -234,6 +294,8 @@ export interface AgentNetInterface {
   tx_drops?: number;
   rx_drops?: number;
   ipv4?: string;
+  agent_id?: string;
+  agent_name?: string;
 }
 
 export interface AgentProcess {
@@ -242,6 +304,7 @@ export interface AgentProcess {
   cmd?: string;
   euser?: string;
   state?: string;
+  agent_id?: string;
 }
 
 export interface AgentWazuhDetection {
@@ -276,12 +339,15 @@ export interface AgentTrafficDetails {
     total_sockets: number;
     listening_sockets: number;
     established_connections: number;
+    total_sites?: number;
+    web_sites_active?: number;
     active_interfaces: number;
     total_rx_mb: number;
     total_tx_mb: number;
     total_wazuh_alerts: number;
   };
   ports: AgentSocket[];
+  sites_activity?: AgentSiteActivity[];
   ifaces: AgentNetInterface[];
   processes: AgentProcess[];
   wazuh_detections: AgentWazuhDetection[];

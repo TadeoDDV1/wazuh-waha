@@ -1,7 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import './LiveTrafficTerminal.css';
 import { dashboardService, buildNetworkStreamUrl } from '../services/api';
-import type { AgentNetworkEvent, NetworkSummary, AgentTrafficDetails, AgentSocket, AgentNetInterface, AgentWazuhDetection } from '../types/dashboard';
+import type {
+  AgentNetworkEvent,
+  NetworkSummary,
+  AgentTrafficDetails,
+  AgentSocket,
+  AgentNetInterface,
+  AgentWazuhDetection,
+  AgentSiteActivity,
+  NetworkSitesSummary,
+} from '../types/dashboard';
 import {
   Network,
   Radio,
@@ -23,6 +32,13 @@ import {
   RefreshCw,
   Filter,
   CheckCircle2,
+  Globe,
+  Wifi,
+  Laptop,
+  Layers,
+  MessageSquare,
+  Database,
+  Terminal as TerminalIcon,
 } from 'lucide-react';
 
 interface NetworkAgentsTerminalProps {
@@ -41,11 +57,18 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
   const [events, setEvents] = useState<AgentNetworkEvent[]>([]);
   const [summary, setSummary] = useState<NetworkSummary | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('all');
-  const [activeSubView, setActiveSubView] = useState<'live_stream' | 'sockets' | 'interfaces' | 'detections'>('live_stream');
+  const [activeSubView, setActiveSubView] = useState<'sites' | 'live_stream' | 'sockets' | 'interfaces' | 'detections'>('sites');
 
   // Telemetría detallada del agente seleccionado
   const [agentDetails, setAgentDetails] = useState<AgentTrafficDetails | null>(null);
   const [loadingDetails, setLoadingDetails] = useState<boolean>(false);
+
+  // Inventario de sitios y actividad web
+  const [sitesSummary, setSitesSummary] = useState<NetworkSitesSummary | null>(null);
+  const [loadingSites, setLoadingSites] = useState<boolean>(false);
+  const [siteCategoryFilter, setSiteCategoryFilter] = useState<string>('all');
+  const [siteStateFilter, setSiteStateFilter] = useState<string>('all');
+  const [siteSearchQuery, setSiteSearchQuery] = useState<string>('');
 
   // Estados de stream en vivo
   const [isPaused, setIsPaused] = useState<boolean>(false);
@@ -84,19 +107,34 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
     }
   }, []);
 
+  // 3. Cargar sitios web y destinos de red
+  const fetchSites = useCallback(async (agentId: string) => {
+    setLoadingSites(true);
+    try {
+      const data = await dashboardService.getNetworkSites(agentId);
+      setSitesSummary(data);
+    } catch (err) {
+      console.error(`Error fetching sites for agent ${agentId}:`, err);
+    } finally {
+      setLoadingSites(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchSummary();
   }, [fetchSummary]);
 
   useEffect(() => {
     fetchAgentDetails(selectedAgentId);
+    fetchSites(selectedAgentId);
     const interval = setInterval(() => {
       fetchAgentDetails(selectedAgentId);
-    }, 12000);
+      fetchSites(selectedAgentId);
+    }, 10000);
     return () => clearInterval(interval);
-  }, [selectedAgentId, fetchAgentDetails]);
+  }, [selectedAgentId, fetchAgentDetails, fetchSites]);
 
-  // 3. Conexión al flujo SSE en tiempo real
+  // 4. Conexión al flujo SSE en tiempo real
   useEffect(() => {
     const streamUrl = buildNetworkStreamUrl();
     const es = new EventSource(streamUrl, { withCredentials: true });
@@ -118,7 +156,11 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
           return;
         }
 
-        if (payload.type === 'network_event' || payload.type === 'agent_heartbeat') {
+        if (
+          payload.type === 'network_event' ||
+          payload.type === 'agent_heartbeat' ||
+          payload.type === 'site_activity'
+        ) {
           const item: AgentNetworkEvent = payload.data;
           setEvents((prev) => {
             const next = [item, ...prev];
@@ -153,6 +195,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
       await dashboardService.probeNetwork();
       await fetchSummary();
       await fetchAgentDetails(selectedAgentId);
+      await fetchSites(selectedAgentId);
     } catch (err) {
       console.error('Error enviando sonda de red:', err);
     } finally {
@@ -163,16 +206,14 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
   // Filtrado de eventos del stream
   const filteredEvents = useMemo(() => {
     return events.filter((evt) => {
-      // Filtro por agente
       if (selectedAgentId !== 'all' && evt.agent_id !== selectedAgentId) {
         return false;
       }
-      // Filtro por tipo
       if (typeFilter === 'traffic' && evt.type !== 'network_traffic') return false;
       if (typeFilter === 'heartbeat' && evt.type !== 'agent_heartbeat') return false;
       if (typeFilter === 'security' && !evt.rule_id) return false;
+      if (typeFilter === 'site' && evt.type !== 'site_activity') return false;
 
-      // Filtro de búsqueda
       if (searchFilter.trim()) {
         const q = searchFilter.toLowerCase();
         const text = `
@@ -196,6 +237,56 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
     return agentsList.find((a) => a.id === selectedAgentId) || null;
   }, [agentsList, selectedAgentId]);
 
+  // Sitios activos consolidados
+  const activeSitesList = useMemo(() => {
+    const list: AgentSiteActivity[] = sitesSummary?.sites || agentDetails?.sites_activity || [];
+    return list.filter((s) => {
+      if (selectedAgentId !== 'all' && s.agent_id !== selectedAgentId) {
+        return false;
+      }
+      if (siteCategoryFilter !== 'all' && s.category !== siteCategoryFilter) {
+        return false;
+      }
+      if (siteStateFilter === 'active') {
+        const isAct = s.state.includes('estab') || s.state.includes('syn') || s.state_label.includes('ACTIVA');
+        if (!isAct) return false;
+      }
+      if (siteSearchQuery.trim()) {
+        const q = siteSearchQuery.toLowerCase();
+        const text = `${s.site_name} ${s.domain} ${s.process} ${s.remote_ip} ${s.remote_port} ${s.agent_name} ${s.category_label}`.toLowerCase();
+        return text.includes(q);
+      }
+      return true;
+    });
+  }, [sitesSummary, agentDetails, selectedAgentId, siteCategoryFilter, siteStateFilter, siteSearchQuery]);
+
+  // Dispositivos LAN detectados
+  const lanDevices = useMemo(() => {
+    return sitesSummary?.lan_devices || [];
+  }, [sitesSummary]);
+
+  // Helper para íconos según categoría de sitio
+  const renderSiteIcon = (category: string, isWeb: boolean) => {
+    switch (category) {
+      case 'web':
+        return <Globe size={15} style={{ color: '#38bdf8' }} />;
+      case 'messaging':
+        return <MessageSquare size={15} style={{ color: '#34d399' }} />;
+      case 'dns':
+        return <Layers size={15} style={{ color: '#00e5ff' }} />;
+      case 'sync':
+        return <ShieldAlert size={15} style={{ color: '#f59e0b' }} />;
+      case 'ssh':
+        return <TerminalIcon size={15} style={{ color: '#a855f7' }} />;
+      case 'database':
+        return <Database size={15} style={{ color: '#fb923c' }} />;
+      case 'lan':
+        return <Wifi size={15} style={{ color: '#10b981' }} />;
+      default:
+        return isWeb ? <Globe size={15} style={{ color: '#38bdf8' }} /> : <Server size={15} style={{ color: '#94a3b8' }} />;
+    }
+  };
+
   return (
     <div className={asPanel ? 'traffic-terminal-panel-host' : 'traffic-terminal-overlay'}>
       <div className={`traffic-terminal-window ${asPanel ? 'as-panel' : ''} ${maximized ? 'maximized' : ''}`}>
@@ -209,7 +300,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '14px', fontWeight: 700, color: '#fff', letterSpacing: '0.3px' }}>
-                  Terminal de Red & Telemetría por Agente (LIVE)
+                  Monitoreo de Red, Sitios Web & Equipos Wazuh (LIVE)
                 </span>
                 <span
                   style={{
@@ -233,11 +324,11 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                       background: connected ? 'var(--green-healthy)' : 'var(--red-error)',
                     }}
                   />
-                  {connected ? 'CANAL REMOTED ACTIVO' : 'RECONECTANDO'}
+                  {connected ? 'RED SOC ENLACE ACTIVO' : 'RECONECTANDO'}
                 </span>
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                Captura conexiones de red en tiempo real, sockets por proceso, interfaces netiface y detecciones Wazuh por equipo
+                Inspección de sitios web visitados, procesos en red, sockets activos y equipos conectados a la misma red WiFi
               </div>
             </div>
           </div>
@@ -250,12 +341,13 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
               onClick={() => {
                 fetchSummary();
                 fetchAgentDetails(selectedAgentId);
+                fetchSites(selectedAgentId);
               }}
-              disabled={loadingDetails}
-              title="Refrescar datos y sockets del agente"
+              disabled={loadingDetails || loadingSites}
+              title="Refrescar sitios, datos y sockets del agente"
               style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-secondary)' }}
             >
-              <RefreshCw size={12} className={loadingDetails ? 'animate-spin' : ''} />
+              <RefreshCw size={12} className={loadingDetails || loadingSites ? 'animate-spin' : ''} />
               <span>Refrescar</span>
             </button>
 
@@ -337,13 +429,14 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
             }}
           >
             <Server size={13} />
-            <span>🌐 Todos los Agentes ({summary?.total_agents || 0})</span>
+            <span>🌐 Toda la Red ({summary?.total_agents || 0} equipos)</span>
           </button>
 
           {/* Agentes individuales */}
           {agentsList.map((ag: any) => {
             const isSel = selectedAgentId === ag.id;
             const osName = ag.os?.name || (ag.id === '000' ? 'Ubuntu' : 'Linux');
+            const isWifi = ag.id === '001' || (ag.ip && ag.ip.startsWith('192.168.122.1'));
             return (
               <button
                 key={ag.id}
@@ -373,8 +466,11 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                     background: ag.status === 'active' ? 'var(--green-healthy)' : 'var(--yellow-warning)',
                   }}
                 />
+                {isWifi ? <Wifi size={12} style={{ color: '#38bdf8' }} /> : <Laptop size={12} />}
                 <span>[{ag.id}] <strong>{ag.name}</strong></span>
-                <span style={{ fontSize: '10px', opacity: 0.7 }}>({osName} · {ag.ip || '127.0.0.1'})</span>
+                <span style={{ fontSize: '10px', opacity: 0.7 }}>
+                  ({osName} · {isWifi ? 'WiFi' : 'LAN'} · {ag.ip || '127.0.0.1'})
+                </span>
               </button>
             );
           })}
@@ -395,20 +491,28 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
             <div className="terminal-meta-chip">
-              <Activity size={12} style={{ color: '#00e5ff' }} />
-              <span>Sockets Activos:</span>
-              <strong style={{ color: '#fff' }}>{agentDetails?.kpis?.total_sockets ?? '-'}</strong>
+              <Globe size={12} style={{ color: '#38bdf8' }} />
+              <span>Sitios Monitoreados:</span>
+              <strong style={{ color: '#38bdf8' }}>{sitesSummary?.total_sites ?? agentDetails?.kpis?.total_sites ?? 0}</strong>
             </div>
 
             <div className="terminal-meta-chip">
               <CheckCircle2 size={12} style={{ color: 'var(--green-healthy)' }} />
-              <span>Conexiones Establecidas:</span>
-              <strong style={{ color: 'var(--green-healthy)' }}>{agentDetails?.kpis?.established_connections ?? '-'}</strong>
+              <span>Conexiones Web Activas:</span>
+              <strong style={{ color: 'var(--green-healthy)' }}>
+                {sitesSummary?.web_sites_count ?? agentDetails?.kpis?.web_sites_active ?? 0}
+              </strong>
+            </div>
+
+            <div className="terminal-meta-chip">
+              <Activity size={12} style={{ color: '#00e5ff' }} />
+              <span>Sockets Totales:</span>
+              <strong style={{ color: '#fff' }}>{agentDetails?.kpis?.total_sockets ?? '-'}</strong>
             </div>
 
             <div className="terminal-meta-chip">
               <Radio size={12} style={{ color: '#a855f7' }} />
-              <span>Puertos en Escucha:</span>
+              <span>En Escucha:</span>
               <strong style={{ color: '#c084fc' }}>{agentDetails?.kpis?.listening_sockets ?? '-'}</strong>
             </div>
 
@@ -426,7 +530,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
 
             {agentDetails?.kpis && (
               <div className="terminal-meta-chip">
-                <span>Tráfico Red:</span>
+                <span>Tráfico:</span>
                 <strong style={{ color: '#38bdf8' }}>
                   ↓ {agentDetails.kpis.total_rx_mb} MB · ↑ {agentDetails.kpis.total_tx_mb} MB
                 </strong>
@@ -438,9 +542,26 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <button
               type="button"
+              onClick={() => setActiveSubView('sites')}
+              style={{
+                padding: '5px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: activeSubView === 'sites' ? 700 : 500,
+                background: activeSubView === 'sites' ? 'linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(16, 185, 129, 0.25))' : 'transparent',
+                color: activeSubView === 'sites' ? '#38bdf8' : 'var(--text-secondary)',
+                border: activeSubView === 'sites' ? '1px solid #38bdf8' : '1px solid transparent',
+                cursor: 'pointer',
+              }}
+            >
+              🌐 Sitios Web & Destinos ({activeSitesList.length})
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveSubView('live_stream')}
               style={{
-                padding: '4px 10px',
+                padding: '5px 12px',
                 borderRadius: '6px',
                 fontSize: '11px',
                 fontWeight: activeSubView === 'live_stream' ? 700 : 500,
@@ -457,7 +578,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
               type="button"
               onClick={() => setActiveSubView('sockets')}
               style={{
-                padding: '4px 10px',
+                padding: '5px 12px',
                 borderRadius: '6px',
                 fontSize: '11px',
                 fontWeight: activeSubView === 'sockets' ? 700 : 500,
@@ -467,14 +588,14 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                 cursor: 'pointer',
               }}
             >
-              🔌 Sockets & Conexiones ({agentDetails?.ports?.length || 0})
+              🔌 Sockets ({agentDetails?.ports?.length || 0})
             </button>
 
             <button
               type="button"
               onClick={() => setActiveSubView('interfaces')}
               style={{
-                padding: '4px 10px',
+                padding: '5px 12px',
                 borderRadius: '6px',
                 fontSize: '11px',
                 fontWeight: activeSubView === 'interfaces' ? 700 : 500,
@@ -484,14 +605,14 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                 cursor: 'pointer',
               }}
             >
-              📡 Interfaces Netiface ({agentDetails?.ifaces?.length || 0})
+              📡 Interfaces ({agentDetails?.ifaces?.length || 0})
             </button>
 
             <button
               type="button"
               onClick={() => setActiveSubView('detections')}
               style={{
-                padding: '4px 10px',
+                padding: '5px 12px',
                 borderRadius: '6px',
                 fontSize: '11px',
                 fontWeight: activeSubView === 'detections' ? 700 : 500,
@@ -501,15 +622,328 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                 cursor: 'pointer',
               }}
             >
-              🛡️ Detecciones Wazuh ({agentDetails?.wazuh_detections?.length || 0})
+              🛡️ Detecciones ({agentDetails?.wazuh_detections?.length || 0})
             </button>
           </div>
         </div>
 
-        {/* ── CONTENIDO PRINCIPAL SEGÚN SUB-VISTA ── */}
+        {/* ── SUB-VISTA 1: SITIOS WEB Y ACTIVIDAD DE RED (EXPLORADOR PRINCIPAL) ── */}
+        {activeSubView === 'sites' && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            
+            {/* Panel de Equipos en la Misma Red WiFi / LAN */}
+            <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px', padding: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Wifi size={16} style={{ color: '#00e5ff' }} />
+                  <strong style={{ fontSize: '13px', color: '#fff' }}>
+                    Equipos en la Misma Red WiFi / Local (Sincronizados con Wazuh Manager)
+                  </strong>
+                </div>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                  Total: {lanDevices.length || summary?.total_agents || 0} dispositivos monitoreados
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
+                {lanDevices.map((dev) => {
+                  const isCurSel = selectedAgentId === dev.agent_id;
+                  const isManager = dev.agent_id === '000';
+                  return (
+                    <div
+                      key={dev.agent_id}
+                      onClick={() => setSelectedAgentId(dev.agent_id)}
+                      style={{
+                        background: isCurSel ? 'rgba(0, 229, 255, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+                        border: isCurSel ? '1px solid #00e5ff' : '1px solid rgba(255, 255, 255, 0.06)',
+                        borderRadius: '8px',
+                        padding: '10px 12px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--green-healthy)' }} />
+                          <strong style={{ fontSize: '12px', color: '#fff' }}>[{dev.agent_id}] {dev.agent_name}</strong>
+                          {isManager && (
+                            <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8' }}>
+                              MANAGER
+                            </span>
+                          )}
+                        </div>
+                        <span style={{ fontSize: '10px', color: '#34d399', fontWeight: 600 }}>
+                          🟢 Sincronizado
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                        <div>
+                          IP Red: <code style={{ color: '#fff' }}>{dev.ip}</code>
+                        </div>
+                        <div>
+                          Interfaz: <span style={{ color: '#38bdf8' }}>{dev.interface_name || 'wlan0'}</span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-secondary)', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                        <span>Sitios Activos: <strong style={{ color: '#00e5ff' }}>{dev.active_sites_count || 0}</strong></span>
+                        <span>Tráfico: <strong>{dev.rx_mb || 0} MB RX</strong></span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Toolbar con Filtros y Buscador de Sitios */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>Filtrar Tipo:</span>
+                
+                {[
+                  { id: 'all', label: '🌐 Todos los Sitios' },
+                  { id: 'web', label: '🔐 Navegación Web (80/443)' },
+                  { id: 'dns', label: '🔍 Consultas DNS (53)' },
+                  { id: 'messaging', label: '💬 Mensajería (Telegram/WA)' },
+                  { id: 'sync', label: '🛡️ Sincronización Wazuh' },
+                  { id: 'ssh', label: '🔑 Terminal SSH' },
+                  { id: 'database', label: '🗄️ Bases de Datos' },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setSiteCategoryFilter(f.id)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: siteCategoryFilter === f.id ? 700 : 500,
+                      background: siteCategoryFilter === f.id ? 'rgba(0, 229, 255, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+                      color: siteCategoryFilter === f.id ? '#00e5ff' : 'var(--text-secondary)',
+                      border: siteCategoryFilter === f.id ? '1px solid #00e5ff' : '1px solid rgba(255, 255, 255, 0.08)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => setSiteStateFilter(siteStateFilter === 'active' ? 'all' : 'active')}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: siteStateFilter === 'active' ? 700 : 500,
+                    background: siteStateFilter === 'active' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+                    color: siteStateFilter === 'active' ? '#34d399' : 'var(--text-secondary)',
+                    border: siteStateFilter === 'active' ? '1px solid #10b981' : '1px solid rgba(255, 255, 255, 0.08)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  🟢 {siteStateFilter === 'active' ? 'Solo Activas (Filtrado)' : 'Solo Conexiones Activas'}
+                </button>
+              </div>
+
+              {/* Buscador de Sitios */}
+              <div className="terminal-search-box" style={{ minWidth: '240px' }}>
+                <Search size={12} className="search-icon" />
+                <input
+                  type="text"
+                  placeholder="Buscar sitio, dominio, proceso (ej: google, firefox)..."
+                  value={siteSearchQuery}
+                  onChange={(e) => setSiteSearchQuery(e.target.value)}
+                  style={{ fontSize: '11px' }}
+                />
+                {siteSearchQuery && (
+                  <button type="button" className="clear-btn" onClick={() => setSiteSearchQuery('')}>
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Tabla de Sitios y Destinos */}
+            {loadingSites ? (
+              <div style={{ padding: '60px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                <Loader2 size={28} className="animate-spin" style={{ margin: '0 auto 10px', color: '#00e5ff' }} />
+                <span>Analizando conexiones y resolviendo dominios de los agentes...</span>
+              </div>
+            ) : activeSitesList.length === 0 ? (
+              <div style={{ padding: '50px', textAlign: 'center', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.02)', borderRadius: '10px' }}>
+                <Globe size={36} style={{ margin: '0 auto 10px', opacity: 0.4, color: '#38bdf8' }} />
+                <h4 style={{ margin: 0, color: '#fff', fontSize: '14px' }}>No hay destinos registrados con los filtros actuales</h4>
+                <p style={{ fontSize: '12px', margin: '6px 0 0' }}>
+                  {siteSearchQuery || siteCategoryFilter !== 'all'
+                    ? 'Intenta restablecer los filtros o la búsqueda para ver todas las conexiones.'
+                    : 'Los agentes están sincronizados. Navega en la web o ejecuta comandos para ver el tráfico en vivo.'}
+                </p>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(255, 255, 255, 0.04)', color: 'var(--text-secondary)', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                      <th style={{ padding: '10px 14px' }}>Sitio Web / Destino Remoto</th>
+                      <th style={{ padding: '10px 14px' }}>Equipo / Agente</th>
+                      <th style={{ padding: '10px 14px' }}>Aplicación / Proceso</th>
+                      <th style={{ padding: '10px 14px' }}>Tipo de Tráfico</th>
+                      <th style={{ padding: '10px 14px' }}>Destino IP & Puerto</th>
+                      <th style={{ padding: '10px 14px' }}>Estado</th>
+                      <th style={{ padding: '10px 14px' }}>Última Actividad</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeSitesList.map((site, idx) => {
+                      const isEstab = site.state.includes('estab') || site.state.includes('syn') || site.state_label.includes('ACTIVA');
+                      return (
+                        <tr
+                          key={idx}
+                          style={{
+                            borderBottom: '1px solid rgba(255,255,255,0.04)',
+                            background: idx % 2 === 0 ? 'rgba(255,255,255,0.01)' : 'transparent',
+                          }}
+                        >
+                          {/* Sitio Web / Destino */}
+                          <td style={{ padding: '10px 14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div
+                                style={{
+                                  width: '26px',
+                                  height: '26px',
+                                  borderRadius: '6px',
+                                  background: 'rgba(255, 255, 255, 0.05)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                {renderSiteIcon(site.category, site.is_web)}
+                              </div>
+                              <div>
+                                <strong style={{ fontSize: '12px', color: '#fff', display: 'block' }}>
+                                  {site.site_name}
+                                </strong>
+                                <span style={{ fontSize: '10px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                                  {site.domain}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Equipo / Agente */}
+                          <td style={{ padding: '10px 14px' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.04)' }}>
+                              <Laptop size={12} style={{ color: '#38bdf8' }} />
+                              <span style={{ fontWeight: 600, color: '#fff' }}>[{site.agent_id}] {site.agent_name}</span>
+                            </div>
+                            {site.agent_ip && (
+                              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px', marginLeft: '6px' }}>
+                                IP: {site.agent_ip}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Aplicación / Proceso */}
+                          <td style={{ padding: '10px 14px' }}>
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                background: 'rgba(6, 182, 212, 0.15)',
+                                color: '#22d3ee',
+                                border: '1px solid rgba(6, 182, 212, 0.3)',
+                              }}
+                            >
+                              {site.process}
+                            </span>
+                            {site.pid && (
+                              <span style={{ color: 'var(--text-secondary)', marginLeft: '6px', fontSize: '10px' }}>
+                                PID {site.pid}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Tipo de Tráfico */}
+                          <td style={{ padding: '10px 14px' }}>
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 600,
+                                color: site.is_web ? '#38bdf8' : site.category === 'dns' ? '#00e5ff' : '#94a3b8',
+                              }}
+                            >
+                              {site.category_label}
+                            </span>
+                          </td>
+
+                          {/* Destino IP & Puerto */}
+                          <td style={{ padding: '10px 14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <code style={{ color: '#fff' }}>{site.remote_ip}:{site.remote_port}</code>
+                              <span
+                                style={{
+                                  fontSize: '9px',
+                                  padding: '1px 5px',
+                                  borderRadius: '3px',
+                                  background: site.protocol === 'TCP' ? 'rgba(0, 229, 255, 0.15)' : 'rgba(168, 85, 247, 0.15)',
+                                  color: site.protocol === 'TCP' ? '#00e5ff' : '#c084fc',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {site.protocol}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Estado */}
+                          <td style={{ padding: '10px 14px' }}>
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                padding: '2px 8px',
+                                borderRadius: '10px',
+                                background: isEstab ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                                color: isEstab ? '#34d399' : '#fbbf24',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                            >
+                              <span
+                                style={{
+                                  width: '5px',
+                                  height: '5px',
+                                  borderRadius: '50%',
+                                  background: isEstab ? '#34d399' : '#fbbf24',
+                                }}
+                              />
+                              {isEstab ? 'CONEXIÓN ACTIVA' : site.state_label}
+                            </span>
+                          </td>
+
+                          {/* Última Actividad */}
+                          <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>
+                            {site.last_seen || 'LIVE'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── SUB-VISTA 2: CONSOLA EN VIVO DEL FLUJO (STREAM SSE) ── */}
         {activeSubView === 'live_stream' && (
           <>
-            {/* Toolbar con filtros de stream */}
             <div className="terminal-toolbar" style={{ flexWrap: 'wrap', gap: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Filter size={12} style={{ color: 'var(--text-secondary)' }} />
@@ -521,6 +955,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                   style={{ fontSize: '11px', padding: '4px 8px' }}
                 >
                   <option value="all">Todo el Flujo</option>
+                  <option value="site">Solo Destinos & Sitios Web</option>
                   <option value="traffic">Solo Conexiones y Paquetes</option>
                   <option value="heartbeat">Solo Keep-Alives / Heartbeat</option>
                   <option value="security">Solo Detecciones de Seguridad</option>
@@ -532,7 +967,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                 <Search size={12} className="search-icon" />
                 <input
                   type="text"
-                  placeholder="Buscar proceso, IP, regla o estado..."
+                  placeholder="Buscar proceso, IP, sitio, regla o estado..."
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
                   style={{ fontSize: '11px' }}
@@ -598,19 +1033,20 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                   <p>
                     {isPaused
                       ? 'El flujo está pausado. Haz clic en el botón de reproducción para reanudar.'
-                      : 'Esperando paquetes de red y eventos de seguridad del agente Wazuh.'}
+                      : 'Esperando paquetes de red, conexiones y eventos de los agentes sincronizados.'}
                   </p>
                 </div>
               ) : (
                 filteredEvents.map((evt, idx) => {
                   const isTraffic = evt.type === 'network_traffic';
+                  const isSite = evt.type === 'site_activity' || Boolean((evt as any).site_name);
                   const isExpanded = expandedEventId === evt.id;
                   const procName = evt.process || 'wazuh-agentd';
 
                   return (
                     <div
                       key={evt.id || idx}
-                      className={`terminal-log-row ${isTraffic ? 'level-medium' : 'level-low'}`}
+                      className={`terminal-log-row ${isSite ? 'level-medium' : isTraffic ? 'level-medium' : 'level-low'}`}
                       onClick={() => setExpandedEventId(isExpanded ? null : (evt.id || String(idx)))}
                       style={{ cursor: 'pointer' }}
                     >
@@ -626,9 +1062,9 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                             fontWeight: 700,
                             padding: '1px 6px',
                             borderRadius: '4px',
-                            background: 'rgba(6, 182, 212, 0.2)',
-                            color: '#22d3ee',
-                            border: '1px solid rgba(6, 182, 212, 0.35)',
+                            background: isSite ? 'rgba(56, 189, 248, 0.2)' : 'rgba(6, 182, 212, 0.2)',
+                            color: isSite ? '#38bdf8' : '#22d3ee',
+                            border: `1px solid ${isSite ? 'rgba(56, 189, 248, 0.35)' : 'rgba(6, 182, 212, 0.35)'}`,
                           }}
                         >
                           [{procName}]
@@ -639,8 +1075,14 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                           [{evt.agent_id}] {evt.agent_name}
                         </span>
 
-                        {/* Dirección de Red */}
-                        {isTraffic ? (
+                        {/* Dirección de Red / Destino Web */}
+                        {isSite ? (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#38bdf8' }}>
+                            <Globe size={11} />
+                            <strong>{(evt as any).site_name || evt.dst_ip}</strong>
+                            <span style={{ fontSize: '10px', opacity: 0.8 }}>({(evt as any).domain || evt.dst_port})</span>
+                          </div>
+                        ) : isTraffic ? (
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#93c5fd' }}>
                             <code>{evt.src_ip}:{evt.src_port || '0'}</code>
                             <ArrowRight size={10} style={{ color: 'var(--text-secondary)' }} />
@@ -680,7 +1122,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                               <span className="drawer-val" style={{ color: '#00e5ff' }}>{procName}</span>
                             </div>
                             <div className="drawer-item">
-                              <span className="drawer-label">Socket de Conexión:</span>
+                              <span className="drawer-label">Destino / Socket:</span>
                               <span className="drawer-val">
                                 {evt.src_ip}:{evt.src_port || '0'} → {evt.dst_ip}:{evt.dst_port || '1514'} ({evt.protocol || 'TCP'})
                               </span>
@@ -708,7 +1150,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
           </>
         )}
 
-        {/* ── SUB-VISTA 2: TABLA DE SOCKETS Y PUERTOS ACTIVOS (SYSCOLLECTOR) ── */}
+        {/* ── SUB-VISTA 3: TABLA DE SOCKETS Y PUERTOS ACTIVOS (SYSCOLLECTOR) ── */}
         {activeSubView === 'sockets' && (
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
@@ -740,11 +1182,12 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                   <thead>
                     <tr style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                       <th style={{ padding: '8px 12px' }}>Proto</th>
+                      <th style={{ padding: '8px 12px' }}>Equipo</th>
                       <th style={{ padding: '8px 12px' }}>Proceso / PID</th>
                       <th style={{ padding: '8px 12px' }}>Puerto Local</th>
-                      <th style={{ padding: '8px 12px' }}>Destino / IP Remota</th>
+                      <th style={{ padding: '8px 12px' }}>Destino / Sitio Web</th>
                       <th style={{ padding: '8px 12px' }}>Estado</th>
-                      <th style={{ padding: '8px 12px' }}>Detalle</th>
+                      <th style={{ padding: '8px 12px' }}>Clasificación</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -771,6 +1214,9 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                               {socket.protocol}
                             </span>
                           </td>
+                          <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>
+                            [{socket.agent_id || '000'}] {socket.agent_name || 'host'}
+                          </td>
                           <td style={{ padding: '8px 12px', color: '#fff', fontWeight: 600 }}>
                             <span style={{ color: '#38bdf8' }}>{socket.process}</span>
                             {socket.pid && <span style={{ color: 'var(--text-secondary)', marginLeft: '6px', fontSize: '10px' }}>(PID {socket.pid})</span>}
@@ -779,9 +1225,18 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                             <code>{socket.local_ip}:{socket.local_port}</code>
                           </td>
                           <td style={{ padding: '8px 12px' }}>
-                            <code style={{ color: socket.remote_ip !== '-' && socket.remote_ip !== '0.0.0.0' ? '#34d399' : 'var(--text-secondary)' }}>
-                              {socket.remote_ip}:{socket.remote_port}
-                            </code>
+                            {socket.site_name ? (
+                              <div>
+                                <strong style={{ color: '#38bdf8', fontSize: '11px' }}>{socket.site_name}</strong>
+                                <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                                  {socket.remote_ip}:{socket.remote_port}
+                                </div>
+                              </div>
+                            ) : (
+                              <code style={{ color: socket.remote_ip !== '-' && socket.remote_ip !== '0.0.0.0' ? '#34d399' : 'var(--text-secondary)' }}>
+                                {socket.remote_ip}:{socket.remote_port}
+                              </code>
+                            )}
                           </td>
                           <td style={{ padding: '8px 12px' }}>
                             <span style={{
@@ -804,13 +1259,13 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                             </span>
                           </td>
                           <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>
-                            {socket.process === 'wazuh-agentd'
-                              ? 'Canal seguro con el Manager Wazuh (1514)'
-                              : socket.process === 'sshd'
-                              ? 'Servicio de acceso SSH'
-                              : socket.process === 'docker-proxy'
-                              ? 'Proxy de contenedor Docker'
-                              : 'Conexión del sistema operativo'}
+                            {socket.category_label || (
+                              socket.process === 'wazuh-agentd'
+                                ? 'Canal seguro con el Manager Wazuh (1514)'
+                                : socket.process === 'sshd'
+                                ? 'Servicio de acceso SSH'
+                                : 'Conexión del sistema operativo'
+                            )}
                           </td>
                         </tr>
                       );
@@ -822,7 +1277,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
           </div>
         )}
 
-        {/* ── SUB-VISTA 3: INTERFACES DE RED (NETIFACE) ── */}
+        {/* ── SUB-VISTA 4: INTERFACES DE RED (NETIFACE) ── */}
         {activeSubView === 'interfaces' && (
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
@@ -851,6 +1306,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                   const isUp = iface.state === 'up';
                   const rxMb = (iface.rx_bytes / (1024 * 1024)).toFixed(2);
                   const txMb = (iface.tx_bytes / (1024 * 1024)).toFixed(2);
+                  const isWifi = iface.name.includes('wlan') || iface.name.includes('wifi');
 
                   return (
                     <div
@@ -864,9 +1320,9 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <Network size={16} style={{ color: isUp ? '#10b981' : 'var(--text-secondary)' }} />
+                          {isWifi ? <Wifi size={16} style={{ color: '#38bdf8' }} /> : <Network size={16} style={{ color: isUp ? '#10b981' : 'var(--text-secondary)' }} />}
                           <strong style={{ fontSize: '13px', color: '#fff' }}>{iface.name}</strong>
-                          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>({iface.type})</span>
+                          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>({isWifi ? 'WiFi' : iface.type})</span>
                         </div>
                         <span style={{
                           fontSize: '10px',
@@ -907,7 +1363,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
           </div>
         )}
 
-        {/* ── SUB-VISTA 4: DETECCIONES DE SEGURIDAD WAZUH DEL AGENTE ── */}
+        {/* ── SUB-VISTA 5: DETECCIONES DE SEGURIDAD WAZUH DEL AGENTE ── */}
         {activeSubView === 'detections' && (
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
@@ -996,15 +1452,17 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
         {/* ── STATUSBAR INFERIOR ── */}
         <div className="terminal-statusbar">
           <div className="statusbar-left">
-            <span>Agente Activo: <strong>{selectedAgentId === 'all' ? 'Todos los Equipos' : `[${selectedAgentId}] ${selectedAgentObj?.name || 'Agente'}`}</strong></span>
+            <span>Equipo Seleccionado: <strong>{selectedAgentId === 'all' ? 'Toda la Red' : `[${selectedAgentId}] ${selectedAgentObj?.name || 'Agente'}`}</strong></span>
             <span>·</span>
-            <span>Buffer en Vivo: <strong>{filteredEvents.length}</strong> eventos</span>
+            <span>Sitios Detectados: <strong>{activeSitesList.length}</strong></span>
             <span>·</span>
             <span>Canal Remoted: <strong>1514/TCP</strong></span>
+            <span>·</span>
+            <span>Equipos WiFi/LAN: <strong>{lanDevices.length || summary?.total_agents || 0}</strong></span>
           </div>
 
           <div className="statusbar-right">
-            <span>{isPaused ? '⏸ Flujo en pausa' : '▶ Transmisión en vivo'}</span>
+            <span>{isPaused ? '⏸ Flujo en pausa' : '▶ Transmisión en vivo activa'}</span>
           </div>
         </div>
       </div>

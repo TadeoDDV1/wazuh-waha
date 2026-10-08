@@ -605,10 +605,52 @@ async def _get_network_traffic_summary() -> str:
             f"• Conexiones Establecidas: `{estab_sock}`",
             f"• Volumen de Datos de Agentes: `{rx_mb} MB RX / {tx_mb} MB TX`",
         ])
+
+        # Destinos y sitios web detectados
+        sites = details.get("sites_activity", [])
+        if sites:
+            lines.extend([
+                "",
+                "🌐 *Sitios y Destinos Web Detectados en la Red:*",
+            ])
+            for s in sites[:6]:
+                lines.append(f"• *{s['site_name']}* (`{s['remote_ip']}:{s['remote_port']}`) vía `{s['process']}` en `[{s['agent_id']}]`")
     except Exception as e:
         log.debug("error getting socket details: %s", e)
 
     return "\n".join(lines)
+
+
+async def _get_network_sites_summary() -> str:
+    """Devuelve inventario detallado de sitios web y destinos navegados por los agentes."""
+    try:
+        from ..api.telemetry import _fetch_agent_traffic_details
+        details = await _fetch_agent_traffic_details("all")
+        sites = details.get("sites_activity", [])
+    except Exception as e:
+        return f"⚠️ Error consultando sitios de la red: {e}"
+
+    if not sites:
+        return "ℹ️ *No se registran destinos externos ni sitios activos en los agentes en este momento.*"
+
+    lines = [
+        "🌐 *SITIOS Y ACTIVIDAD WEB DE LOS AGENTES*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"• Total Sitios/Destinos: `{len(sites)}`",
+        f"• Conexiones Web Activas: `{sum(1 for s in sites if s.get('is_web'))}`",
+        "",
+        "📡 *Destinos Detectados en la Red:*",
+    ]
+
+    for s in sites[:10]:
+        state_ico = "🟢" if "estab" in s.get("state", "").lower() or "activa" in s.get("state_label", "").lower() else "🟡"
+        is_web_tag = "🌐 [Web]" if s.get("is_web") else "🔌 [Servicio]"
+        lines.append(
+            f"{state_ico} *{s['site_name']}* ({s['domain']})\n"
+            f"  {is_web_tag} `{s['remote_ip']}:{s['remote_port']}` ({s['protocol']}) | Proceso: `{s['process']}` | Equipo: `[{s['agent_id']}] {s['agent_name']}`"
+        )
+
+    return "\n\n".join(lines)
 
 
 async def _get_agents_list_summary() -> str:
@@ -667,9 +709,17 @@ async def _get_agent_detail_summary(agent_id: str) -> str:
         f"• Sockets Totales: `{kpis.get('total_sockets', 0)}`",
         f"• Puertos Escuchando: `{kpis.get('listening_sockets', 0)}`",
         f"• Conexiones Establecidas: `{kpis.get('established_connections', 0)}`",
+        f"• Sitios Web / Destinos: `{kpis.get('total_sites', 0)}`",
         f"• Interfaces Activas: `{kpis.get('active_interfaces', 0)}`",
         f"• Ancho de Banda: `{kpis.get('total_rx_mb', 0.0)} MB RX / {kpis.get('total_tx_mb', 0.0)} MB TX`",
     ]
+
+    # Sitios y destinos del agente
+    sites = details.get("sites_activity", [])
+    if sites:
+        lines.append("\n🌐 *Sitios y Conexiones Web Activas:*")
+        for s in sites[:5]:
+            lines.append(f"• *{s['site_name']}* (`{s['remote_ip']}:{s['remote_port']}`) por `{s['process']}`")
 
     # Interfaces
     ifaces = details.get("ifaces", [])
@@ -812,6 +862,8 @@ def _get_help_menu() -> str:
         f"  Verifica el estado en tiempo real de Wazuh, WAHA, Relay y Ollama.\n\n"
         f"• `/red` o `/trafico`\n"
         f"  Inspecciona puertos clave (1514, 55000, 8765, 3001, 8001, 22), sockets y tráfico.\n\n"
+        f"• `/sitios` o `/webs`\n"
+        f"  Lista los sitios web y destinos navegados por los agentes en la red.\n\n"
         f"• `/agentes` o `/equipos`\n"
         f"  Lista los equipos conectados al SOC con su IP, SO y estado.\n\n"
         f"• `/agente <id>`\n"
@@ -851,6 +903,8 @@ async def process_admin_command(text: str, source: str = "telegram") -> str:
         return await _get_services_status()
     elif cmd in ("/red", "/trafico", "/traffic", "/puertos"):
         return await _get_network_traffic_summary()
+    elif cmd in ("/sitios", "/sites", "/webs", "/destinos"):
+        return await _get_network_sites_summary()
     elif cmd in ("/agentes", "/equipos", "/agents"):
         return await _get_agents_list_summary()
     elif cmd in ("/agente", "/equipo", "/agent"):
