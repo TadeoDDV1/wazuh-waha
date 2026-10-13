@@ -70,10 +70,8 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
   const [fullProfile, setFullProfile] = useState<AgentFullProfile | null>(null);
   const [loadingProfile, setLoadingProfile] = useState<boolean>(false);
   const [profileTargetAgentId, setProfileTargetAgentId] = useState<string>('000');
-  const [profileSubTab, setProfileSubTab] = useState<'hardware' | 'sca' | 'fim' | 'packages' | 'processes'>('hardware');
   const [packageSearch, setPackageSearch] = useState<string>('');
   const [processSearch, setProcessSearch] = useState<string>('');
-  const [fimSearch, setFimSearch] = useState<string>('');
 
   // Telemetría detallada del agente seleccionado
   const [agentDetails, setAgentDetails] = useState<AgentTrafficDetails | null>(null);
@@ -96,17 +94,51 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
   const [connected, setConnected] = useState<boolean>(false);
   const [probing, setProbando] = useState<boolean>(false);
   const [maximized, setMaximized] = useState<boolean>(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const terminalLogsRef = useRef<HTMLDivElement>(null);
   const sseRef = useRef<EventSource | null>(null);
+  const pausedEventsRef = useRef<AgentNetworkEvent[]>([]);
+  const isPausedRef = useRef<boolean>(false);
+
+  const togglePause = useCallback(() => {
+    setIsPaused((prev) => {
+      const next = !prev;
+      isPausedRef.current = next;
+      if (!next && pausedEventsRef.current.length > 0) {
+        // Al reanudar: volcar los eventos acumulados durante la pausa
+        const buffered = pausedEventsRef.current;
+        pausedEventsRef.current = [];
+        setEvents((cur) => {
+          const merged = [...buffered, ...cur];
+          return merged.length > MAX_EVENTS ? merged.slice(0, MAX_EVENTS) : merged;
+        });
+      }
+      return next;
+    });
+  }, []);
+
+  // Helper para traducir errores HTTP a mensajes claros
+  const describeError = (err: unknown, ctx: string): string => {
+    const anyErr = err as { response?: { status?: number }; message?: string };
+    const status = anyErr?.response?.status;
+    if (status === 401) return `${ctx}: sesión expirada o no autorizada (401). Volvé a iniciar sesión.`;
+    if (status === 403) return `${ctx}: permiso denegado (403). Se requiere sesión con permisos completos.`;
+    if (status === 429) return `${ctx}: demasiadas solicitudes (429). Esperá unos segundos.`;
+    if (status && status >= 500) return `${ctx}: error del servidor (${status}). Reintenta en unos segundos.`;
+    if (anyErr?.message?.includes('Network Error')) return `${ctx}: sin conexión con el relay. Verificá que esté activo.`;
+    return `${ctx}: ${anyErr?.message || 'error desconocido'}`;
+  };
 
   // 1. Cargar resumen general de red y agentes
   const fetchSummary = useCallback(async () => {
     try {
       const data = await dashboardService.getNetworkSummary();
       setSummary(data);
+      setFetchError((prev) => (prev?.startsWith('Resumen') ? null : prev));
     } catch (err) {
       console.error('Error fetching network summary:', err);
+      setFetchError(describeError(err, 'Resumen de red'));
     }
   }, []);
 
@@ -116,8 +148,10 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
     try {
       const details = await dashboardService.getAgentTrafficDetails(agentId);
       setAgentDetails(details);
+      setFetchError((prev) => (prev?.startsWith('Telemetría') ? null : prev));
     } catch (err) {
       console.error(`Error fetching traffic details for agent ${agentId}:`, err);
+      setFetchError(describeError(err, 'Telemetría del agente'));
     } finally {
       setLoadingDetails(false);
     }
@@ -129,8 +163,10 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
     try {
       const data = await dashboardService.getNetworkSites(agentId);
       setSitesSummary(data);
+      setFetchError((prev) => (prev?.startsWith('Sitios') ? null : prev));
     } catch (err) {
       console.error(`Error fetching sites for agent ${agentId}:`, err);
+      setFetchError(describeError(err, 'Sitios de red'));
     } finally {
       setLoadingSites(false);
     }
@@ -176,49 +212,71 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
     return () => clearInterval(interval);
   }, [selectedAgentId, profileTargetAgentId, activeSubView, fetchAgentDetails, fetchSites, fetchFullProfile]);
 
-  // 4. Conexión al flujo SSE en tiempo real
+  // 4. Conexión al flujo SSE en tiempo real (con reconexión backoff)
   useEffect(() => {
-    const streamUrl = buildNetworkStreamUrl();
-    const es = new EventSource(streamUrl, { withCredentials: true });
-    sseRef.current = es;
+    let closed = false;
+    let failCount = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    es.onopen = () => {
-      setConnected(true);
-    };
+    const connect = () => {
+      if (closed) return;
+      const streamUrl = buildNetworkStreamUrl();
+      const es = new EventSource(streamUrl, { withCredentials: true });
+      sseRef.current = es;
 
-    es.onerror = () => {
-      setConnected(false);
-    };
+      es.onopen = () => {
+        failCount = 0;
+        setConnected(true);
+      };
 
-    es.onmessage = (e) => {
-      try {
-        const payload = JSON.parse(e.data);
-        if (payload.type === 'connected') {
-          setConnected(true);
-          return;
-        }
+      es.onerror = () => {
+        setConnected(false);
+        es.close();
+        if (closed) return;
+        failCount += 1;
+        const base = Math.min(1000 * 2 ** Math.min(failCount, 5), 30000);
+        const delay = base + Math.floor(Math.random() * 1000);
+        retryTimer = setTimeout(connect, delay);
+      };
 
-        if (
-          payload.type === 'network_event' ||
-          payload.type === 'agent_heartbeat' ||
-          payload.type === 'site_activity'
-        ) {
-          const item: AgentNetworkEvent = payload.data;
-          setEvents((prev) => {
-            const next = [item, ...prev];
-            if (next.length > MAX_EVENTS) {
-              return next.slice(0, MAX_EVENTS);
+      es.onmessage = (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          if (payload.type === 'connected') {
+            setConnected(true);
+            return;
+          }
+
+          if (
+            payload.type === 'network_event' ||
+            payload.type === 'agent_heartbeat' ||
+            payload.type === 'site_activity'
+          ) {
+            const item: AgentNetworkEvent = payload.data;
+            if (isPausedRef.current) {
+              pausedEventsRef.current = [item, ...pausedEventsRef.current].slice(0, MAX_EVENTS);
+              return;
             }
-            return next;
-          });
+            setEvents((prev) => {
+              const next = [item, ...prev];
+              if (next.length > MAX_EVENTS) {
+                return next.slice(0, MAX_EVENTS);
+              }
+              return next;
+            });
+          }
+        } catch (err) {
+          console.error('Error parseando evento SSE:', err);
         }
-      } catch (err) {
-        console.error('Error parseando evento SSE:', err);
-      }
+      };
     };
+
+    connect();
 
     return () => {
-      es.close();
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      sseRef.current?.close();
       sseRef.current = null;
     };
   }, []);
@@ -436,6 +494,51 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
             )}
           </div>
         </div>
+
+        {/* ── BANNER DE ERROR VISIBLE (antes: los fallos se tragaban en console.error) ── */}
+        {fetchError && (
+          <div
+            style={{
+              margin: '8px 16px 0',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              color: '#f87171',
+              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+            }}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <ShieldAlert size={14} />
+              {fetchError}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setFetchError(null);
+                fetchSummary();
+                fetchAgentDetails(selectedAgentId);
+                fetchSites(selectedAgentId);
+              }}
+              style={{
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#f87171',
+                borderRadius: '6px',
+                padding: '3px 10px',
+                fontSize: '11px',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
 
         {/* ── SELECTOR SEPARADO DE AGENTES (PESTAÑAS) ── */}
         <div
@@ -1046,7 +1149,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                 <button
                   type="button"
                   className="icon-tool-btn"
-                  onClick={() => setIsPaused(!isPaused)}
+                  onClick={togglePause}
                   title={isPaused ? 'Reanudar flujo en vivo' : 'Pausar flujo'}
                 >
                   {isPaused ? <Play size={13} style={{ color: 'var(--green-healthy)' }} /> : <Pause size={13} />}
@@ -1506,6 +1609,271 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── SUB-VISTA 6: FICHA FORENSE & AUDITORÍA PROFUNDA ── */}
+        {activeSubView === 'forensics' && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '14px', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>🔬</span> Ficha Forense & Auditoría Profunda
+                </h4>
+                <p style={{ margin: '2px 0 0', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                  Perfil integral del agente {fullProfile ? `[${fullProfile.agent_id}] ${fullProfile.name}` : 'seleccionado'}: hardware, SO, seguridad (SCA/FIM), software y procesos.
+                </p>
+              </div>
+              {fullProfile && (
+                <span style={{ fontSize: '11px', color: '#c084fc', background: 'rgba(168, 85, 247, 0.1)', border: '1px solid rgba(168, 85, 247, 0.25)', padding: '3px 8px', borderRadius: '6px' }}>
+                  Última sincronización: {new Date(fullProfile.timestamp * 1000).toLocaleString('es-AR')}
+                </span>
+              )}
+            </div>
+
+            {loadingProfile ? (
+              <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                <Loader2 size={24} className="animate-spin" style={{ margin: '0 auto 8px', color: '#c084fc' }} />
+                <span>Recopilando ficha forense del agente...</span>
+              </div>
+            ) : !fullProfile ? (
+              <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                <p>No se pudo cargar la ficha forense. Verificá la conexión con el relay.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+                {/* ── Identificación del Agente ── */}
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px' }}>
+                  <h5 style={{ margin: '0 0 10px', fontSize: '12px', color: '#c084fc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Server size={13} /> Identificación del Agente
+                  </h5>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px', fontSize: '12px' }}>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>ID:</span> <code style={{ color: '#fff' }}>{fullProfile.agent_id}</code></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Nombre:</span> <strong style={{ color: '#fff' }}>{fullProfile.name}</strong></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>IP:</span> <code style={{ color: '#38bdf8' }}>{fullProfile.ip}</code></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Estado:</span> <span style={{ color: fullProfile.status === 'active' ? 'var(--green-healthy)' : 'var(--red-error)' }}>{fullProfile.status}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Versión Wazuh:</span> <span style={{ color: '#fff' }}>{fullProfile.version}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Último keep-alive:</span> <span style={{ color: '#fff' }}>{fullProfile.last_keep_alive}</span></div>
+                  </div>
+                </div>
+
+                {/* ── Hardware ── */}
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px' }}>
+                  <h5 style={{ margin: '0 0 10px', fontSize: '12px', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Cpu size={13} /> Hardware
+                  </h5>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '10px', fontSize: '12px' }}>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>CPU:</span> <span style={{ color: '#fff' }}>{fullProfile.hardware?.cpu_name || '-'}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Núcleos:</span> <span style={{ color: '#fff' }}>{fullProfile.hardware?.cpu_cores ?? '-'}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Frecuencia:</span> <span style={{ color: '#fff' }}>{fullProfile.hardware?.cpu_mhz ?? '-'} MHz</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>RAM Total:</span> <span style={{ color: '#fff' }}>{fullProfile.hardware?.ram_total_mb ?? '-'} MB</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>RAM Usada:</span> <span style={{ color: '#fbbf24' }}>{fullProfile.hardware?.ram_used_mb ?? '-'} MB ({fullProfile.hardware?.ram_usage_percent ?? '-'}%)</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>RAM Libre:</span> <span style={{ color: 'var(--green-healthy)' }}>{fullProfile.hardware?.ram_free_mb ?? '-'} MB</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Board Serial:</span> <code style={{ color: '#94a3b8' }}>{fullProfile.hardware?.board_serial || '-'}</code></div>
+                  </div>
+                </div>
+
+                {/* ── Sistema Operativo ── */}
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px' }}>
+                  <h5 style={{ margin: '0 0 10px', fontSize: '12px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <HardDrive size={13} /> Sistema Operativo
+                  </h5>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px', fontSize: '12px' }}>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Nombre:</span> <span style={{ color: '#fff' }}>{fullProfile.os?.name || '-'}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Plataforma:</span> <span style={{ color: '#fff' }}>{fullProfile.os?.platform || '-'}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Versión:</span> <span style={{ color: '#fff' }}>{fullProfile.os?.version || '-'}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Kernel:</span> <code style={{ color: '#94a3b8' }}>{fullProfile.os?.kernel || '-'}</code></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Arquitectura:</span> <span style={{ color: '#fff' }}>{fullProfile.os?.architecture || '-'}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Hostname:</span> <span style={{ color: '#fff' }}>{fullProfile.os?.hostname || '-'}</span></div>
+                  </div>
+                </div>
+
+                {/* ── Red ── */}
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px' }}>
+                  <h5 style={{ margin: '0 0 10px', fontSize: '12px', color: '#00e5ff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Wifi size={13} /> Red — Interfaces ({fullProfile.network?.interfaces?.length || 0})
+                  </h5>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                    Tráfico total: <strong style={{ color: '#fff' }}>{fullProfile.network?.total_rx_mb ?? 0} MB recibidos</strong> · <strong style={{ color: '#fff' }}>{fullProfile.network?.total_tx_mb ?? 0} MB enviados</strong>
+                  </div>
+                  {(fullProfile.network?.interfaces || []).map((iface, idx) => (
+                    <div key={idx} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '6px', padding: '8px 10px', marginBottom: '6px', fontSize: '11px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <strong style={{ color: '#fff' }}>{iface.name}</strong>
+                        <span style={{ color: iface.state === 'up' ? 'var(--green-healthy)' : 'var(--red-error)', fontSize: '10px', fontWeight: 700 }}>{iface.state?.toUpperCase()}</span>
+                        {iface.ipv4 && <code style={{ color: '#38bdf8' }}>{iface.ipv4}</code>}
+                        <code style={{ color: 'var(--text-secondary)' }}>{iface.mac}</code>
+                        <span style={{ color: 'var(--text-secondary)' }}>MTU {iface.mtu}</span>
+                        <span style={{ color: 'var(--text-secondary)' }}>↓{Math.round((iface.rx_bytes || 0) / 1048576)} MB ↑{Math.round((iface.tx_bytes || 0) / 1048576)} MB</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── SCA CIS Benchmark ── */}
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px' }}>
+                  <h5 style={{ margin: '0 0 10px', fontSize: '12px', color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <ShieldCheck size={13} /> Seguridad de Configuración (SCA) — {fullProfile.sca?.name || 'CIS Benchmark'}
+                  </h5>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '10px', fontSize: '12px', marginBottom: '10px' }}>
+                    <div style={{ textAlign: 'center', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '6px', padding: '8px' }}>
+                      <div style={{ fontSize: '20px', fontWeight: 700, color: (fullProfile.sca?.score ?? 0) >= 80 ? 'var(--green-healthy)' : (fullProfile.sca?.score ?? 0) >= 50 ? '#fbbf24' : 'var(--red-error)' }}>{fullProfile.sca?.score ?? 0}%</div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Score</div>
+                    </div>
+                    <div style={{ textAlign: 'center', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '6px', padding: '8px' }}>
+                      <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--green-healthy)' }}>{fullProfile.sca?.pass ?? 0}</div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Aprobados</div>
+                    </div>
+                    <div style={{ textAlign: 'center', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '6px', padding: '8px' }}>
+                      <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--red-error)' }}>{fullProfile.sca?.fail ?? 0}</div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Fallidos</div>
+                    </div>
+                    <div style={{ textAlign: 'center', background: 'rgba(255,255,255,0.04)', borderRadius: '6px', padding: '8px' }}>
+                      <div style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>{fullProfile.sca?.total_checks ?? 0}</div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Total Controles</div>
+                    </div>
+                  </div>
+                  {(fullProfile.sca?.failed_checks || []).length > 0 && (
+                    <div>
+                      <div style={{ fontSize: '11px', color: '#f87171', fontWeight: 600, marginBottom: '6px' }}>Controles fallidos:</div>
+                      {fullProfile.sca.failed_checks.map((chk, idx) => (
+                        <div key={idx} style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)', borderRadius: '6px', padding: '8px 10px', marginBottom: '6px', fontSize: '11px' }}>
+                          <div style={{ color: '#f87171', fontWeight: 600 }}>#{chk.id} — {chk.title}</div>
+                          {chk.rationale && <div style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>{chk.rationale}</div>}
+                          {chk.remediation && <div style={{ color: '#34d399', marginTop: '2px' }}>Fix: {chk.remediation}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── FIM Syscheck ── */}
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px' }}>
+                  <h5 style={{ margin: '0 0 10px', fontSize: '12px', color: '#a855f7', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <FileCheck size={13} /> Integridad de Archivos (FIM) — {fullProfile.fim?.total_monitored ?? 0} archivos monitoreados
+                  </h5>
+                  {(fullProfile.fim?.recent_files || []).length === 0 ? (
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Sin cambios recientes registrados por Syscheck.</div>
+                  ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-secondary)' }}>
+                            <th style={{ textAlign: 'left', padding: '4px 8px' }}>Archivo</th>
+                            <th style={{ textAlign: 'left', padding: '4px 8px' }}>Tamaño</th>
+                            <th style={{ textAlign: 'left', padding: '4px 8px' }}>Permisos</th>
+                            <th style={{ textAlign: 'left', padding: '4px 8px' }}>MD5</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fullProfile.fim.recent_files.map((f, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                              <td style={{ padding: '4px 8px', color: '#fff', fontFamily: 'monospace', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.file}</td>
+                              <td style={{ padding: '4px 8px', color: 'var(--text-secondary)' }}>{f.size ?? '-'}</td>
+                              <td style={{ padding: '4px 8px', color: 'var(--text-secondary)' }}>{f.perm || '-'}</td>
+                              <td style={{ padding: '4px 8px', color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: '10px' }}>{f.md5 ? f.md5.slice(0, 12) + '…' : '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Software Instalado ── */}
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px' }}>
+                  <h5 style={{ margin: '0 0 10px', fontSize: '12px', color: '#fb923c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Package size={13} /> Software Instalado — {fullProfile.software?.total_packages ?? 0} paquetes detectados
+                  </h5>
+                  <input
+                    type="text"
+                    placeholder="Buscar paquete..."
+                    value={packageSearch}
+                    onChange={(e) => setPackageSearch(e.target.value)}
+                    style={{
+                      width: '100%', maxWidth: '300px', padding: '6px 10px', borderRadius: '6px',
+                      border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.3)', color: '#fff',
+                      fontSize: '11px', marginBottom: '10px', outline: 'none',
+                    }}
+                  />
+                  {(fullProfile.software?.sample_packages || []).filter((p) => {
+                    if (!packageSearch.trim()) return true;
+                    const q = packageSearch.toLowerCase();
+                    return `${p.name} ${p.version} ${p.vendor}`.toLowerCase().includes(q);
+                  }).map((pkg, idx) => (
+                    <div key={idx} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '6px', padding: '6px 10px', marginBottom: '4px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                      <span style={{ color: '#fff', fontWeight: 600 }}>{pkg.name}</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>{pkg.version} {pkg.vendor ? `· ${pkg.vendor}` : ''}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── Procesos ── */}
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px' }}>
+                  <h5 style={{ margin: '0 0 10px', fontSize: '12px', color: '#34d399', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <TerminalIcon size={13} /> Procesos Activos — {fullProfile.processes?.total_count ?? 0} detectados
+                  </h5>
+                  <input
+                    type="text"
+                    placeholder="Buscar proceso..."
+                    value={processSearch}
+                    onChange={(e) => setProcessSearch(e.target.value)}
+                    style={{
+                      width: '100%', maxWidth: '300px', padding: '6px 10px', borderRadius: '6px',
+                      border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.3)', color: '#fff',
+                      fontSize: '11px', marginBottom: '10px', outline: 'none',
+                    }}
+                  />
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {(fullProfile.processes?.top_processes || []).filter((p) => {
+                      if (!processSearch.trim()) return true;
+                      const q = processSearch.toLowerCase();
+                      return `${p.name} ${p.cmd} ${p.euser}`.toLowerCase().includes(q);
+                    }).map((proc, idx) => (
+                      <span key={idx} style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '6px', padding: '3px 8px', fontSize: '11px', color: '#34d399' }}>
+                        <code>{proc.pid}</code> {proc.name} {proc.euser ? `(${proc.euser})` : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── Sitios Activos (resumen desde la ficha) ── */}
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px' }}>
+                  <h5 style={{ margin: '0 0 10px', fontSize: '12px', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Globe size={13} /> Destinos de Red Activos — {(fullProfile.active_sites || []).length} sitios
+                  </h5>
+                  {(fullProfile.active_sites || []).slice(0, 15).map((site, idx) => (
+                    <div key={idx} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '6px', padding: '6px 10px', marginBottom: '4px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      {renderSiteIcon(site.category, site.is_web)}
+                      <strong style={{ color: '#fff' }}>{site.site_name}</strong>
+                      <code style={{ color: 'var(--text-secondary)' }}>{site.remote_ip}:{site.remote_port}</code>
+                      <span style={{ color: 'var(--text-secondary)' }}>{site.process}</span>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>{site.category_label}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── Detecciones recientes (resumen desde la ficha) ── */}
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px' }}>
+                  <h5 style={{ margin: '0 0 10px', fontSize: '12px', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <ShieldAlert size={13} /> Detecciones Wazuh Recientes — {(fullProfile.recent_detections || []).length} alertas
+                  </h5>
+                  {(fullProfile.recent_detections || []).slice(0, 10).map((det, idx) => {
+                    const isCritical = det.level >= 10;
+                    return (
+                      <div key={idx} style={{ background: isCritical ? 'rgba(239,68,68,0.06)' : 'rgba(0,0,0,0.2)', border: `1px solid ${isCritical ? 'rgba(239,68,68,0.2)' : 'transparent'}`, borderRadius: '6px', padding: '6px 10px', marginBottom: '4px', fontSize: '11px' }}>
+                        <span style={{ color: isCritical ? '#f87171' : '#fbbf24', fontWeight: 700, fontSize: '10px' }}>{det.level_es}</span>
+                        {' '}<span style={{ color: '#00e5ff' }}>#{det.rule_id}</span>
+                        {' '}<span style={{ color: '#fff' }}>{det.description}</span>
+                        {det.srcip && <span style={{ color: 'var(--text-secondary)' }}> · origen <code>{det.srcip}</code></span>}
+                      </div>
+                    );
+                  })}
+                </div>
+
               </div>
             )}
           </div>

@@ -8,6 +8,7 @@ import { WhatsappCard } from './WhatsappCard';
 import { TelegramCard } from './TelegramCard';
 import { NotificationChannelsCard } from './NotificationChannelsCard';
 import { TelemetryGlobalCard } from './TelemetryGlobalCard';
+import { ReportsCard } from './ReportsCard';
 import {
   Loader2,
   AlertCircle,
@@ -90,6 +91,19 @@ export const Dashboard: React.FC = () => {
           {wahaComponent && <WhatsappCard component={wahaComponent} />}
           <TelegramCard />
         </div>
+      </div>
+
+      {/* ── 6. Reportes de Actividad por Agente (PDF) ── */}
+      <div style={{ margin: '0 24px 30px' }}>
+        <div style={{ marginBottom: '16px' }}>
+          <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>📄</span> Reportes de Actividad y Auditoría
+          </h3>
+          <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+            Generá reportes PDF descargables con la ficha forense completa de cada agente Wazuh: hardware, sistema operativo, red, seguridad (SCA/FIM), software, procesos y detecciones.
+          </p>
+        </div>
+        <ReportsCard />
       </div>
     </div>
   );

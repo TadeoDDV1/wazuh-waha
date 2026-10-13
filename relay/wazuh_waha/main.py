@@ -15,6 +15,7 @@ from .api.alerts import router as alerts_router
 from .api.auth import router as auth_router
 from .api.dashboard import router as dashboard_router
 from .api.debug import router as debug_router
+from .api.reports import router as reports_router
 from .api.telemetry import router as telemetry_router
 from .api.waha_webhook import router as waha_webhook_router
 from .common.audit import get_audit_log
@@ -221,4 +222,5 @@ app.include_router(alerts_router)
 app.include_router(debug_router)
 app.include_router(telemetry_router)
 app.include_router(dashboard_router)
+app.include_router(reports_router)
 app.include_router(waha_webhook_router)

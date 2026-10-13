@@ -16,15 +16,27 @@ const api = axios.create({
   withCredentials: true,
 });
 
-api.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    if (err?.response?.status === 401 && !err?.config?.url?.includes('/auth/')) {
-      notifyAuthExpired();
-    }
-    return Promise.reject(err);
+// Interceptor 401 compartido: notifica sesión expirada salvo en /auth/.
+const authInterceptor = (err: any) => {
+  if (err?.response?.status === 401 && !err?.config?.url?.includes('/auth/')) {
+    notifyAuthExpired();
+  }
+  return Promise.reject(err);
+};
+
+api.interceptors.response.use((res) => res, authInterceptor);
+
+// Instancia para /api/v1/telemetry/* — antes usaba axios "pelado" y saltaba
+// el interceptor: una sesión expirada fallaba en silencio en la Terminal de Red.
+const telemetryApi = axios.create({
+  baseURL: `${API_URL}/api/v1/telemetry`,
+  headers: {
+    'Content-Type': 'application/json',
   },
-);
+  withCredentials: true,
+});
+
+telemetryApi.interceptors.response.use((res) => res, authInterceptor);
 
 export const dashboardService = {
   getLogs: async (lines = 100): Promise<{ok: boolean, logs: string}> => {
@@ -199,28 +211,36 @@ export const dashboardService = {
   },
 
   getNetworkSummary: async (): Promise<any> => {
-    const response = await axios.get('/api/v1/telemetry/network/summary', { withCredentials: true });
+    const response = await telemetryApi.get('/network/summary');
     return response.data;
   },
 
   probeNetwork: async (): Promise<any> => {
-    const response = await axios.post('/api/v1/telemetry/network/probe', {}, { withCredentials: true });
+    const response = await telemetryApi.post('/network/probe', {});
     return response.data;
   },
 
   getAgentTrafficDetails: async (agentId: string): Promise<AgentTrafficDetails> => {
-    const response = await axios.get(`/api/v1/telemetry/agents/${agentId}/traffic`, { withCredentials: true });
+    const response = await telemetryApi.get(`/agents/${agentId}/traffic`);
     return response.data;
   },
 
   getNetworkSites: async (agentId: string = 'all'): Promise<NetworkSitesSummary> => {
-    const response = await axios.get(`/api/v1/telemetry/network/sites?agent_id=${agentId}`, { withCredentials: true });
+    const response = await telemetryApi.get(`/network/sites?agent_id=${encodeURIComponent(agentId)}`);
     return response.data;
   },
 
   getAgentFullProfile: async (agentId: string): Promise<AgentFullProfile> => {
-    const response = await axios.get(`/api/v1/telemetry/agents/${agentId}/full-profile`, { withCredentials: true });
+    const response = await telemetryApi.get(`/agents/${agentId}/full-profile`);
     return response.data;
+  },
+
+  getAgentReportBlob: async (agentId: string): Promise<Blob> => {
+    const response = await axios.get(`${API_URL}/api/v1/reports/agent/${encodeURIComponent(agentId)}`, {
+      responseType: 'blob',
+      withCredentials: true,
+    });
+    return response.data as Blob;
   },
 };
 
