@@ -10,6 +10,7 @@ import type {
   AgentWazuhDetection,
   AgentSiteActivity,
   NetworkSitesSummary,
+  AgentFullProfile,
 } from '../types/dashboard';
 import {
   Network,
@@ -40,6 +41,11 @@ import {
   Database,
   Terminal as TerminalIcon,
   Video,
+  Cpu,
+  HardDrive,
+  ShieldCheck,
+  FileCheck,
+  Package,
 } from 'lucide-react';
 
 interface NetworkAgentsTerminalProps {
@@ -58,7 +64,16 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
   const [events, setEvents] = useState<AgentNetworkEvent[]>([]);
   const [summary, setSummary] = useState<NetworkSummary | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('all');
-  const [activeSubView, setActiveSubView] = useState<'sites' | 'live_stream' | 'sockets' | 'interfaces' | 'detections'>('sites');
+  const [activeSubView, setActiveSubView] = useState<'sites' | 'live_stream' | 'sockets' | 'interfaces' | 'detections' | 'forensics'>('sites');
+
+  // Ficha Forense y Auditoría profunda
+  const [fullProfile, setFullProfile] = useState<AgentFullProfile | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState<boolean>(false);
+  const [profileTargetAgentId, setProfileTargetAgentId] = useState<string>('000');
+  const [profileSubTab, setProfileSubTab] = useState<'hardware' | 'sca' | 'fim' | 'packages' | 'processes'>('hardware');
+  const [packageSearch, setPackageSearch] = useState<string>('');
+  const [processSearch, setProcessSearch] = useState<string>('');
+  const [fimSearch, setFimSearch] = useState<string>('');
 
   // Telemetría detallada del agente seleccionado
   const [agentDetails, setAgentDetails] = useState<AgentTrafficDetails | null>(null);
@@ -121,19 +136,45 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
     }
   }, []);
 
+  // 3b. Cargar ficha forense y telemetría profunda del agente
+  const fetchFullProfile = useCallback(async (targetAgentId: string) => {
+    setLoadingProfile(true);
+    try {
+      const data = await dashboardService.getAgentFullProfile(targetAgentId);
+      setFullProfile(data);
+    } catch (err) {
+      console.error(`Error fetching full profile for agent ${targetAgentId}:`, err);
+    } finally {
+      setLoadingProfile(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchSummary();
   }, [fetchSummary]);
 
   useEffect(() => {
+    if (selectedAgentId !== 'all') {
+      setProfileTargetAgentId(selectedAgentId);
+    }
+  }, [selectedAgentId]);
+
+  useEffect(() => {
     fetchAgentDetails(selectedAgentId);
     fetchSites(selectedAgentId);
+    const target = selectedAgentId === 'all' ? profileTargetAgentId : selectedAgentId;
+    fetchFullProfile(target);
+
     const interval = setInterval(() => {
       fetchAgentDetails(selectedAgentId);
       fetchSites(selectedAgentId);
-    }, 10000);
+      if (activeSubView === 'forensics') {
+        const curTarget = selectedAgentId === 'all' ? profileTargetAgentId : selectedAgentId;
+        fetchFullProfile(curTarget);
+      }
+    }, 12000);
     return () => clearInterval(interval);
-  }, [selectedAgentId, fetchAgentDetails, fetchSites]);
+  }, [selectedAgentId, profileTargetAgentId, activeSubView, fetchAgentDetails, fetchSites, fetchFullProfile]);
 
   // 4. Conexión al flujo SSE en tiempo real
   useEffect(() => {
@@ -627,6 +668,23 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
               }}
             >
               🛡️ Detecciones ({agentDetails?.wazuh_detections?.length || 0})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubView('forensics')}
+              style={{
+                padding: '5px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: activeSubView === 'forensics' ? 700 : 500,
+                background: activeSubView === 'forensics' ? 'linear-gradient(135deg, rgba(168, 85, 247, 0.3), rgba(59, 130, 246, 0.3))' : 'transparent',
+                color: activeSubView === 'forensics' ? '#c084fc' : 'var(--text-secondary)',
+                border: activeSubView === 'forensics' ? '1px solid #a855f7' : '1px solid transparent',
+                cursor: 'pointer',
+              }}
+            >
+              🔬 Ficha Forense & Auditoría
             </button>
           </div>
         </div>

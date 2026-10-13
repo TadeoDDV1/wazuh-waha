@@ -354,4 +354,95 @@ export interface AgentTrafficDetails {
   timestamp: number;
 }
 
+export interface AgentHardware {
+  cpu_name: string;
+  cpu_cores: number;
+  cpu_mhz: number;
+  ram_total_mb: number;
+  ram_free_mb: number;
+  ram_used_mb: number;
+  ram_usage_percent: number;
+  board_serial?: string;
+}
+
+export interface AgentOS {
+  name: string;
+  platform: string;
+  version: string;
+  kernel: string;
+  architecture: string;
+  hostname: string;
+}
+
+export interface AgentSCACheck {
+  id: number | string;
+  title: string;
+  rationale?: string;
+  remediation?: string;
+}
+
+export interface AgentSCA {
+  name: string;
+  policy_id: string;
+  score: number;
+  pass: number;
+  fail: number;
+  total_checks: number;
+  failed_checks: AgentSCACheck[];
+}
+
+export interface AgentFIMFile {
+  file: string;
+  size?: number;
+  perm?: string;
+  uname?: string;
+  date?: string;
+  md5?: string;
+}
+
+export interface AgentFIM {
+  total_monitored: number;
+  recent_files: AgentFIMFile[];
+}
+
+export interface AgentPackage {
+  name: string;
+  version: string;
+  vendor?: string;
+  description?: string;
+}
+
+export interface AgentSoftware {
+  total_packages: number;
+  sample_packages: AgentPackage[];
+}
+
+export interface AgentFullProfile {
+  ok: boolean;
+  agent_id: string;
+  name: string;
+  ip: string;
+  status: string;
+  version: string;
+  last_keep_alive: string;
+  hardware: AgentHardware;
+  os: AgentOS;
+  network: {
+    interfaces: AgentNetInterface[];
+    total_rx_mb: number;
+    total_tx_mb: number;
+  };
+  sca: AgentSCA;
+  fim: AgentFIM;
+  software: AgentSoftware;
+  processes: {
+    total_count: number;
+    top_processes: AgentProcess[];
+  };
+  active_sites: AgentSiteActivity[];
+  recent_detections: AgentWazuhDetection[];
+  timestamp: number;
+}
+
+
 

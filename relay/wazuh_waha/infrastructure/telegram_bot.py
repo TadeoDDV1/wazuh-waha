@@ -684,61 +684,199 @@ async def _get_agents_list_summary() -> str:
     return "\n".join(lines)
 
 
-async def _get_agent_detail_summary(agent_id: str) -> str:
-    """Devuelve diagnóstico profundo de un agente específico."""
-    aid = str(agent_id).strip()
-    try:
-        from ..api.telemetry import _fetch_agent_traffic_details
-        details = await _fetch_agent_traffic_details(aid)
-    except Exception as e:
-        return f"⚠️ Error consultando telemetría del agente {aid}: {e}"
+def _render_bar(pct: float, length: int = 8) -> str:
+    """Genera una barra gráfica de progreso visual para Telegram / WhatsApp."""
+    filled = int(round(max(0, min(100, pct)) / 100.0 * length))
+    return "█" * filled + "░" * (length - filled)
 
-    if not details or not details.get("ok"):
+
+async def _get_agent_detail_summary(agent_id: str, subcmd: str = "") -> str:
+    """Devuelve diagnóstico profundo y forense de un agente con soporte para submódulos."""
+    aid = str(agent_id).strip()
+    sub = str(subcmd or "").strip().lower()
+
+    try:
+        from ..api.telemetry import _fetch_agent_full_profile
+        profile = await _fetch_agent_full_profile(aid)
+    except Exception as e:
+        return f"⚠️ Error consultando perfil forense del agente {aid}: {e}"
+
+    if not profile or not profile.get("ok"):
         return f"⚠️ No se encontró telemetría para el agente `{aid}`."
 
-    info = details.get("agent_info") or {}
-    name = info.get("name", f"agente-{aid}")
-    ip = info.get("ip", "N/D")
-    status = str(info.get("status", "active")).upper()
-    kpis = details.get("kpis", {})
+    name = profile.get("name", f"agente-{aid}")
+    ip = profile.get("ip", "N/D")
+    status = str(profile.get("status", "active")).upper()
+    hw = profile.get("hardware", {})
+    os_info = profile.get("os", {})
+    net = profile.get("network", {})
+    sca = profile.get("sca", {})
+    fim = profile.get("fim", {})
+    soft = profile.get("software", {})
+    procs = profile.get("processes", {})
+    sites = profile.get("active_sites", [])
+    alerts = profile.get("recent_detections", [])
+
+    # 1. Submódulo: Hardware
+    if sub in ("hardware", "hw", "cpu", "ram"):
+        ram_pct = hw.get("ram_usage_percent", 0.0)
+        ram_bar = _render_bar(ram_pct)
+        ram_tot_gb = round(hw.get("ram_total_mb", 0) / 1024, 2)
+        ram_used_gb = round(hw.get("ram_used_mb", 0) / 1024, 2)
+        ram_free_gb = round(hw.get("ram_free_mb", 0) / 1024, 2)
+
+        return (
+            f"💻 *ESPECIFICACIONES DE HARDWARE [{aid}] - {name}*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"• Procesador: `{hw.get('cpu_name', 'Desconocido')}`\n"
+            f"• Núcleos / Hilos: `{hw.get('cpu_cores', 1)} núcleos` ({hw.get('cpu_mhz', 0)} MHz)\n"
+            f"• Arquitectura: `{os_info.get('architecture', 'x86_64')}`\n"
+            f"• Placa / Serial: `{hw.get('board_serial', '-')}`\n\n"
+            "🧠 *Memoria RAM:*\n"
+            f"• Uso: `[{ram_bar}] {ram_pct:.1f}%`\n"
+            f"• Total: `{hw.get('ram_total_mb', 0)} MB` ({ram_tot_gb} GB)\n"
+            f"• En Uso: `{hw.get('ram_used_mb', 0)} MB` ({ram_used_gb} GB)\n"
+            f"• Libre: `{hw.get('ram_free_mb', 0)} MB` ({ram_free_gb} GB)\n\n"
+            "🐧 *Sistema Operativo:*\n"
+            f"• Distro: `{os_info.get('name', 'Linux')}` ({os_info.get('version', '-')})\n"
+            f"• Kernel: `{os_info.get('kernel', '-')}`\n"
+            f"• Hostname: `{os_info.get('hostname', name)}`"
+        )
+
+    # 2. Submódulo: Red & Adaptadores
+    if sub in ("red", "net", "interfaces", "network"):
+        ifaces = net.get("interfaces", [])
+        lines = [
+            f"📡 *INVENTARIO DE RED Y ADAPTADORES [{aid}] - {name}*",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"• Tráfico Acumulado: `{net.get('total_rx_mb', 0.0)} MB RX` / `{net.get('total_tx_mb', 0.0)} MB TX`",
+            "",
+            "🔌 *Interfaces de Red Detectadas:*",
+        ]
+        for iface in ifaces:
+            st = "🟢 ACTIVA" if iface.get("state") == "up" else "⚪ INACTIVA"
+            rx = round(iface.get("rx_bytes", 0) / (1024 * 1024), 2)
+            tx = round(iface.get("tx_bytes", 0) / (1024 * 1024), 2)
+            mac = iface.get("mac", "-")
+            ipv4 = iface.get("ipv4") or "-"
+            lines.append(
+                f"• `{iface.get('name')}` ({st}):\n"
+                f"  MAC: `{mac}` | IPv4: `{ipv4}`\n"
+                f"  Tráfico: `{rx} MB RX` / `{tx} MB TX` (Paquetes: {iface.get('rx_packets', 0)} RX / {iface.get('tx_packets', 0)} TX)"
+            )
+        return "\n".join(lines)
+
+    # 3. Submódulo: SCA (CIS Benchmark)
+    if sub in ("sca", "cis", "seguridad", "compliance"):
+        score = sca.get("score", 0)
+        sca_bar = _render_bar(score)
+        failed_checks = sca.get("failed_checks", [])
+
+        lines = [
+            f"🔒 *POSTURA DE SEGURIDAD CIS BENCHMARK [{aid}] - {name}*",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"• Evaluación: *{sca.get('name', 'CIS Benchmark')}*",
+            f"• Política: `{sca.get('policy_id', 'cis')}`",
+            f"• Puntuación de Seguridad: `[{sca_bar}] {score}%`",
+            f"• Total Controles: `{sca.get('total_checks', 0)}`",
+            f"• Aprobados: `✅ {sca.get('pass', 0)}` | Fallados: `❌ {sca.get('fail', 0)}`",
+        ]
+        if failed_checks:
+            lines.append("\n🚨 *Principales Controles Fallados & Remediación:*")
+            for idx, c in enumerate(failed_checks[:5], 1):
+                lines.append(
+                    f"{idx}. *{c.get('title')}*\n"
+                    f"   _Motivo:_ {c.get('rationale')}\n"
+                    f"   🔧 _Remediación:_ `{c.get('remediation')}`"
+                )
+        return "\n".join(lines)
+
+    # 4. Submódulo: Procesos
+    if sub in ("procesos", "ps", "process"):
+        top_p = procs.get("top_processes", [])
+        lines = [
+            f"⚙️ *PROCESOS EN EJECUCIÓN [{aid}] - {name}*",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"• Total Procesos: `{procs.get('total_count', len(top_p))}`",
+            "",
+            "📋 *Top Procesos Activos:*",
+        ]
+        for pr in top_p[:12]:
+            u = pr.get("euser") or pr.get("user") or "root"
+            pid = pr.get("pid", 0)
+            pname = pr.get("name", "proceso")
+            cmd = (pr.get("cmd") or "")[:50]
+            cmd_snippet = f" (`{cmd}`)" if cmd and cmd != pname else ""
+            lines.append(f"• `[PID {pid}]` *{pname}* (Usuario: `{u}`){cmd_snippet}")
+        return "\n".join(lines)
+
+    # 5. Submódulo: Software y Paquetes
+    if sub in ("paquetes", "software", "pkg"):
+        sample_pkg = soft.get("sample_packages", [])
+        lines = [
+            f"📦 *INVENTARIO DE SOFTWARE [{aid}] - {name}*",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"• Total Paquetes Instalados: `{soft.get('total_packages', 0)}`",
+            "",
+            "📚 *Muestra de Paquetes:*",
+        ]
+        for p in sample_pkg[:10]:
+            lines.append(f"• *{p.get('name')}* `{p.get('version')}` ({p.get('vendor', 'Linux')})")
+        return "\n".join(lines)
+
+    # 6. Submódulo: FIM (Syscheck)
+    if sub in ("fim", "syscheck", "archivos"):
+        recent_f = fim.get("recent_files", [])
+        lines = [
+            f"📁 *INTEGRIDAD DE ARCHIVOS FIM [{aid}] - {name}*",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"• Archivos Monitoreados: `{fim.get('total_monitored', 0)}`",
+            "",
+            "📄 *Archivos Auditados Recientes:*",
+        ]
+        for f in recent_f[:8]:
+            sz = f.get("size", 0)
+            lines.append(f"• `{f.get('file')}` ({sz} B, perm `{f.get('perm')}`, usuario `{f.get('uname')}`)")
+        return "\n".join(lines)
+
+    # 7. Resumen Ejecutivo Completo (Default)
+    ram_pct = hw.get("ram_usage_percent", 0.0)
+    ram_bar = _render_bar(ram_pct)
+    sca_score = sca.get("score", 0)
+    sca_bar = _render_bar(sca_score)
+    status_ico = "🟢 ACTIVO" if "ACT" in status else "🔴 DESCONECTADO"
 
     lines = [
-        f"🖥️ *DIAGNÓSTICO DEL AGENTE [{aid}] - {name}*",
+        f"🖥️ *FICHA FORENSE DEL AGENTE [{aid}] - {name}*",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"• IP: `{ip}` | Estado: `{status}`",
-        f"• Sockets Totales: `{kpis.get('total_sockets', 0)}`",
-        f"• Puertos Escuchando: `{kpis.get('listening_sockets', 0)}`",
-        f"• Conexiones Establecidas: `{kpis.get('established_connections', 0)}`",
-        f"• Sitios Web / Destinos: `{kpis.get('total_sites', 0)}`",
-        f"• Interfaces Activas: `{kpis.get('active_interfaces', 0)}`",
-        f"• Ancho de Banda: `{kpis.get('total_rx_mb', 0.0)} MB RX / {kpis.get('total_tx_mb', 0.0)} MB TX`",
+        f"• Estado: {status_ico} | IP: `{ip}`",
+        f"• SO: `{os_info.get('name', 'Linux')}` ({os_info.get('version', '-')}) | Kernel: `{os_info.get('kernel', '-')}`",
+        f"• Hardware: `{hw.get('cpu_name', 'CPU')}` ({hw.get('cpu_cores', 1)} núcleos)",
+        f"• Memoria RAM: `[{ram_bar}] {ram_pct:.1f}%` ({hw.get('ram_used_mb', 0)} MB / {hw.get('ram_total_mb', 0)} MB)",
+        f"• Postura CIS (SCA): `[{sca_bar}] {sca_score}%` (✅ {sca.get('pass', 0)} / ❌ {sca.get('fail', 0)})",
+        f"• Tráfico Red: `{net.get('total_rx_mb', 0.0)} MB RX` / `{net.get('total_tx_mb', 0.0)} MB TX`",
+        f"• Procesos: `{procs.get('total_count', 0)}` | Paquetes: `{soft.get('total_packages', 0)}`",
     ]
 
     # Sitios y destinos del agente
-    sites = details.get("sites_activity", [])
     if sites:
         lines.append("\n🌐 *Sitios y Conexiones Web Activas:*")
-        for s in sites[:5]:
+        for s in sites[:4]:
             lines.append(f"• *{s['site_name']}* (`{s['remote_ip']}:{s['remote_port']}`) por `{s['process']}`")
 
-    # Interfaces
-    ifaces = details.get("ifaces", [])
-    if ifaces:
-        lines.append("\n📡 *Interfaces de Red:*")
-        for iface in ifaces[:4]:
-            st = "ACTIVA" if iface.get("state") == "up" else "INACTIVA"
-            rx = round(iface.get("rx_bytes", 0) / (1024 * 1024), 2)
-            tx = round(iface.get("tx_bytes", 0) / (1024 * 1024), 2)
-            lines.append(f"• `{iface.get('name')}` ({st}): {rx} MB RX / {tx} MB TX")
-
-    # Alertas recientes del agente
-    alerts = details.get("wazuh_detections", [])
+    # Alertas recientes
     if alerts:
         lines.append("\n🛡️ *Últimas Detecciones de Seguridad:*")
-        for al in alerts[:4]:
+        for al in alerts[:3]:
             lvl = al.get("level", 0)
             desc = al.get("description", "Evento de seguridad")
             lines.append(f"• `[L{lvl}]` #{al.get('rule_id')}: {desc}")
+
+    lines.append(
+        "\n💡 *Subcomandos disponibles:*\n"
+        f"`/agente {aid} hardware` · `/agente {aid} red` · `/agente {aid} sca`\n"
+        f"`/agente {aid} procesos` · `/agente {aid} paquetes` · `/agente {aid} fim`"
+    )
 
     return "\n".join(lines)
 
@@ -866,8 +1004,8 @@ def _get_help_menu() -> str:
         f"  Lista los sitios web y destinos navegados por los agentes en la red.\n\n"
         f"• `/agentes` o `/equipos`\n"
         f"  Lista los equipos conectados al SOC con su IP, SO y estado.\n\n"
-        f"• `/agente <id>`\n"
-        f"  Detalle exhaustivo de un agente (ej: `/agente 000` o `/agente 001`).\n\n"
+        f"• `/agente <id> [submódulo]`\n"
+        f"  Ficha forense de un equipo (ej: `/agente 001 hardware`, `red`, `sca`, `procesos`, `paquetes`, `fim`).\n\n"
         f"• `/alertas`\n"
         f"  Muestra las últimas alertas de seguridad procesadas en español.\n\n"
         f"• `/kpis` o `/metricas`\n"
@@ -909,8 +1047,9 @@ async def process_admin_command(text: str, source: str = "telegram") -> str:
         return await _get_agents_list_summary()
     elif cmd in ("/agente", "/equipo", "/agent"):
         if not arg:
-            return "ℹ️ Por favor especifica el ID del agente. Ejemplo: `/agente 000`"
-        return await _get_agent_detail_summary(arg)
+            return "ℹ️ Por favor especifica el ID del agente. Ejemplo: `/agente 000` o `/agente 000 hardware`"
+        sub_arg = parts[2].lower() if len(parts) > 2 else ""
+        return await _get_agent_detail_summary(arg, subcmd=sub_arg)
     elif cmd in ("/alertas", "/alerts"):
         limit = 5
         if arg.isdigit():
