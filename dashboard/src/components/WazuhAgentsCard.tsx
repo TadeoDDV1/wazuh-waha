@@ -14,9 +14,17 @@ import {
   Monitor,
   Loader2,
   FileText,
+  Network,
+  Globe,
+  Activity,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Radio,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { copyToClipboard } from '../utils/clipboard';
+import type { AgentTrafficDetails } from '../types/dashboard';
 
 interface Agent {
   id: string;
@@ -31,16 +39,29 @@ interface Agent {
   };
   dateAdd?: string;
   lastKeepAlive?: string;
+  traffic?: {
+    total_sockets: number;
+    established: number;
+    interfaces_count: number;
+    rx_mb: number;
+    tx_mb: number;
+  };
 }
 
-export const WazuhAgentsCard: React.FC = () => {
-  const { config } = useDashboardContext();
+interface WazuhAgentsCardProps {
+  initialWizardOpen?: boolean;
+}
+
+export const WazuhAgentsCard: React.FC<WazuhAgentsCardProps> = ({
+  initialWizardOpen = true,
+}) => {
+  const { config, setActiveView } = useDashboardContext();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Deployment Wizard State
-  const [showWizard, setShowWizard] = useState(false);
+  const [showWizard, setShowWizard] = useState(initialWizardOpen);
   const [targetOs, setTargetOs] = useState('deb');
   const [agentName, setAgentName] = useState('');
   const [agentIp, setAgentIp] = useState('');
@@ -49,6 +70,11 @@ export const WazuhAgentsCard: React.FC = () => {
   const [isRegisteringApi, setIsRegisteringApi] = useState(false);
   const [registeredKey, setRegisteredKey] = useState<string | null>(null);
   const [downloadingReportId, setDownloadingReportId] = useState<string | null>(null);
+
+  // Inline Traffic Inspection State
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
+  const [agentTraffic, setAgentTraffic] = useState<Record<string, AgentTrafficDetails>>({});
+  const [loadingTrafficFor, setLoadingTrafficFor] = useState<string | null>(null);
 
   // Initialize manager IP when config loads
   useEffect(() => {
@@ -80,6 +106,26 @@ export const WazuhAgentsCard: React.FC = () => {
     fetchAgents();
   }, []);
 
+  const toggleAgentTraffic = async (agentId: string) => {
+    if (expandedAgentId === agentId) {
+      setExpandedAgentId(null);
+      return;
+    }
+    setExpandedAgentId(agentId);
+    if (!agentTraffic[agentId]) {
+      setLoadingTrafficFor(agentId);
+      try {
+        const details = await dashboardService.getAgentTrafficDetails(agentId);
+        setAgentTraffic((prev) => ({ ...prev, [agentId]: details }));
+      } catch (err) {
+        console.error(`Error al cargar tráfico del agente ${agentId}:`, err);
+        toast.error(`No se pudo cargar la telemetría de tráfico del agente ${agentId}`);
+      } finally {
+        setLoadingTrafficFor(null);
+      }
+    }
+  };
+
   const getInstallCommand = () => {
     const ip = managerIp.trim() || '192.168.122.142';
     const nameStr = agentName.trim() ? `WAZUH_AGENT_NAME="${agentName.trim()}" ` : '';
@@ -87,35 +133,35 @@ export const WazuhAgentsCard: React.FC = () => {
 
     switch (targetOs) {
       case 'deb':
-        return `# 1. Descargar e instalar agente Wazuh (Ubuntu/Debian)
+        return `# 1. Descargar e instalar agente Wazuh v4.9 (Ubuntu / Debian / Kali / Linux Mint)
 curl -so wazuh-agent.deb https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.9.0-1_amd64.deb
 sudo WAZUH_MANAGER="${ip}" ${nameStr}${agentIpStr}dpkg -i ./wazuh-agent.deb
 sudo systemctl daemon-reload
 sudo systemctl enable --now wazuh-agent`;
 
       case 'arch':
-        return `# 1. Instalar agente en Arch Linux (AUR / Pacman)
+        return `# 1. Instalar agente en Arch Linux / Manjaro / EndeavourOS (AUR)
 yay -S wazuh-agent --noconfirm || paru -S wazuh-agent --noconfirm
-# 2. Registrar con el Manager y arrancar servicio
+# 2. Registrar con el Wazuh Manager (${ip}) y arrancar servicio
 sudo /var/ossec/bin/agent-auth -m "${ip}" ${agentName.trim() ? `-A "${agentName.trim()}"` : ''}
 sudo systemctl daemon-reload
 sudo systemctl enable --now wazuh-agent`;
 
       case 'rpm':
-        return `# 1. Descargar e instalar agente Wazuh (RHEL/CentOS/Rocky/Fedora)
+        return `# 1. Importar claves e instalar agente Wazuh (RHEL / CentOS / Rocky Linux / Fedora)
 sudo rpm --import https://packages.wazuh.com/key/GPG-KEY-WAZUH
 sudo WAZUH_MANAGER="${ip}" ${nameStr}${agentIpStr}yum install -y https://packages.wazuh.com/4.x/yum/wazuh-agent-4.9.0-1.x86_64.rpm
 sudo systemctl daemon-reload
 sudo systemctl enable --now wazuh-agent`;
 
       case 'windows':
-        return `# Ejecutar en PowerShell como Administrador
+        return `# Ejecutar en PowerShell como Administrador (Windows Server / Windows 10 / 11)
 Invoke-WebRequest -Uri https://packages.wazuh.com/4.x/windows/wazuh-agent-4.9.0-1.msi -OutFile \${env:tmp}\\wazuh-agent.msi
 msiexec.exe /i \${env:tmp}\\wazuh-agent.msi /q WAZUH_MANAGER="${ip}" WAZUH_REGISTRATION_SERVER="${ip}" ${nameStr}${agentIpStr}
 NET START Wazuh`;
 
       case 'macos':
-        return `# 1. Descargar e instalar paquete macOS
+        return `# 1. Descargar e instalar paquete macOS (Intel y Apple Silicon)
 curl -so wazuh-agent.pkg https://packages.wazuh.com/4.x/mac/wazuh-agent-4.9.0-1.pkg
 sudo WAZUH_MANAGER="${ip}" ${nameStr}${agentIpStr}installer -pkg wazuh-agent.pkg -target /
 sudo /Library/Ossec/bin/wazuh-control start`;
@@ -250,7 +296,7 @@ sudo /Library/Ossec/bin/wazuh-control start`;
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <h2 style={{ fontSize: '18px', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-                <span>Agentes Wazuh Registrados</span>
+                <span>Agentes Wazuh Registrados & Telemetría de Red</span>
               </h2>
               <span
                 style={{
@@ -267,7 +313,7 @@ sudo /Library/Ossec/bin/wazuh-control start`;
               </span>
             </div>
             <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>
-              <span>Monitorea tus endpoints conectados y utiliza el asistente para desplegar nuevos agentes en Linux, Windows o macOS.</span>
+              <span>Monitorea el tráfico de tus endpoints conectados y genera comandos listos para instalar agentes en Linux, Windows o macOS.</span>
             </p>
           </div>
         </div>
@@ -283,7 +329,7 @@ sudo /Library/Ossec/bin/wazuh-control start`;
               padding: '7px 14px',
               borderRadius: '8px',
               border: 'none',
-              background: showWizard ? 'var(--bg-card-hover)' : 'var(--cyan-accent)',
+              background: showWizard ? 'var(--bg-card-hover)' : 'linear-gradient(135deg, #00e5ff, #3b82f6)',
               color: showWizard ? 'var(--text-primary)' : '#000',
               cursor: 'pointer',
               fontWeight: 700,
@@ -293,7 +339,30 @@ sudo /Library/Ossec/bin/wazuh-control start`;
             }}
           >
             {showWizard ? <XCircle size={14} /> : <PlusCircle size={14} />}
-            <span>{showWizard ? 'Cerrar Asistente' : '➕ Añadir / Desplegar Agente'}</span>
+            <span>{showWizard ? 'Ocultar Generador' : '⚡ Generador de Comandos'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveView('network_agents')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(16, 185, 129, 0.15)',
+              color: '#34d399',
+              border: '1px solid rgba(16, 185, 129, 0.35)',
+              borderRadius: '8px',
+              padding: '7px 12px',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+            title="Abrir Terminal de Red & Agentes completa"
+          >
+            <Network size={14} />
+            <span>Terminal Red (LIVE)</span>
           </button>
 
           <button
@@ -320,82 +389,80 @@ sudo /Library/Ossec/bin/wazuh-control start`;
         </div>
       </div>
 
-      {/* ── Asistente de Despliegue de Agente ── */}
+      {/* ── Generador de Comandos de Instalación (Asistente Prominente) ── */}
       {showWizard && (
         <div
           style={{
             marginBottom: '24px',
-            padding: '20px',
-            background: 'var(--bg-surface)',
+            padding: '22px',
+            background: 'linear-gradient(180deg, rgba(13, 20, 36, 0.95), rgba(10, 15, 29, 0.98))',
             borderRadius: '12px',
-            border: '1px solid rgba(0, 229, 255, 0.3)',
-            boxShadow: '0 0 20px rgba(0, 229, 255, 0.1)',
+            border: '1px solid rgba(0, 229, 255, 0.35)',
+            boxShadow: '0 0 25px rgba(0, 229, 255, 0.12)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Terminal size={18} style={{ color: 'var(--cyan-accent)' }} />
-              <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--cyan-accent)' }}>
-                <span>Asistente de Despliegue e Instalación de Agentes</span>
-              </h4>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ background: 'rgba(0, 229, 255, 0.15)', padding: '6px', borderRadius: '8px' }}>
+                <Terminal size={20} style={{ color: 'var(--cyan-accent)' }} />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--cyan-accent)' }}>
+                  <span>Generador de Comandos para Nuevos Agentes Wazuh</span>
+                </h4>
+                <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  Selecciona el sistema operativo del endpoint, personaliza el nombre y copia el comando para pegarlo en la terminal del nuevo equipo.
+                </p>
+              </div>
             </div>
-            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-              <span>Wazuh Agent 4.9+ · Inscripción Automática</span>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.06)', padding: '4px 10px', borderRadius: '6px' }}>
+              <span>Wazuh v4.9 · Registro Automático en Puerto 1514</span>
             </span>
           </div>
 
-          {/* Form Grid */}
+          {/* OS Selector Tabs */}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
+            {[
+              { id: 'deb', label: '🐧 Ubuntu / Debian', desc: 'apt / dpkg' },
+              { id: 'arch', label: '🏔️ Arch Linux', desc: 'pacman / yay' },
+              { id: 'rpm', label: '🎩 RHEL / CentOS / Rocky', desc: 'yum / dnf' },
+              { id: 'windows', label: '🪟 Windows', desc: 'PowerShell Admin' },
+              { id: 'macos', label: '🍎 macOS', desc: 'pkg / terminal' },
+            ].map((os) => {
+              const isSelected = targetOs === os.id;
+              return (
+                <button
+                  key={os.id}
+                  type="button"
+                  onClick={() => setTargetOs(os.id)}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: isSelected ? '1px solid var(--cyan-accent)' : '1px solid var(--border-subtle)',
+                    background: isSelected ? 'rgba(0, 229, 255, 0.15)' : 'var(--bg-card)',
+                    color: isSelected ? 'var(--cyan-accent)' : 'var(--text-secondary)',
+                    fontWeight: isSelected ? 700 : 500,
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: '2px',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <span>{os.label}</span>
+                  <span style={{ fontSize: '10px', opacity: 0.7 }}>{os.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Parameters Form Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '16px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--text-primary)' }}>
-                <span>Sistema Operativo del Endpoint</span>
-              </label>
-              <select
-                value={targetOs}
-                onChange={(e) => setTargetOs(e.target.value)}
-                style={{
-                  width: '100%',
-                  background: 'var(--bg-card)',
-                  color: 'var(--text-primary)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '6px',
-                  padding: '7px 10px',
-                  fontSize: '12px',
-                }}
-              >
-                <option value="deb">🐧 Linux (Debian / Ubuntu / Kali / Mint)</option>
-                <option value="arch">🏔️ Linux (Arch Linux / Manjaro / EndeavourOS)</option>
-                <option value="rpm">🎩 Linux (RHEL / CentOS / Rocky / Fedora)</option>
-                <option value="windows">🪟 Windows (PowerShell Administrador)</option>
-                <option value="macos">🍎 macOS (Intel / Apple Silicon)</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--text-primary)' }}>
-                <span>Nombre del Agente (Opcional)</span>
-              </label>
-              <input
-                type="text"
-                placeholder="Ej. server-produccion-02"
-                value={agentName}
-                onChange={(e) => setAgentName(e.target.value)}
-                style={{
-                  width: '100%',
-                  background: 'var(--bg-card)',
-                  color: 'var(--text-primary)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '6px',
-                  padding: '7px 10px',
-                  fontSize: '12px',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--text-primary)' }}>
-                <span>IP del Wazuh Manager</span>
+                <span>IP / Host del Wazuh Manager</span>
               </label>
               <input
                 type="text"
@@ -408,7 +475,29 @@ sudo /Library/Ossec/bin/wazuh-control start`;
                   color: 'var(--text-primary)',
                   border: '1px solid var(--cyan-accent)',
                   borderRadius: '6px',
-                  padding: '7px 10px',
+                  padding: '8px 10px',
+                  fontSize: '12px',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--text-primary)' }}>
+                <span>Nombre del Agente (Opcional)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="Ej. pc-oficina-01 o srv-db"
+                value={agentName}
+                onChange={(e) => setAgentName(e.target.value)}
+                style={{
+                  width: '100%',
+                  background: 'var(--bg-card)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '6px',
+                  padding: '8px 10px',
                   fontSize: '12px',
                   boxSizing: 'border-box',
                 }}
@@ -421,7 +510,7 @@ sudo /Library/Ossec/bin/wazuh-control start`;
               </label>
               <input
                 type="text"
-                placeholder="Ej. any o 192.168.1.150"
+                placeholder="Ej. any o 192.168.1.50"
                 value={agentIp}
                 onChange={(e) => setAgentIp(e.target.value)}
                 style={{
@@ -430,7 +519,7 @@ sudo /Library/Ossec/bin/wazuh-control start`;
                   color: 'var(--text-primary)',
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '6px',
-                  padding: '7px 10px',
+                  padding: '8px 10px',
                   fontSize: '12px',
                   boxSizing: 'border-box',
                 }}
@@ -438,10 +527,10 @@ sudo /Library/Ossec/bin/wazuh-control start`;
             </div>
           </div>
 
-          {/* Quick Pre-register button */}
+          {/* Quick Pre-register Button */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
             <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-              <span>Consejo: El agente se registrará automáticamente en el Manager al ejecutar el comando con <code>WAZUH_MANAGER="{managerIp}"</code>.</span>
+              <span>Consejo: Al ejecutar el comando generado en el nuevo equipo, el daemon se registrará automáticamente en el Manager.</span>
             </span>
 
             <button
@@ -464,7 +553,7 @@ sudo /Library/Ossec/bin/wazuh-control start`;
               title="Registra previamente el nombre en el Manager vía API REST"
             >
               {isRegisteringApi ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
-              <span>Pre-registrar Agente en Manager</span>
+              <span>Pre-registrar Agente en Manager (Opcional)</span>
             </button>
           </div>
 
@@ -477,37 +566,39 @@ sudo /Library/Ossec/bin/wazuh-control start`;
 
           {/* Generated Command Box */}
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Terminal size={13} />
-                <span>Comando de Instalación en una sola línea</span>
+                <Terminal size={14} style={{ color: 'var(--cyan-accent)' }} />
+                <span>Comando de Instalación (Copiar y pegar en el nuevo equipo):</span>
               </label>
               <button
                 type="button"
                 onClick={handleCopy}
                 style={{
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  padding: '5px 12px',
-                  background: copied ? 'var(--green-healthy)' : 'var(--bg-card)',
-                  color: copied ? '#000' : 'var(--text-primary)',
-                  border: '1px solid var(--border-subtle)',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  padding: '6px 16px',
+                  background: copied ? 'var(--green-healthy)' : 'var(--cyan-accent)',
+                  color: '#000',
+                  border: 'none',
                   borderRadius: '6px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
+                  boxShadow: '0 0 12px rgba(0, 229, 255, 0.4)',
+                  transition: 'all 0.15s ease',
                 }}
               >
-                {copied ? <Check size={12} /> : <Copy size={12} />}
-                <span>{copied ? '¡Copiado!' : 'Copiar comando'}</span>
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+                <span>{copied ? '¡Comando Copiado!' : '📋 Copiar Comando de Instalación'}</span>
               </button>
             </div>
             <pre
               style={{
                 margin: 0,
-                padding: '14px 16px',
-                background: '#0d1117',
+                padding: '16px',
+                background: '#0a0d14',
                 color: '#58a6ff',
                 borderRadius: '8px',
                 fontSize: '12px',
@@ -515,8 +606,8 @@ sudo /Library/Ossec/bin/wazuh-control start`;
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-all',
                 fontFamily: 'monospace',
-                border: '1px solid rgba(255,255,255,0.08)',
-                lineHeight: 1.5,
+                border: '1px solid rgba(0, 229, 255, 0.25)',
+                lineHeight: 1.6,
               }}
             >
               <span>{getInstallCommand()}</span>
@@ -546,7 +637,7 @@ sudo /Library/Ossec/bin/wazuh-control start`;
       {loading && !agents.length ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '30px', gap: '10px', color: 'var(--text-secondary)' }}>
           <Loader2 size={20} className="animate-spin" />
-          <span>Consultando agentes en Wazuh Manager API...</span>
+          <span>Consultando agentes y sockets de red en Wazuh Manager...</span>
         </div>
       ) : agents.length === 0 ? (
         <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '10px 0' }}>
@@ -561,7 +652,7 @@ sudo /Library/Ossec/bin/wazuh-control start`;
                 <th style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontWeight: 600 }}><span>Nombre</span></th>
                 <th style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontWeight: 600 }}><span>IP Endpoint</span></th>
                 <th style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontWeight: 600 }}><span>Sistema Operativo</span></th>
-                <th style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontWeight: 600 }}><span>Versión Agente</span></th>
+                <th style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontWeight: 600 }}><span>📡 Tráfico de Red</span></th>
                 <th style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontWeight: 600 }}><span>Estado</span></th>
                 <th style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontWeight: 600, textAlign: 'right' }}><span>Acciones</span></th>
               </tr>
@@ -570,107 +661,355 @@ sudo /Library/Ossec/bin/wazuh-control start`;
               {agents.map((a) => {
                 const isActive = a.status === 'active';
                 const osLabel = a.os?.name ? `${a.os.name} ${a.os.version || ''}`.trim() : (a.id === '000' ? 'Ubuntu (Manager)' : 'Linux / Unix');
+                const isExpanded = expandedAgentId === a.id;
+                const details = agentTraffic[a.id];
+                const tr = a.traffic;
+
                 return (
-                  <tr key={a.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                    <td style={{ padding: '10px 12px' }}>
-                      <code style={{ background: 'rgba(52, 152, 219, 0.12)', color: 'var(--cyan-accent)', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, fontSize: '11px' }}>
-                        <span>{a.id}</span>
-                      </code>
-                    </td>
-                    <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Monitor size={14} style={{ color: 'var(--cyan-accent)' }} />
-                        <span>{a.name}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
-                      <span>{a.ip || 'any'}</span>
-                    </td>
-                    <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
-                      <span>{osLabel}</span>
-                    </td>
-                    <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
-                      <span>{a.version || 'Wazuh 4.9.0'}</span>
-                    </td>
-                    <td style={{ padding: '10px 12px' }}>
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '3px 10px',
-                          borderRadius: '12px',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          background: isActive ? 'rgba(46, 204, 113, 0.15)' : 'rgba(231, 76, 60, 0.15)',
-                          color: isActive ? 'var(--green-healthy)' : 'var(--red-error)',
-                          border: `1px solid ${isActive ? 'rgba(46, 204, 113, 0.3)' : 'rgba(231, 76, 60, 0.3)'}`,
-                        }}
-                      >
+                  <React.Fragment key={a.id}>
+                    <tr
+                      style={{
+                        borderBottom: isExpanded ? 'none' : '1px solid rgba(255,255,255,0.04)',
+                        background: isExpanded ? 'rgba(0, 229, 255, 0.04)' : 'transparent',
+                        transition: 'background 0.2s',
+                      }}
+                    >
+                      <td style={{ padding: '10px 12px' }}>
+                        <code style={{ background: 'rgba(52, 152, 219, 0.12)', color: 'var(--cyan-accent)', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, fontSize: '11px' }}>
+                          <span>{a.id}</span>
+                        </code>
+                      </td>
+                      <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Monitor size={14} style={{ color: 'var(--cyan-accent)' }} />
+                          <span>{a.name}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                        <span>{a.ip || 'any'}</span>
+                      </td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
+                        <span>{osLabel}</span>
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                background: tr && tr.total_sockets > 0 ? 'rgba(0, 229, 255, 0.12)' : 'rgba(255, 255, 255, 0.06)',
+                                color: tr && tr.total_sockets > 0 ? 'var(--cyan-accent)' : 'var(--text-secondary)',
+                                border: '1px solid rgba(0, 229, 255, 0.25)',
+                              }}
+                            >
+                              📡 {tr ? `${tr.total_sockets} sockets` : 'Sockets activos'}
+                            </span>
+                            {tr && tr.established > 0 && (
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  background: 'rgba(46, 204, 113, 0.12)',
+                                  color: 'var(--green-healthy)',
+                                }}
+                              >
+                                {tr.established} activas
+                              </span>
+                            )}
+                          </div>
+                          {tr && (tr.rx_mb > 0 || tr.tx_mb > 0) && (
+                            <span style={{ fontSize: '10px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                              ↓ {tr.rx_mb} MB · ↑ {tr.tx_mb} MB
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
                         <span
                           style={{
-                            width: '6px',
-                            height: '6px',
-                            borderRadius: '50%',
-                            background: isActive ? 'var(--green-healthy)' : 'var(--red-error)',
-                            display: 'inline-block',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '3px 10px',
+                            borderRadius: '12px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            background: isActive ? 'rgba(46, 204, 113, 0.15)' : 'rgba(231, 76, 60, 0.15)',
+                            color: isActive ? 'var(--green-healthy)' : 'var(--red-error)',
+                            border: `1px solid ${isActive ? 'rgba(46, 204, 113, 0.3)' : 'rgba(231, 76, 60, 0.3)'}`,
                           }}
-                        />
-                        <span>{isActive ? 'Activo' : 'Desconectado'}</span>
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleDownloadReport(a.id, a.name)}
-                        disabled={downloadingReportId === a.id}
-                        style={{
-                          background: 'rgba(168, 85, 247, 0.15)',
-                          border: '1px solid rgba(168, 85, 247, 0.35)',
-                          color: '#c084fc',
-                          cursor: downloadingReportId === a.id ? 'wait' : 'pointer',
-                          padding: '4px 10px',
-                          borderRadius: '6px',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '5px',
-                          marginRight: '8px',
-                          transition: 'all 0.2s',
-                        }}
-                        title={`Generar y descargar ficha forense PDF del agente ${a.id}`}
-                      >
-                        {downloadingReportId === a.id ? (
-                          <Loader2 size={12} className="animate-spin" />
-                        ) : (
-                          <FileText size={12} />
-                        )}
-                        <span>Reporte PDF</span>
-                      </button>
-                      {a.id !== '000' && (
+                        >
+                          <span
+                            style={{
+                              width: '6px',
+                              height: '6px',
+                              borderRadius: '50%',
+                              background: isActive ? 'var(--green-healthy)' : 'var(--red-error)',
+                              display: 'inline-block',
+                            }}
+                          />
+                          <span>{isActive ? 'Activo' : 'Desconectado'}</span>
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                        {/* Ver Tráfico en vivo / Inspeccionar */}
                         <button
                           type="button"
-                          onClick={() => handleDeleteAgent(a.id, a.name)}
+                          onClick={() => toggleAgentTraffic(a.id)}
                           style={{
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--text-muted)',
+                            background: isExpanded ? 'rgba(0, 229, 255, 0.25)' : 'rgba(0, 229, 255, 0.1)',
+                            border: '1px solid rgba(0, 229, 255, 0.3)',
+                            color: 'var(--cyan-accent)',
                             cursor: 'pointer',
-                            padding: '4px',
-                            borderRadius: '4px',
-                            transition: 'color 0.2s',
-                            verticalAlign: 'middle',
+                            padding: '4px 9px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            marginRight: '6px',
+                            transition: 'all 0.15s',
                           }}
-                          title={`Eliminar agente ${a.id} del Manager`}
-                          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--red-error)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+                          title="Inspeccionar sockets y sitios de red en vivo"
                         >
-                          <Trash2 size={15} />
+                          {loadingTrafficFor === a.id ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <Activity size={12} />
+                          )}
+                          <span>{isExpanded ? 'Ocultar' : '🔍 Tráfico'}</span>
+                          {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                         </button>
-                      )}
-                    </td>
-                  </tr>
+
+                        {/* Terminal directa */}
+                        <button
+                          type="button"
+                          onClick={() => setActiveView('network_agents')}
+                          style={{
+                            background: 'rgba(16, 185, 129, 0.1)',
+                            border: '1px solid rgba(16, 185, 129, 0.3)',
+                            color: '#34d399',
+                            cursor: 'pointer',
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            marginRight: '6px',
+                          }}
+                          title="Abrir este agente en la Terminal de Red interactiva"
+                        >
+                          <Network size={12} />
+                          <span>Terminal</span>
+                        </button>
+
+                        {/* Reporte PDF */}
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadReport(a.id, a.name)}
+                          disabled={downloadingReportId === a.id}
+                          style={{
+                            background: 'rgba(168, 85, 247, 0.15)',
+                            border: '1px solid rgba(168, 85, 247, 0.35)',
+                            color: '#c084fc',
+                            cursor: downloadingReportId === a.id ? 'wait' : 'pointer',
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            marginRight: '6px',
+                            transition: 'all 0.2s',
+                          }}
+                          title={`Generar y descargar ficha forense PDF del agente ${a.id}`}
+                        >
+                          {downloadingReportId === a.id ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <FileText size={12} />
+                          )}
+                          <span>PDF</span>
+                        </button>
+
+                        {a.id !== '000' && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAgent(a.id, a.name)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                              padding: '4px',
+                              borderRadius: '4px',
+                              transition: 'color 0.2s',
+                              verticalAlign: 'middle',
+                            }}
+                            title={`Eliminar agente ${a.id} del Manager`}
+                            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--red-error)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+
+                    {/* Inline Drawer de Tráfico y Conexiones del Agente */}
+                    {isExpanded && (
+                      <tr style={{ background: 'rgba(13, 20, 36, 0.65)', borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td colSpan={7} style={{ padding: '16px 20px' }}>
+                          {loadingTrafficFor === a.id ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--cyan-accent)', padding: '12px 0' }}>
+                              <Loader2 size={16} className="animate-spin" />
+                              <span>Cargando sockets activos y destinos de red del agente [{a.id}] {a.name}...</span>
+                            </div>
+                          ) : details ? (
+                            <div>
+                              {/* KPI Bar */}
+                              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '14px', alignItems: 'center' }}>
+                                <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <Radio size={14} style={{ color: 'var(--green-healthy)' }} />
+                                  <span>Tráfico en Vivo de [{a.id}] {a.name}:</span>
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--cyan-accent)', background: 'rgba(0, 229, 255, 0.1)', padding: '3px 8px', borderRadius: '4px' }}>
+                                  Total Sockets: <strong>{details.kpis?.total_sockets ?? details.ports?.length ?? 0}</strong>
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--green-healthy)', background: 'rgba(46, 204, 113, 0.1)', padding: '3px 8px', borderRadius: '4px' }}>
+                                  Conexiones Establecidas: <strong>{details.kpis?.established_connections ?? 0}</strong>
+                                </div>
+                                <div style={{ fontSize: '11px', color: '#c084fc', background: 'rgba(168, 85, 247, 0.1)', padding: '3px 8px', borderRadius: '4px' }}>
+                                  Sitios & Destinos: <strong>{details.sites_activity?.length ?? 0}</strong>
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                                  Ancho de Banda: <strong>{details.kpis?.total_rx_mb ?? 0} MB RX / {details.kpis?.total_tx_mb ?? 0} MB TX</strong>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveView('network_agents')}
+                                  style={{
+                                    marginLeft: 'auto',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    background: 'none',
+                                    border: '1px solid rgba(0, 229, 255, 0.3)',
+                                    color: 'var(--cyan-accent)',
+                                    padding: '3px 8px',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                  }}
+                                >
+                                  <span>Ver en Terminal Completa</span>
+                                  <ExternalLink size={11} />
+                                </button>
+                              </div>
+
+                              {/* Active Sites / Destinations Chips */}
+                              <div style={{ marginBottom: '12px' }}>
+                                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                                  Sitios Web y Destinos de Red Detectados:
+                                </div>
+                                {details.sites_activity && details.sites_activity.length > 0 ? (
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '8px' }}>
+                                    {details.sites_activity.slice(0, 8).map((site, sIdx) => (
+                                      <div
+                                        key={sIdx}
+                                        style={{
+                                          background: 'rgba(0, 0, 0, 0.4)',
+                                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                                          borderRadius: '6px',
+                                          padding: '7px 10px',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                          gap: '8px',
+                                        }}
+                                      >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                                          <Globe size={13} style={{ color: site.is_web ? 'var(--cyan-accent)' : '#a855f7', flexShrink: 0 }} />
+                                          <div style={{ overflow: 'hidden' }}>
+                                            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                              {site.site_name}
+                                            </div>
+                                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                                              {site.remote_ip}:{site.remote_port} · {site.process || 'app'}
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <span
+                                          style={{
+                                            fontSize: '9px',
+                                            fontWeight: 700,
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            background: site.state === 'recent' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(46, 204, 113, 0.15)',
+                                            color: site.state === 'recent' ? 'var(--text-secondary)' : 'var(--green-healthy)',
+                                            flexShrink: 0,
+                                          }}
+                                        >
+                                          {site.state_label || site.state}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                                    No hay conexiones web externas registradas en este momento.
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Sockets Preview */}
+                              <div>
+                                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                                  Puertos y Sockets en Escucha / Activos:
+                                </div>
+                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                  {(details.ports || [])
+                                    .filter((p) => p.local_port > 0)
+                                    .slice(0, 14)
+                                    .map((p, pIdx) => (
+                                      <span
+                                        key={pIdx}
+                                        style={{
+                                          fontSize: '10px',
+                                          fontFamily: 'monospace',
+                                          background: 'rgba(255, 255, 255, 0.05)',
+                                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                                          borderRadius: '4px',
+                                          padding: '2px 7px',
+                                          color: p.state === 'listening' ? '#fbbf24' : 'var(--cyan-accent)',
+                                        }}
+                                        title={`${p.protocol} ${p.local_ip}:${p.local_port} -> ${p.remote_ip}:${p.remote_port} (${p.process})`}
+                                      >
+                                        {p.protocol} :{p.local_port} ({p.process || 'sys'})
+                                      </span>
+                                    ))}
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                              No hay datos de telemetría de red disponibles para este agente.
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </tbody>

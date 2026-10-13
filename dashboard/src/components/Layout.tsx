@@ -8,6 +8,7 @@ import SettingsSection from './SettingsSection';
 import LiveTrafficTerminal from './LiveTrafficTerminal';
 import NetworkAgentsTerminal from './NetworkAgentsTerminal';
 import { ReportsCard } from './ReportsCard';
+import { WazuhAgentsCard } from './WazuhAgentsCard';
 import LoginScreen from './LoginScreen';
 import { Toaster } from 'sonner';
 import { useDashboardContext } from '../context/DashboardContext';
@@ -51,6 +52,18 @@ const LayoutContent: React.FC = () => {
               </p>
             </div>
             <ReportsCard />
+          </div>
+        ) : activeView === 'deploy' ? (
+          <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px 24px 50px' }}>
+            <div style={{ marginBottom: '20px' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '24px' }}>⚡</span> Asistente y Generador de Comandos de Despliegue de Agentes
+              </h2>
+              <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                Genera de inmediato el comando de instalación para cualquier sistema operativo (Linux Ubuntu/Debian, Arch Linux, RHEL/CentOS, Windows o macOS). Al ejecutarlo en el endpoint, se conectará al Wazuh Manager y enviará telemetría de red.
+              </p>
+            </div>
+            <WazuhAgentsCard initialWizardOpen={true} />
           </div>
         ) : (
           <Dashboard />

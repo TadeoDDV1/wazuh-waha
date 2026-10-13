@@ -21,6 +21,7 @@ import {
   TerminalSquare,
   Network,
   FileText,
+  Terminal,
 } from 'lucide-react';
 
 function formatUptime(sec: number): string {
@@ -236,6 +237,33 @@ export const Navbar: React.FC = () => {
             >
               <FileText size={14} style={{ color: activeView === 'reports' ? '#c084fc' : 'currentColor' }} />
               <span>Reportes Forenses (PDF)</span>
+            </button>
+
+            <button
+              type="button"
+              className={`nav-tab-btn ${activeView === 'deploy' ? 'active' : ''}`}
+              onClick={() => setActiveView('deploy')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: activeView === 'deploy' ? 700 : 500,
+                border: activeView === 'deploy' ? '1px solid #38bdf8' : '1px solid transparent',
+                background: activeView === 'deploy'
+                  ? 'linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(14, 165, 233, 0.3))'
+                  : 'transparent',
+                color: activeView === 'deploy' ? '#38bdf8' : 'var(--text-secondary)',
+                boxShadow: activeView === 'deploy' ? '0 0 16px rgba(56, 189, 248, 0.4)' : 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              title="Generador de Comandos y Asistente de Despliegue de Nuevos Agentes Wazuh"
+            >
+              <Terminal size={14} style={{ color: activeView === 'deploy' ? '#38bdf8' : 'currentColor' }} />
+              <span>⚡ Desplegar Agente</span>
             </button>
           </div>
 

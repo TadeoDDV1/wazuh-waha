@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import socket
+import sqlite3
 import time
 from typing import Any
 
@@ -947,8 +948,116 @@ def _get_agent_wazuh_alerts(agent_id: str = "all", max_items: int = 40) -> list[
     return alerts
 
 
+_AGENT_TRAFFIC_CACHE: dict[str, tuple[dict[str, Any], float]] = {}
+_AGENT_TRAFFIC_CACHE_TTL = 6.0  # 6 segundos de caché para deduplicar llamadas del dashboard
+
+
+def _read_agent_queue_db(aid: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Lee syscollector (sockets, interfaces y procesos) directamente de /var/ossec/queue/db/{aid}.db.
+    Es de ultra-baja latencia (<2ms), en modo solo lectura (mode=ro) y evita completamente bloqueos
+    de SQLite o timeouts 500 (error 3021) en la API REST de Wazuh."""
+    db_path = f"/var/ossec/queue/db/{aid}.db"
+    if not os.path.exists(db_path):
+        return [], [], []
+
+    raw_ports: list[dict[str, Any]] = []
+    raw_ifaces: list[dict[str, Any]] = []
+    raw_procs: list[dict[str, Any]] = []
+
+    try:
+        uri = f"file:{db_path}?mode=ro"
+        with sqlite3.connect(uri, uri=True, timeout=1.5) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # 1. Sockets y puertos
+            try:
+                cursor.execute(
+                    "SELECT protocol, local_ip, local_port, remote_ip, remote_port, process, PID as pid, state, tx_queue, rx_queue FROM sys_ports"
+                )
+                for r in cursor.fetchall():
+                    raw_ports.append({
+                        "protocol": (r["protocol"] or "tcp").upper(),
+                        "local": {"ip": r["local_ip"], "port": r["local_port"]},
+                        "remote": {"ip": r["remote_ip"], "port": r["remote_port"]},
+                        "local_ip": r["local_ip"],
+                        "local_port": r["local_port"],
+                        "remote_ip": r["remote_ip"],
+                        "remote_port": r["remote_port"],
+                        "process": r["process"] or "sistema",
+                        "pid": r["pid"],
+                        "state": r["state"] or "listening",
+                        "tx": {"packets": r["tx_queue"] or 0},
+                        "rx": {"packets": r["rx_queue"] or 0},
+                        "_agent_id": aid,
+                    })
+            except Exception:
+                pass
+
+            # 2. Interfaces de Red
+            try:
+                cursor.execute(
+                    "SELECT name, adapter, type, state, mtu, mac, tx_packets, rx_packets, tx_bytes, rx_bytes, tx_errors, rx_errors, tx_dropped, rx_dropped FROM sys_netiface"
+                )
+                for r in cursor.fetchall():
+                    raw_ifaces.append({
+                        "name": r["name"] or "eth0",
+                        "state": str(r["state"] or "down").lower(),
+                        "mac": r["mac"] or "-",
+                        "mtu": r["mtu"] or 1500,
+                        "type": r["type"] or "ethernet",
+                        "tx": {
+                            "bytes": r["tx_bytes"] or 0,
+                            "packets": r["tx_packets"] or 0,
+                            "errors": r["tx_errors"] or 0,
+                            "drops": r["tx_dropped"] or 0,
+                        },
+                        "rx": {
+                            "bytes": r["rx_bytes"] or 0,
+                            "packets": r["rx_packets"] or 0,
+                            "errors": r["rx_errors"] or 0,
+                            "drops": r["rx_dropped"] or 0,
+                        },
+                        "tx_bytes": r["tx_bytes"] or 0,
+                        "rx_bytes": r["rx_bytes"] or 0,
+                        "_agent_id": aid,
+                    })
+            except Exception:
+                pass
+
+            # 3. Procesos
+            try:
+                cursor.execute(
+                    "SELECT PID as pid, name, cmd, euser, state FROM sys_processes LIMIT 200"
+                )
+                for r in cursor.fetchall():
+                    raw_procs.append({
+                        "pid": r["pid"] or 0,
+                        "name": r["name"] or "proceso",
+                        "cmd": r["cmd"] or "",
+                        "euser": r["euser"] or "root",
+                        "state": r["state"] or "running",
+                        "_agent_id": aid,
+                    })
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return raw_ports, raw_ifaces, raw_procs
+
+
 async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
     """Obtiene sockets activos enriquecidos con sitios web, interfaces, procesos y alertas."""
+    agent_id_str = str(agent_id).strip()
+
+    # Comprobar caché en memoria para evitar saturación ante múltiples llamadas simultáneas
+    now_t = time.time()
+    if agent_id_str in _AGENT_TRAFFIC_CACHE:
+        cached_val, cached_ts = _AGENT_TRAFFIC_CACHE[agent_id_str]
+        if now_t - cached_ts < _AGENT_TRAFFIC_CACHE_TTL:
+            return cached_val
+
     from ..config import settings
     from ..infrastructure.notifier import _get_token
     import httpx
@@ -958,7 +1067,6 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
     verify = settings.wazuh_manager_api_verify_tls
 
     all_agents = await _fetch_network_agents_data()
-    agent_id_str = str(agent_id).strip()
 
     # Determinar qué agentes consultar
     if agent_id_str == "all":
@@ -974,59 +1082,68 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
     all_raw_ifaces: list[dict[str, Any]] = []
     all_raw_procs: list[dict[str, Any]] = []
 
-    # Consultar API de Wazuh si está disponible
-    if mgr_host and settings.wazuh_manager_api_pass:
+    # 1. Intentar primero lectura directa ultra-rápida de /var/ossec/queue/db/{aid}.db
+    remaining_agents_to_api: list[dict[str, Any]] = []
+    for ag in target_agents:
+        aid = str(ag.get("id", "000"))
+        ag_name = ag.get("name", "host")
+        ag_ip = ag.get("ip", "127.0.0.1")
+
+        p_list, i_list, pr_list = _read_agent_queue_db(aid)
+        if p_list or i_list or pr_list:
+            for p in p_list:
+                p["_agent_name"] = ag_name
+                p["_agent_ip"] = ag_ip
+            for i in i_list:
+                i["_agent_name"] = ag_name
+                i["_agent_ip"] = ag_ip
+            for pr in pr_list:
+                pr["_agent_name"] = ag_name
+
+            all_raw_ports.extend(p_list)
+            all_raw_ifaces.extend(i_list)
+            all_raw_procs.extend(pr_list)
+        else:
+            remaining_agents_to_api.append(ag)
+
+    # 2. Si algún agente no tiene archivo DB local, consultar API REST de forma secuencial segura
+    if remaining_agents_to_api and mgr_host and settings.wazuh_manager_api_pass:
         try:
-            async with httpx.AsyncClient(timeout=12.0, verify=verify) as client:
+            async with httpx.AsyncClient(timeout=10.0, verify=verify) as client:
                 token = await _get_token(client)
                 if token:
                     headers = {"Authorization": f"Bearer {token}"}
-
-                    async def fetch_one_agent_syscollector(ag_dict: dict[str, Any]):
+                    for ag_dict in remaining_agents_to_api:
                         aid = str(ag_dict.get("id", "000"))
                         ag_name = ag_dict.get("name", "host")
                         ag_ip = ag_dict.get("ip", "127.0.0.1")
 
-                        req_ports = client.get(f"{base}/syscollector/{aid}/ports?limit=500", headers=headers)
-                        req_iface = client.get(f"{base}/syscollector/{aid}/netiface", headers=headers)
-                        req_procs = client.get(f"{base}/syscollector/{aid}/processes?limit=100", headers=headers)
+                        async def safe_fetch(path: str) -> list[dict[str, Any]]:
+                            try:
+                                r = await client.get(f"{base}{path}", headers=headers, timeout=8.0)
+                                if r.is_success:
+                                    return r.json().get("data", {}).get("affected_items", [])
+                            except Exception:
+                                pass
+                            return []
 
-                        r_p, r_i, r_pr = await asyncio.gather(req_ports, req_iface, req_procs, return_exceptions=True)
+                        raw_p = await safe_fetch(f"/syscollector/{aid}/ports?limit=500")
+                        for p in raw_p:
+                            p["_agent_id"] = aid
+                            p["_agent_name"] = ag_name
+                            p["_agent_ip"] = ag_ip
+                        all_raw_ports.extend(raw_p)
 
-                        raw_p, raw_i, raw_pr = [], [], []
-                        if isinstance(r_p, httpx.Response) and r_p.is_success:
-                            items = r_p.json().get("data", {}).get("affected_items", [])
-                            for p in items:
-                                p["_agent_id"] = aid
-                                p["_agent_name"] = ag_name
-                                p["_agent_ip"] = ag_ip
-                            raw_p = items
+                        raw_i = await safe_fetch(f"/syscollector/{aid}/netiface")
+                        for iface in raw_i:
+                            iface["_agent_id"] = aid
+                            iface["_agent_name"] = ag_name
+                        all_raw_ifaces.extend(raw_i)
 
-                        if isinstance(r_i, httpx.Response) and r_i.is_success:
-                            items = r_i.json().get("data", {}).get("affected_items", [])
-                            for iface in items:
-                                iface["_agent_id"] = aid
-                                iface["_agent_name"] = ag_name
-                            raw_i = items
-
-                        if isinstance(r_pr, httpx.Response) and r_pr.is_success:
-                            items = r_pr.json().get("data", {}).get("affected_items", [])
-                            for pr in items:
-                                pr["_agent_id"] = aid
-                            raw_pr = items
-
-                        return raw_p, raw_i, raw_pr
-
-                    agent_results = await asyncio.gather(
-                        *[fetch_one_agent_syscollector(ag) for ag in target_agents],
-                        return_exceptions=True,
-                    )
-                    for res in agent_results:
-                        if isinstance(res, tuple) and len(res) == 3:
-                            p_list, i_list, pr_list = res
-                            all_raw_ports.extend(p_list)
-                            all_raw_ifaces.extend(i_list)
-                            all_raw_procs.extend(pr_list)
+                        raw_pr = await safe_fetch(f"/syscollector/{aid}/processes?limit=100")
+                        for pr in raw_pr:
+                            pr["_agent_id"] = aid
+                        all_raw_procs.extend(raw_pr)
         except Exception:
             pass
 
@@ -1236,7 +1353,7 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
     active_ifaces_count = sum(1 for i in normalized_ifaces if i["state"] == "up")
     web_sites_count = sum(1 for s in sites_activity if s.get("is_web"))
 
-    return {
+    result = {
         "ok": True,
         "agent_id": agent_id_str,
         "agent_info": agent_info,
@@ -1258,6 +1375,8 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
         "wazuh_detections": wazuh_alerts,
         "timestamp": time.time(),
     }
+    _AGENT_TRAFFIC_CACHE[agent_id_str] = (result, time.time())
+    return result
 
 
 def _get_local_hardware_fallback() -> dict[str, Any]:

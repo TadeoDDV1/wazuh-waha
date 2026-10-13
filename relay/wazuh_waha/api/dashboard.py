@@ -1759,6 +1759,26 @@ async def get_wazuh_agents(request: Request, _: None = Depends(verify_api_key)):
             if r.is_success:
                 data = r.json()
                 agents = data.get("data", {}).get("affected_items", [])
+
+                # Enriquecer cada agente con telemetría de tráfico en vivo
+                try:
+                    from .telemetry import _read_agent_queue_db
+                    for ag in agents:
+                        aid = str(ag.get("id", "000"))
+                        p_list, i_list, _ = _read_agent_queue_db(aid)
+                        rx_b = sum(i.get("rx_bytes", 0) for i in i_list)
+                        tx_b = sum(i.get("tx_bytes", 0) for i in i_list)
+                        estab_c = sum(1 for p in p_list if "estab" in str(p.get("state", "")).lower())
+                        ag["traffic"] = {
+                            "total_sockets": len(p_list),
+                            "established": estab_c,
+                            "interfaces_count": len(i_list),
+                            "rx_mb": round(rx_b / (1024 * 1024), 2),
+                            "tx_mb": round(tx_b / (1024 * 1024), 2),
+                        }
+                except Exception:
+                    pass
+
                 return {"agents": agents}
             else:
                 return {"error": f"Error de Wazuh API: {r.status_code} {r.text[:100]}"}
