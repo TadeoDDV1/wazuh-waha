@@ -363,6 +363,42 @@ async def send_document(
         return False
 
 
+async def send_photo(
+    photo_bytes: bytes,
+    filename: str = "image.png",
+    caption: str = "",
+    chat_id: str | None = None,
+    token: str | None = None,
+) -> bool:
+    """Envía una imagen/foto (como el código QR de WAHA) a Telegram."""
+    tk = token or getattr(settings, "telegram_bot_token", "")
+    cid = chat_id or getattr(settings, "telegram_chat_id", "")
+    if not tk or not cid:
+        log.debug("telegram_send_photo_skipped (token o chat_id vacio)")
+        return False
+
+    url = _bot_url("sendPhoto", tk)
+    data: dict[str, Any] = {"chat_id": cid}
+    if caption:
+        data["caption"] = caption[:1024]
+        data["parse_mode"] = "Markdown"
+
+    files = {
+        "photo": (filename, photo_bytes, "image/png")
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(url, data=data, files=files)
+            if resp.is_success:
+                return True
+            log.warning("telegram_send_photo_fail status=%d body=%r", resp.status_code, resp.text[:200])
+            return False
+    except Exception as e:
+        log.warning("telegram_send_photo_err err=%s", e)
+        return False
+
+
 async def get_updates(token: str | None = None, offset: int = 0, timeout: int = 5) -> list[dict]:
     """Lee updates pendientes vía long polling."""
     tk = token or settings.telegram_bot_token
@@ -726,7 +762,7 @@ def _render_bar(pct: float, length: int = 8) -> str:
     return "█" * filled + "░" * (length - filled)
 
 
-async def _get_agent_detail_summary(agent_id: str, subcmd: str = "") -> str:
+async def _get_agent_detail_summary(agent_id: str, subcmd: str = "", extra_arg: str = "") -> str:
     """Devuelve diagnóstico profundo y forense de un agente con soporte para submódulos."""
     aid = str(agent_id).strip()
     sub = str(subcmd or "").strip().lower()
@@ -819,7 +855,7 @@ async def _get_agent_detail_summary(agent_id: str, subcmd: str = "") -> str:
         ]
         if failed_checks:
             lines.append("\n🚨 *Principales Controles Fallados & Remediación:*")
-            for idx, c in enumerate(failed_checks[:5], 1):
+            for idx, c in enumerate(failed_checks[:6], 1):
                 lines.append(
                     f"{idx}. *{c.get('title')}*\n"
                     f"   _Motivo:_ {c.get('rationale')}\n"
@@ -849,14 +885,19 @@ async def _get_agent_detail_summary(agent_id: str, subcmd: str = "") -> str:
     # 5. Submódulo: Software y Paquetes
     if sub in ("paquetes", "software", "pkg"):
         sample_pkg = soft.get("sample_packages", [])
+        if extra_arg:
+            q = extra_arg.lower()
+            sample_pkg = [p for p in sample_pkg if q in p.get("name", "").lower() or q in p.get("vendor", "").lower()]
         lines = [
             f"📦 *INVENTARIO DE SOFTWARE [{aid}] - {name}*",
             "━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"• Total Paquetes Instalados: `{soft.get('total_packages', 0)}`",
+            f"• Total Paquetes Registrados: `{soft.get('total_packages', 0)}`" + (f" (Filtro '{extra_arg}': {len(sample_pkg)})" if extra_arg else ""),
             "",
             "📚 *Muestra de Paquetes:*",
         ]
-        for p in sample_pkg[:10]:
+        if not sample_pkg:
+            lines.append(f"• _No se encontraron paquetes que coincidan con '{extra_arg}'._" if extra_arg else "• _Sin paquetes reportados._")
+        for p in sample_pkg[:15]:
             lines.append(f"• *{p.get('name')}* `{p.get('version')}` ({p.get('vendor', 'Linux')})")
         return "\n".join(lines)
 
@@ -870,9 +911,41 @@ async def _get_agent_detail_summary(agent_id: str, subcmd: str = "") -> str:
             "",
             "📄 *Archivos Auditados Recientes:*",
         ]
+        if not recent_f:
+            lines.append("• _No hay eventos recientes de integridad de archivos reportados._")
         for f in recent_f[:8]:
             sz = f.get("size", 0)
             lines.append(f"• `{f.get('file')}` ({sz} B, perm `{f.get('perm')}`, usuario `{f.get('uname')}`)")
+        return "\n".join(lines)
+
+    # 7. Submódulo: Puertos y Sockets
+    if sub in ("puertos", "sockets", "ports"):
+        socks = profile.get("network", {}).get("sockets", [])
+        lines = [
+            f"🔌 *PUERTOS Y SOCKETS [{aid}] - {name}*",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"• Total Sockets Reportados: `{len(socks)}`",
+            "",
+        ]
+        if not socks:
+            lines.append("• _No se detectaron sockets activos para este agente._")
+        for sk in socks[:12]:
+            lines.append(f"• `{sk.get('protocol', 'TCP')}` `{sk.get('local_ip', '*')}:{sk.get('local_port', '?')}` [{sk.get('state', 'LISTEN')}] vía `{sk.get('process', '-')}`")
+        return "\n".join(lines)
+
+    # 8. Submódulo: Sitios y Destinos Web
+    if sub in ("sitios", "sites", "web"):
+        agent_sites = sites or []
+        lines = [
+            f"🌐 *SITIOS Y DESTINOS WEB [{aid}] - {name}*",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"• Destinos Detectados: `{len(agent_sites)}`",
+            "",
+        ]
+        if not agent_sites:
+            lines.append("• _No se detectó actividad de sitios web en este agente._")
+        for s in agent_sites[:10]:
+            lines.append(f"• *{s.get('site_name')}* (`{s.get('remote_ip')}:{s.get('remote_port')}`) por `{s.get('process')}`")
         return "\n".join(lines)
 
     # 7. Resumen Ejecutivo Completo (Default)
@@ -1024,31 +1097,60 @@ def _get_rules_summary() -> str:
 
 
 def _get_help_menu() -> str:
-    """Menú de comandos de ayuda en español."""
+    """Menú de comandos de ayuda en español con cobertura total del ecosistema."""
     return (
-        f"🛡️ *PANEL DE CONTROL Y MONITOREO WAZUH-WAHA*\n"
+        f"🛡️ *CENTRO DE OPERACIONES DE SEGURIDAD (SOC) — COMANDOS*\n"
         f"Servidor: `{platform.node()}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📋 *Comandos de Monitoreo:*\n"
-        f"• `/status` — CPU Load, RAM, Disco, Uptime\n"
-        f"• `/servicios` — Estado de Wazuh, WAHA, Relay, Dashboard\n"
-        f"• `/red` — Puertos del ecosistema y sockets activos\n"
-        f"• `/sitios` — Sitios web y destinos navegados por los equipos\n"
-        f"• `/agentes` — Lista de equipos conectados al SOC\n"
-        f"• `/agente <id> [módulo]` — Ficha forense (hardware, red, sca, etc.)\n"
+        f"👥 *Gestión de Agentes y Ficha Forense:*\n"
+        f"• `/agentes` — Lista de equipos conectados y estado\n"
+        f"• `/agente <id> [módulo]` — Ficha forense completa (hardware, red, sca, ps)\n"
+        f"• `/agregar_agente <nombre> [ip]` — Registrar nuevo equipo en Wazuh\n"
+        f"• `/eliminar_agente <id>` — Dar de baja un equipo de Wazuh\n"
+        f"• `/reiniciar_agente <id>` — Reiniciar agente Wazuh de forma remota\n"
+        f"• `/comando_agente <deb|rpm|arch|win>` — Script listo para instalar agente\n"
+        f"• `/sca <id>` — Chequeos de seguridad CIS Benchmark y remediación\n"
+        f"• `/fim <id>` — Archivos monitoreados e integridad FIM\n"
+        f"• `/procesos <id>` — Procesos en ejecución y PIDs en el equipo\n"
+        f"• `/paquetes <id> [filtro]` — Software instalado (ej. `/paquetes 001 ssh`)\n"
+        f"• `/puertos_agente <id>` — Puertos y sockets del equipo\n"
+        f"• `/sitios_agente <id>` — Sitios web visitados por el equipo\n\n"
+        f"📄 *Reportes Oficiales:*\n"
+        f"• `/reporte <agent_id>` — Generar y recibir PDF forense en el chat\n\n"
+        f"🌐 *Red y Monitoreo de Conectividad:*\n"
+        f"• `/red` — Puertos del ecosistema y conexiones activas\n"
+        f"• `/sitios` — Sitios web y destinos navegados en la red\n"
+        f"• `/escanear_red` — Sondeo y escaneo de puertos/red inmediato\n\n"
+        f"🚨 *Alertas y Seguridad:*\n"
         f"• `/alertas [n]` — Últimas alertas de seguridad en español\n"
-        f"• `/kpis` — Estadísticas de despacho, deduplicación y latencia\n"
-        f"• `/canales` — Estado de WhatsApp, Telegram y Correo\n"
-        f"• `/reglas` — Reglas de seguridad activas en Wazuh\n"
-        f"• `/ping` — Prueba de disponibilidad y latencia\n\n"
-        f"⚙️ *Comandos de Configuración y Reportes:*\n"
-        f"• `/config` — Ver configuración activa del sistema\n"
-        f"• `/set_nivel <8-15>` — Ajustar severidad mínima de alertas\n"
+        f"• `/buscar_alerta <termino>` — Buscar alerta por texto (ej. `/buscar_alerta root`)\n"
+        f"• `/silenciar <rule_id>` — Silenciar regla temporalmente para no saturar\n"
+        f"• `/reactivar <rule_id>` — Reactivar regla silenciada\n"
+        f"• `/reglas_silenciadas` — Lista de reglas actualmente silenciadas\n"
+        f"• `/limpiar_cache` — Limpiar caché de deduplicación (reset TTL)\n"
+        f"• `/reglas` — Reglas de seguridad locales activas en Wazuh\n\n"
+        f"📱 *WhatsApp Gateway (WAHA):*\n"
+        f"• `/waha_status` — Estado de la sesión de WhatsApp\n"
+        f"• `/waha_restart` — Reiniciar sesión de WhatsApp en WAHA\n"
+        f"• `/waha_qr` — Recibir código QR en este chat para vincular WhatsApp\n"
+        f"• `/enviar_wa <numero> <mensaje>` — Enviar WhatsApp vía WAHA\n\n"
+        f"⚙️ *Configuración y Parámetros:*\n"
+        f"• `/config` — Ver configuración activa de canales y umbrales\n"
+        f"• `/set_nivel <8-15>` — Cambiar severidad mínima de alertas\n"
         f"• `/set_canal <whatsapp|telegram|email> <on|off>` — Activar o silenciar canal\n"
         f"• `/set_phone <numero>` — Actualizar móvil admin WhatsApp\n"
         f"• `/set_email <correo>` — Actualizar email destino de alertas\n"
-        f"• `/reporte <id_agente>` — Generar y recibir PDF del agente en el chat\n"
-        f"• `/reiniciar <waha|dashboard|relay>` — Reiniciar servicio"
+        f"• `/set_dedup <segundos>` — Cambiar ventana de deduplicación TTL\n"
+        f"• `/set_wazuh_ip <ip>` — Cambiar IP del servidor Wazuh Manager\n\n"
+        f"🖥️ *Servidor y Operaciones:*\n"
+        f"• `/status` — CPU Load, RAM, Disco y Uptime del host\n"
+        f"• `/servicios` — Estado de Wazuh, WAHA, Relay y Dashboard\n"
+        f"• `/reiniciar <waha|dashboard|relay|wazuh>` — Reiniciar servicio\n"
+        f"• `/logs [n]` — Ver últimos logs del servicio relay\n"
+        f"• `/audit [n]` — Ver historial de cambios y auditoría\n"
+        f"• `/ip` — Ver direcciones IP locales y públicas del servidor\n"
+        f"• `/kpis` — Métricas de despacho, deduplicación y latencia\n"
+        f"• `/ping` — Prueba de disponibilidad y latencia"
     )
 
 
@@ -1239,6 +1341,475 @@ async def _restart_service(service_arg: str) -> str:
         return f"❌ Error ejecutando reinicio: {e}"
 
 
+async def _add_wazuh_agent(name: str, ip: str = "any") -> str:
+    """Registra un nuevo agente en Wazuh Manager API y devuelve clave y comandos."""
+    from ..config import settings
+    from .notifier import _get_token
+    host = settings.wazuh_manager_host or settings.wazuh_server_ip
+    if not host or not settings.wazuh_manager_api_pass:
+        return "❌ Wazuh API no configurada (faltan credenciales o IP en el relay)."
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return "❌ Error de autenticación con la API de Wazuh Manager."
+
+            headers = {"Authorization": f"Bearer {token}"}
+            payload = {"name": name, "ip": ip}
+            r = await client.post(f"{base}/agents", headers=headers, json=payload)
+            if r.is_success:
+                data = r.json().get("data", {})
+                ag_id = data.get("id", "?")
+                ag_key = data.get("key", "N/D")
+                return (
+                    f"✅ *AGENTE REGISTRADO EXITOSAMENTE*\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"• *ID del Agente:* `{ag_id}`\n"
+                    f"• *Nombre:* `{name}`\n"
+                    f"• *IP Asignada:* `{ip}`\n"
+                    f"• *Clave de Registro (Key):*\n`{ag_key}`\n\n"
+                    f"📋 *Importación manual en el equipo:*\n"
+                    f"```bash\n/var/ossec/bin/manage_agents -i {ag_key}\n```\n"
+                    f"_Tip: Ejecuta `/comando_agente deb` para ver el script de instalación._"
+                )
+            else:
+                return f"❌ Error de Wazuh API ({r.status_code}): {r.text[:200]}"
+    except Exception as e:
+        return f"❌ Excepción registrando agente: {e}"
+
+
+async def _delete_wazuh_agent(agent_id: str) -> str:
+    """Elimina un agente registrado en Wazuh Manager."""
+    aid = str(agent_id).strip()
+    if aid == "000":
+        return "⚠️ No se puede eliminar el agente `000` (Wazuh Manager local)."
+    from ..config import settings
+    from .notifier import _get_token
+    host = settings.wazuh_manager_host or settings.wazuh_server_ip
+    if not host or not settings.wazuh_manager_api_pass:
+        return "❌ Wazuh API no configurada."
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return "❌ Error de autenticación con la API de Wazuh Manager."
+
+            headers = {"Authorization": f"Bearer {token}"}
+            r = await client.delete(f"{base}/agents?agents_list={aid}&status=all", headers=headers)
+            if r.is_success:
+                return f"🗑️ *Agente [{aid}] eliminado exitosamente del Wazuh Manager.*"
+            else:
+                return f"❌ Error Wazuh API ({r.status_code}): {r.text[:200]}"
+    except Exception as e:
+        return f"❌ Error eliminando agente: {e}"
+
+
+async def _restart_wazuh_agent(agent_id: str) -> str:
+    """Reinicia el servicio de un agente a través de la API de Wazuh Manager."""
+    aid = str(agent_id).strip()
+    from ..config import settings
+    from .notifier import _get_token
+    host = settings.wazuh_manager_host or settings.wazuh_server_ip
+    if not host or not settings.wazuh_manager_api_pass:
+        return "❌ Wazuh API no configurada."
+
+    base = f"https://{host}:{settings.wazuh_manager_api_port}"
+    verify = settings.wazuh_manager_api_verify_tls
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+            token = await _get_token(client)
+            if not token:
+                return "❌ Error de autenticación con la API de Wazuh Manager."
+
+            headers = {"Authorization": f"Bearer {token}"}
+            r = await client.put(f"{base}/agents/{aid}/restart", headers=headers)
+            if r.is_success:
+                return f"🔄 *Orden de reinicio enviada al agente [{aid}] con éxito.*"
+            else:
+                return f"❌ Error Wazuh API ({r.status_code}): {r.text[:200]}"
+    except Exception as e:
+        return f"❌ Error reiniciando agente: {e}"
+
+
+def _get_agent_install_command(os_target: str) -> str:
+    """Devuelve el script de despliegue oficial para el SO indicado."""
+    target = os_target.lower().strip()
+    mgr_ip = settings.wazuh_server_ip or settings.wazuh_manager_host or "192.168.122.142"
+
+    if target in ("deb", "ubuntu", "debian"):
+        cmd = (
+            f"curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import && "
+            f"chmod 644 /usr/share/keyrings/wazuh.gpg && "
+            f'echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" | tee -a /etc/apt/sources.list.d/wazuh.list && '
+            f"apt-get update && WAZUH_MANAGER='{mgr_ip}' apt-get install -y wazuh-agent && "
+            f"systemctl daemon-reload && systemctl enable wazuh-agent && systemctl restart wazuh-agent"
+        )
+        return (
+            f"📦 *INSTALACIÓN AGENTE WAZUH (Ubuntu / Debian)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Ejecuta como `root` en el equipo destino:\n\n"
+            f"```bash\n{cmd}\n```"
+        )
+    elif target in ("rpm", "centos", "rhel", "fedora", "rocky"):
+        cmd = (
+            f"rpm --import https://packages.wazuh.com/key/GPG-KEY-WAZUH && "
+            f'cat > /etc/yum.repos.d/wazuh.repo << EOF\n[wazuh]\nname=Wazuh repository\nbaseurl=https://packages.wazuh.com/4.x/yum/\ngpgcheck=1\ngpgkey=https://packages.wazuh.com/key/GPG-KEY-WAZUH\nenabled=1\nEOF\n'
+            f"WAZUH_MANAGER='{mgr_ip}' yum install -y wazuh-agent && "
+            f"systemctl daemon-reload && systemctl enable wazuh-agent && systemctl restart wazuh-agent"
+        )
+        return (
+            f"📦 *INSTALACIÓN AGENTE WAZUH (RHEL / CentOS / Rocky)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Ejecuta como `root` en el equipo destino:\n\n"
+            f"```bash\n{cmd}\n```"
+        )
+    elif target in ("arch", "archlinux", "manjaro"):
+        cmd = (
+            f"yay -S wazuh-agent --noconfirm\n"
+            f"sudo sed -i 's/<address>.*<\\/address>/<address>{mgr_ip}<\\/address>/' /var/ossec/etc/ossec.conf\n"
+            f"sudo systemctl enable --now wazuh-agent"
+        )
+        return (
+            f"📦 *INSTALACIÓN AGENTE WAZUH (Arch Linux)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"```bash\n{cmd}\n```"
+        )
+    elif target in ("win", "windows", "powershell"):
+        cmd = (
+            f"Invoke-WebRequest -Uri https://packages.wazuh.com/4.x/windows/wazuh-agent-4.9.0-1.msi -OutFile wazuh-agent.msi; "
+            f".\\wazuh-agent.msi /q WAZUH_MANAGER='{mgr_ip}'; "
+            f"NET START WazuhSvc"
+        )
+        return (
+            f"📦 *INSTALACIÓN AGENTE WAZUH (Windows PowerShell Admin)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"```powershell\n{cmd}\n```"
+        )
+    else:
+        return "⚠️ Sistema no soportado. Opciones válidas: `deb`, `rpm`, `arch`, `windows`."
+
+
+def _mute_rule(rule_id: str) -> str:
+    """Silencia una regla para que no emita alertas."""
+    rid = str(rule_id).strip()
+    if not rid or not rid.isdigit():
+        return "⚠️ Especifica el número de regla. Ejemplo: `/silenciar 57106`"
+    from ..config import load_overrides, save_overrides
+    ov = load_overrides()
+    ov[f"muted_rule:{rid}"] = True
+    save_overrides(ov)
+    return f"🔇 *Regla #{rid} silenciada.* No emitirá alertas por ningún canal hasta que uses `/reactivar {rid}`."
+
+
+def _unmute_rule(rule_id: str) -> str:
+    """Reactiva una regla previamente silenciada."""
+    rid = str(rule_id).strip()
+    if not rid or not rid.isdigit():
+        return "⚠️ Especifica el número de regla. Ejemplo: `/reactivar 57106`"
+    from ..config import load_overrides, save_overrides
+    ov = load_overrides()
+    if f"muted_rule:{rid}" in ov:
+        del ov[f"muted_rule:{rid}"]
+        save_overrides(ov)
+        return f"🔊 *Regla #{rid} reactivada exitosamente.* Volverá a emitir alertas con normalidad."
+    return f"ℹ️ La regla #{rid} no estaba silenciada."
+
+
+def _list_muted_rules() -> str:
+    """Lista las reglas silenciadas en el sistema."""
+    from ..config import load_overrides
+    ov = load_overrides()
+    muted = [k.replace("muted_rule:", "") for k, v in ov.items() if k.startswith("muted_rule:") and v is True]
+    if not muted:
+        return "ℹ️ *No hay reglas silenciadas actualmente en el sistema.*"
+    lines = [
+        "🔇 *REGLAS DE SEGURIDAD SILENCIADAS:*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+    for r in sorted(muted):
+        lines.append(f"• Regla `#{r}` (Silenciada)")
+    lines.append("\n_Tip: Usa `/reactivar <rule_id>` para volver a recibir alertas de esa regla._")
+    return "\n".join(lines)
+
+
+def _clear_dedup_cache() -> str:
+    """Limpia la memoria de deduplicación de alertas."""
+    try:
+        from ..domain.dedup import deduper
+        deduper._write_state({})
+        return "🧹 *Caché de deduplicación limpiada exitosamente.* Las alertas repetidas volverán a emitirse inmediatamente sin esperar el TTL."
+    except Exception as e:
+        return f"❌ Error limpiando caché de deduplicación: {e}"
+
+
+def _search_alerts(query: str) -> str:
+    """Busca alertas en el buffer reciente que coincidan con el término."""
+    term = str(query).strip().lower()
+    if not term:
+        return "⚠️ Ingresa un término de búsqueda. Ejemplo: `/buscar_alerta ssh` o `/buscar_alerta root`"
+    items = traffic_watcher.get_recent(limit=60)
+    matched = []
+    for a in items:
+        rid = str(a.get("rule_id", ""))
+        desc = str(a.get("description", "")).lower()
+        agent = str(a.get("agent_name", "")).lower()
+        flog = str(a.get("full_log", "")).lower()
+        if term in rid.lower() or term in desc or term in agent or term in flog:
+            matched.append(a)
+
+    if not matched:
+        return f"ℹ️ *No se encontraron alertas recientes con el término:* `{query}`"
+
+    lines = [
+        f"🔍 *ALERTAS ENCONTRADAS PARA '{query}' ({len(matched)}):*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+    for a in reversed(matched[:8]):
+        lvl = a.get("level", 0)
+        rid = a.get("rule_id", "0")
+        desc = a.get("description", "")
+        agent = a.get("agent_name", "host")
+        lines.append(f"• `[L{lvl}]` *#{rid}* ({agent}): {desc}")
+    return "\n\n".join(lines)
+
+
+async def _trigger_network_scan() -> str:
+    """Dispara un escaneo/sondeo de red en el host y agentes y reporta resultados."""
+    try:
+        from ..api.telemetry import _collect_host_traffic, _fetch_agent_traffic_details
+        probe_res = await _collect_host_traffic()
+        sock_count = len(probe_res.get("sockets", []))
+        sites_res = await _fetch_agent_traffic_details("all")
+        sites = sites_res.get("sites_activity", [])
+        return (
+            "🛰️ *SONDEO DE RED COMPLETADO CON ÉXITO*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"• Sockets analizados en host: `{sock_count}`\n"
+            f"• Destinos/Sitios web clasificados: `{len(sites)}`\n"
+            f"• Interfaces inspeccionadas: `{len(probe_res.get('interfaces', []))}`\n"
+            f"• Flujo SSE: Telemetría actualizada en vivo en el SOC.\n\n"
+            "_Consulta los destinos detectados con `/sitios` o los puertos con `/red`._"
+        )
+    except Exception as e:
+        return f"❌ Error ejecutando sondeo de red: {e}"
+
+
+async def _get_waha_session_status() -> str:
+    """Obtiene el estado detallado de la sesión de WhatsApp en WAHA."""
+    url = f"{settings.waha_host}/api/sessions/{settings.waha_session}"
+    try:
+        async with httpx.AsyncClient(timeout=6) as client:
+            r = await client.get(url, headers={"X-Api-Key": settings.waha_api_key})
+            if r.is_success:
+                data = r.json()
+                st = data.get("status", "UNKNOWN")
+                me = data.get("me", {})
+                user_id = me.get("id", "No vinculado") if isinstance(me, dict) else str(me)
+                pushname = me.get("pushName", "-") if isinstance(me, dict) else "-"
+                engine = data.get("engine", "WEBJS")
+                st_ico = "🟢 CONECTADO (WORKING)" if st == "WORKING" else f"🟡 {st}"
+                return (
+                    "📱 *ESTADO DE SESIÓN WHATSAPP (WAHA)*\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"• *Sesión:* `{settings.waha_session}`\n"
+                    f"• *Estado:* {st_ico}\n"
+                    f"• *Número Vinculado:* `{user_id}` ({pushname})\n"
+                    f"• *Motor:* `{engine}`\n"
+                    f"• *Gateway Host:* `{settings.waha_host}`\n"
+                    f"• *Destino Admin:* `{settings.admin_phone or 'No configurado'}`\n\n"
+                    "_Tip: Si necesitas escanear el QR, usa `/waha_qr`._"
+                )
+            return f"⚠️ WAHA respondió con código {r.status_code}: {r.text[:150]}"
+    except Exception as e:
+        return f"❌ No se pudo conectar con WAHA: {e}"
+
+
+async def _restart_waha_session() -> str:
+    """Reinicia la sesión de WAHA sin apagar el contenedor."""
+    s = settings.waha_session
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            await client.post(f"{settings.waha_host}/api/sessions/{s}/stop", headers={"X-Api-Key": settings.waha_api_key})
+            await asyncio.sleep(2)
+            r = await client.post(f"{settings.waha_host}/api/sessions/{s}/start", headers={"X-Api-Key": settings.waha_api_key})
+            if r.is_success:
+                return f"🔄 *Sesión de WhatsApp `{s}` reiniciada exitosamente.*"
+            return f"⚠️ Error reiniciando sesión: {r.status_code} {r.text[:150]}"
+    except Exception as e:
+        return f"❌ Error reiniciando sesión en WAHA: {e}"
+
+
+async def _send_waha_qr_to_telegram(chat_id: str | None = None) -> str:
+    """Descarga el código QR actual de WAHA y lo envía directamente como imagen a Telegram."""
+    url = f"{settings.waha_host}/api/{settings.waha_session}/auth/qr?format=image"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(url, headers={"X-Api-Key": settings.waha_api_key})
+            if r.status_code == 200 and "image" in r.headers.get("content-type", ""):
+                ok = await send_photo(
+                    photo_bytes=r.content,
+                    filename="waha_qr.png",
+                    caption=f"📷 *Código QR para vincular WhatsApp (Sesión `{settings.waha_session}`)*\nEscanea este código desde la app de WhatsApp > Dispositivos vinculados.",
+                    chat_id=chat_id,
+                )
+                if ok:
+                    return "✅ Código QR enviado como imagen a este chat."
+                return "⚠️ Se obtuvo el código QR de WAHA pero falló el envío por Telegram."
+            elif r.status_code == 422 or "WORKING" in r.text:
+                return "ℹ️ *La sesión de WhatsApp ya se encuentra vinculada y activa (WORKING).* No requiere código QR."
+            return f"⚠️ WAHA no generó QR ({r.status_code}): {r.text[:150]}"
+    except Exception as e:
+        return f"❌ Error obteniendo código QR de WAHA: {e}"
+
+
+async def _send_custom_whatsapp(phone: str, text_message: str) -> str:
+    """Envía un mensaje de WhatsApp a un número específico vía WAHA."""
+    clean_p = phone.strip().replace("+", "").replace(" ", "").replace("-", "")
+    if not clean_p or not text_message.strip():
+        return "⚠️ Uso: `/enviar_wa <numero> <mensaje>`. Ejemplo: `/enviar_wa 5491122334455 Alerta de prueba`"
+    from .waha_client import send_text
+    try:
+        ok = await send_text(text_message.strip(), recipient=clean_p)
+        if ok:
+            return f"✅ *Mensaje de WhatsApp enviado exitosamente a* `{clean_p}`."
+        return f"⚠️ WAHA no pudo despachar el mensaje a `{clean_p}`. Revisa `/waha_status`."
+    except Exception as e:
+        return f"❌ Error despachando WhatsApp: {e}"
+
+
+def _get_recent_system_logs(lines: int = 25) -> str:
+    """Lee y devuelve los últimos logs del relay."""
+    limit = min(max(int(lines), 5), 50)
+    import subprocess
+    try:
+        out = subprocess.check_output(
+            ["journalctl", "-u", "wazuh-waha.service", "-n", str(limit), "--no-pager", "-q"],
+            stderr=subprocess.STDOUT,
+            timeout=5,
+        ).decode("utf-8", errors="replace")
+        clean_logs = out[-3500:]
+        return f"📋 *ÚLTIMOS {limit} LOGS DEL RELAY (journalctl):*\n```text\n{clean_logs}\n```"
+    except Exception as e:
+        return f"❌ Error leyendo journalctl: {e}"
+
+
+def _get_audit_log_entries(lines: int = 10) -> str:
+    """Lee las últimas operaciones registradas en audit.jsonl."""
+    limit = min(max(int(lines), 3), 30)
+    audit_file = Path("/var/lib/wazuh-waha/audit.jsonl")
+    if not audit_file.exists():
+        return "ℹ️ *No hay registros de auditoría aún en disco.*"
+    try:
+        with open(audit_file, "r", encoding="utf-8") as f:
+            raw_lines = [line.strip() for line in f if line.strip()]
+        last_items = [json.loads(l) for l in raw_lines[-limit:]]
+        res = [
+            f"🛡️ *ÚLTIMOS {len(last_items)} REGISTROS DE AUDITORÍA:*",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        ]
+        for it in reversed(last_items):
+            ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(it.get("ts", time.time())))
+            m = it.get("method", "REQ")
+            p = it.get("path", "-")
+            st = it.get("status", 200)
+            ip = it.get("ip", "-")
+            res.append(f"• `[{ts}]` *{m}* `{p}` (HTTP {st}) desde `{ip}`")
+        return "\n".join(res)
+    except Exception as e:
+        return f"❌ Error leyendo auditoría: {e}"
+
+
+def _get_server_ip_info() -> str:
+    """Muestra información detallada de direcciones IP del host y del ecosistema."""
+    mgr_ip = settings.wazuh_server_ip or settings.wazuh_manager_host or "127.0.0.1"
+    local_ips = []
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
+        # No envía paquetes reales, solo resuelve la interfaz local hacia el exterior
+        s.connect(("8.8.8.8", 80))
+        local_ips.append(s.getsockname()[0])
+        s.close()
+    except Exception:
+        pass
+
+    if not local_ips:
+        try:
+            import subprocess
+            out = subprocess.check_output(["ip", "-4", "route", "get", "1.1.1.1"], timeout=2).decode("utf-8")
+            for token in out.split():
+                if token.count(".") == 3 and not token.startswith("1.1.1.1"):
+                    local_ips.append(token)
+                    break
+        except Exception:
+            pass
+
+    pub_ip = "No detectada"
+    try:
+        import urllib.request
+        pub_ip = urllib.request.urlopen("https://api.ipify.org", timeout=2).read().decode("utf-8")
+    except Exception:
+        pass
+
+    lan_ip = local_ips[0] if local_ips else "127.0.0.1"
+
+    return (
+        "🌐 *DIRECCIONES IP DEL SISTEMA*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"• *Hostname:* `{platform.node()}`\n"
+        f"• *IP Local / LAN:* `{lan_ip}`\n"
+        f"• *IP Pública:* `{pub_ip}`\n"
+        f"• *Wazuh Manager IP:* `{mgr_ip}` (API Puerto: `{settings.wazuh_manager_api_port}`)\n"
+        f"• *Relay Puerto:* `{settings.relay_port}`\n"
+        f"• *Dashboard Web:* `http://{lan_ip}:8001`"
+    )
+
+
+def _set_dedup_ttl(arg: str) -> str:
+    try:
+        val = int(arg)
+        if not (10 <= val <= 3600):
+            return "⚠️ El TTL debe ser un número entero de segundos entre 10 y 3600 (ej. 300)."
+        from ..config import settings, load_overrides, save_overrides
+        from ..domain.dedup import deduper
+        setattr(settings, "relay_dedup_ttl", val)
+        deduper.ttl = val
+        ov = load_overrides()
+        ov["relay_dedup_ttl"] = val
+        save_overrides(ov)
+        _save_to_env({"RELAY_DEDUP_TTL": str(val)})
+        _sync_systemd_env()
+        return f"⏱️ *Ventana de deduplicación actualizada a {val} segundos.*"
+    except ValueError:
+        return "⚠️ Uso: `/set_dedup <segundos>`. Ejemplo: `/set_dedup 180`"
+
+
+def _set_wazuh_manager_ip(arg: str) -> str:
+    ip = arg.strip()
+    if not ip:
+        return "⚠️ Uso: `/set_wazuh_ip <ip_o_host>`. Ejemplo: `/set_wazuh_ip 192.168.122.142`"
+    from ..config import settings, load_overrides, save_overrides
+    setattr(settings, "wazuh_server_ip", ip)
+    setattr(settings, "wazuh_manager_host", ip)
+    ov = load_overrides()
+    ov["wazuh_server_ip"] = ip
+    ov["wazuh_manager_host"] = ip
+    save_overrides(ov)
+    _save_to_env({"WAZUH_SERVER_IP": ip, "WAZUH_MANAGER_HOST": ip})
+    _sync_systemd_env()
+    return f"🛡️ *IP del Wazuh Manager actualizada a:* `{ip}`"
+
+
 # ─────────────────────────────────────────────────────────────
 # 4. Procesador Central de Comandos (Telegram + WhatsApp)
 # ─────────────────────────────────────────────────────────────
@@ -1253,35 +1824,127 @@ async def process_admin_command(text: str, source: str = "telegram", chat_id: st
     cmd = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ""
 
+    # Menú y ayuda
     if cmd in ("/start", "/help", "/ayuda", "/comandos"):
         return _get_help_menu()
+
+    # Diagnóstico del servidor y servicios
     elif cmd in ("/status", "/estado"):
         return _get_system_status()
     elif cmd in ("/servicios", "/services"):
         return await _get_services_status()
+    elif cmd in ("/uptime", "/tiempo"):
+        return _get_system_status()
+    elif cmd in ("/ip", "/ips", "/red_ip"):
+        return _get_server_ip_info()
+    elif cmd in ("/logs", "/journal"):
+        lines_count = int(arg) if arg.isdigit() else 25
+        return _get_recent_system_logs(lines=lines_count)
+    elif cmd in ("/audit", "/auditoria"):
+        lines_count = int(arg) if arg.isdigit() else 10
+        return _get_audit_log_entries(lines=lines_count)
+
+    # Red y telemetría
     elif cmd in ("/red", "/trafico", "/traffic", "/puertos"):
         return await _get_network_traffic_summary()
     elif cmd in ("/sitios", "/sites", "/webs", "/destinos"):
         return await _get_network_sites_summary()
+    elif cmd in ("/escanear_red", "/probar_red", "/scan"):
+        return await _trigger_network_scan()
+
+    # Gestión de agentes Wazuh
     elif cmd in ("/agentes", "/equipos", "/agents"):
         return await _get_agents_list_summary()
     elif cmd in ("/agente", "/equipo", "/agent"):
         if not arg:
-            return "ℹ️ Por favor especifica el ID del agente. Ejemplo: `/agente 000` o `/agente 000 hardware`"
+            return "ℹ️ Especifica el ID del agente. Ejemplo: `/agente 000` o `/agente 000 hardware`"
         sub_arg = parts[2].lower() if len(parts) > 2 else ""
-        return await _get_agent_detail_summary(arg, subcmd=sub_arg)
+        extra_arg = parts[3].lower() if len(parts) > 3 else ""
+        return await _get_agent_detail_summary(arg, subcmd=sub_arg, extra_arg=extra_arg)
+    elif cmd in ("/agregar_agente", "/crear_agente", "/nuevo_agente"):
+        if not arg:
+            return "ℹ️ Uso: `/agregar_agente <nombre> [ip]`. Ejemplo: `/agregar_agente servidor-web 192.168.1.50`"
+        agent_ip = parts[2] if len(parts) > 2 else "any"
+        return await _add_wazuh_agent(arg, ip=agent_ip)
+    elif cmd in ("/eliminar_agente", "/borrar_agente", "/delete_agent"):
+        if not arg:
+            return "ℹ️ Especifica el ID del agente a eliminar. Ejemplo: `/eliminar_agente 002`"
+        return await _delete_wazuh_agent(arg)
+    elif cmd in ("/reiniciar_agente", "/restart_agent"):
+        if not arg:
+            return "ℹ️ Especifica el ID del agente a reiniciar. Ejemplo: `/reiniciar_agente 001`"
+        return await _restart_wazuh_agent(arg)
+    elif cmd in ("/comando_agente", "/instalar_agente", "/install_agent"):
+        target_os = arg if arg else "deb"
+        return _get_agent_install_command(target_os)
+
+    # Atajos forenses directos por agente
+    elif cmd in ("/sca", "/cis"):
+        target_aid = arg if arg else "000"
+        return await _get_agent_detail_summary(target_aid, subcmd="sca")
+    elif cmd in ("/fim", "/syscheck", "/archivos"):
+        target_aid = arg if arg else "000"
+        return await _get_agent_detail_summary(target_aid, subcmd="fim")
+    elif cmd in ("/procesos", "/ps"):
+        target_aid = arg if arg else "000"
+        return await _get_agent_detail_summary(target_aid, subcmd="procesos")
+    elif cmd in ("/paquetes", "/software", "/pkg"):
+        target_aid = arg if arg else "000"
+        query_filter = parts[2] if len(parts) > 2 else ""
+        return await _get_agent_detail_summary(target_aid, subcmd="paquetes", extra_arg=query_filter)
+    elif cmd in ("/puertos_agente", "/sockets_agente"):
+        target_aid = arg if arg else "000"
+        return await _get_agent_detail_summary(target_aid, subcmd="puertos")
+    elif cmd in ("/sitios_agente",):
+        target_aid = arg if arg else "001"
+        return await _get_agent_detail_summary(target_aid, subcmd="sitios")
+
+    # Alertas y Silenciamiento
     elif cmd in ("/alertas", "/alerts"):
         limit = 5
         if arg.isdigit():
             limit = min(max(int(arg), 1), 15)
         return _get_recent_alerts_summary(limit=limit)
+    elif cmd in ("/buscar_alerta", "/buscar", "/search"):
+        query = " ".join(parts[1:]) if len(parts) > 1 else ""
+        return _search_alerts(query)
+    elif cmd in ("/silenciar", "/silenciar_regla", "/mute"):
+        if not arg:
+            return "ℹ️ Especifica la regla a silenciar. Ejemplo: `/silenciar 57106`"
+        return _mute_rule(arg)
+    elif cmd in ("/reactivar", "/desilenciar", "/unmute"):
+        if not arg:
+            return "ℹ️ Especifica la regla a reactivar. Ejemplo: `/reactivar 57106`"
+        return _unmute_rule(arg)
+    elif cmd in ("/reglas_silenciadas", "/muted"):
+        return _list_muted_rules()
+    elif cmd in ("/limpiar_cache", "/reset_dedup", "/clear_cache"):
+        return _clear_dedup_cache()
+    elif cmd in ("/reglas", "/rules"):
+        return _get_rules_summary()
+
+    # WhatsApp Gateway (WAHA)
+    elif cmd in ("/waha_status", "/whatsapp_status"):
+        return await _get_waha_session_status()
+    elif cmd in ("/waha_restart", "/whatsapp_restart"):
+        return await _restart_waha_session()
+    elif cmd in ("/waha_qr", "/whatsapp_qr", "/qr"):
+        return await _send_waha_qr_to_telegram(chat_id=chat_id)
+    elif cmd in ("/enviar_wa", "/whatsapp"):
+        if len(parts) < 3:
+            return "ℹ️ Uso: `/enviar_wa <numero> <mensaje>`. Ejemplo: `/enviar_wa 5491122334455 Alerta de prueba`"
+        dest_phone = parts[1]
+        msg_text = " ".join(parts[2:])
+        return await _send_custom_whatsapp(dest_phone, msg_text)
+
+    # Métricas y Canales
     elif cmd in ("/kpis", "/metricas", "/metrics"):
         res = await _get_kpis_summary()
         return "\n".join(res) if isinstance(res, tuple) else str(res)
     elif cmd in ("/canales", "/channels"):
         return _get_channels_summary()
-    elif cmd in ("/reglas", "/rules"):
-        return _get_rules_summary()
+
+    # Configuración y Parámetros
     elif cmd in ("/config", "/configuracion", "/settings"):
         return _get_configuration_summary()
     elif cmd in ("/set_nivel", "/nivel"):
@@ -1300,20 +1963,34 @@ async def process_admin_command(text: str, source: str = "telegram", chat_id: st
         if not arg:
             return "ℹ️ Especifica el email. Ejemplo: `/set_email soc@empresa.com`"
         return _set_admin_email(arg)
+    elif cmd in ("/set_dedup", "/dedup"):
+        if not arg:
+            return "ℹ️ Especifica el TTL en segundos. Ejemplo: `/set_dedup 180`"
+        return _set_dedup_ttl(arg)
+    elif cmd in ("/set_wazuh_ip", "/wazuh_ip"):
+        if not arg:
+            return "ℹ️ Especifica la IP. Ejemplo: `/set_wazuh_ip 192.168.122.142`"
+        return _set_wazuh_manager_ip(arg)
+
+    # Reportes Forenses en PDF
     elif cmd in ("/reporte", "/report", "/pdf"):
         target_aid = arg if arg else "001"
         return await _generate_and_send_agent_report(target_aid, chat_id=chat_id)
+
+    # Control de Servicios
     elif cmd in ("/reiniciar", "/restart"):
         if not arg:
-            return "ℹ️ Especifica el servicio a reiniciar (`waha`, `dashboard`, `relay`, `manager`). Ejemplo: `/reiniciar waha`"
+            return "ℹ️ Especifica el servicio (`waha`, `dashboard`, `relay`, `manager`). Ejemplo: `/reiniciar waha`"
         return await _restart_service(arg)
+
+    # Utilidades
     elif cmd in ("/ping",):
         t0 = time.time()
         load = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
         elapsed_ms = round((time.time() - t0) * 1000, 2)
         return f"🏓 *Pong!*\nServidor `{platform.node()}` operativo.\nLatencia interna: `{elapsed_ms} ms`\nCPU load: `{load:.2f}`"
     else:
-        return f"❓ Comando `{cmd}` no reconocido.\n\nEscribe `/ayuda` para ver la lista de comandos disponibles."
+        return f"❓ Comando `{cmd}` no reconocido.\n\nEscribe `/ayuda` para ver la lista completa de comandos disponibles."
 
 
 # ─────────────────────────────────────────────────────────────

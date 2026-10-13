@@ -99,6 +99,11 @@ async def format_alert(alert: dict) -> tuple[str, dict]:
             meta["decision"] = f"muted_rule_group:{rg}"
             return ("", meta)
 
+    # Verificar si la regla individual está silenciada
+    if overrides.get(f"muted_rule:{rule_id}") is True:
+        meta["decision"] = f"muted_rule:{rule_id}"
+        return ("", meta)
+
     src_ip = (alert.get("data") or {}).get("srcip", "")
     if deduper.is_duplicate(rule_id, agent_id, key_extra=src_ip):
         meta["decision"] = "duplicate"
