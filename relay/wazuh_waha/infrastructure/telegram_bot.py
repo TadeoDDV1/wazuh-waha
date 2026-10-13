@@ -1585,18 +1585,20 @@ def _search_alerts(query: str) -> str:
 async def _trigger_network_scan() -> str:
     """Dispara un escaneo/sondeo de red en el host y agentes y reporta resultados."""
     try:
-        from ..api.telemetry import _collect_host_traffic, _fetch_agent_traffic_details
-        probe_res = await _collect_host_traffic()
-        sock_count = len(probe_res.get("sockets", []))
+        from ..api.telemetry import _fetch_network_agents_data, _fetch_agent_traffic_details
+        agents = await _fetch_network_agents_data()
         sites_res = await _fetch_agent_traffic_details("all")
+        kpis = sites_res.get("kpis", {})
         sites = sites_res.get("sites_activity", [])
         return (
             "🛰️ *SONDEO DE RED COMPLETADO CON ÉXITO*\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"• Sockets analizados en host: `{sock_count}`\n"
+            f"• Equipos/Agentes conectados: `{len(agents)}`\n"
+            f"• Sockets totales en monitoreo: `{kpis.get('total_sockets', 0)}`\n"
+            f"• Conexiones activas establecidas: `{kpis.get('established_connections', 0)}`\n"
+            f"• Puertos locales en escucha: `{kpis.get('listening_sockets', 0)}`\n"
             f"• Destinos/Sitios web clasificados: `{len(sites)}`\n"
-            f"• Interfaces inspeccionadas: `{len(probe_res.get('interfaces', []))}`\n"
-            f"• Flujo SSE: Telemetría actualizada en vivo en el SOC.\n\n"
+            f"• Tráfico acumulado: `{kpis.get('total_rx_mb', 0.0)} MB RX / {kpis.get('total_tx_mb', 0.0)} MB TX`\n\n"
             "_Consulta los destinos detectados con `/sitios` o los puertos con `/red`._"
         )
     except Exception as e:
