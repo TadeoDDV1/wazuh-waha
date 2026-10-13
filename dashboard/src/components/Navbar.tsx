@@ -20,6 +20,7 @@ import {
   ExternalLink,
   TerminalSquare,
   Network,
+  FileText,
 } from 'lucide-react';
 
 function formatUptime(sec: number): string {
@@ -208,6 +209,33 @@ export const Navbar: React.FC = () => {
                   animation: 'pulse 2s infinite',
                 }}
               />
+            </button>
+
+            <button
+              type="button"
+              className={`nav-tab-btn ${activeView === 'reports' ? 'active' : ''}`}
+              onClick={() => setActiveView('reports')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: activeView === 'reports' ? 700 : 500,
+                border: activeView === 'reports' ? '1px solid #c084fc' : '1px solid transparent',
+                background: activeView === 'reports'
+                  ? 'linear-gradient(135deg, rgba(168, 85, 247, 0.35), rgba(192, 132, 252, 0.3))'
+                  : 'transparent',
+                color: activeView === 'reports' ? '#c084fc' : 'var(--text-secondary)',
+                boxShadow: activeView === 'reports' ? '0 0 16px rgba(168, 85, 247, 0.4)' : 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              title="Generador de Reportes de Actividad y Auditoría Forense en PDF por Agente"
+            >
+              <FileText size={14} style={{ color: activeView === 'reports' ? '#c084fc' : 'currentColor' }} />
+              <span>Reportes Forenses (PDF)</span>
             </button>
           </div>
 

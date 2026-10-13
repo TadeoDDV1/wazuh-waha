@@ -13,6 +13,7 @@ import {
   Trash2,
   Monitor,
   Loader2,
+  FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { copyToClipboard } from '../utils/clipboard';
@@ -47,6 +48,7 @@ export const WazuhAgentsCard: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [isRegisteringApi, setIsRegisteringApi] = useState(false);
   const [registeredKey, setRegisteredKey] = useState<string | null>(null);
+  const [downloadingReportId, setDownloadingReportId] = useState<string | null>(null);
 
   // Initialize manager IP when config loads
   useEffect(() => {
@@ -175,6 +177,31 @@ sudo /Library/Ossec/bin/wazuh-control start`;
       }
     } catch (err: any) {
       toast.error(err.message || 'Error eliminando agente');
+    }
+  };
+
+  const handleDownloadReport = async (agentId: string, agentName: string) => {
+    setDownloadingReportId(agentId);
+    try {
+      toast.info(`Generando reporte PDF para [${agentId}] ${agentName}...`);
+      const blob = await dashboardService.getAgentReportBlob(agentId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const now = new Date();
+      const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+      const safeName = agentName ? `_${agentName.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
+      a.download = `reporte_agente_${agentId}${safeName}_${ts}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`Reporte PDF de ${agentName} [${agentId}] descargado exitosamente`);
+    } catch (err: any) {
+      console.error('Error descargando reporte:', err);
+      toast.error(`Error al generar reporte PDF del agente ${agentId}`);
+    } finally {
+      setDownloadingReportId(null);
     }
   };
 
@@ -593,6 +620,34 @@ sudo /Library/Ossec/bin/wazuh-control start`;
                       </span>
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadReport(a.id, a.name)}
+                        disabled={downloadingReportId === a.id}
+                        style={{
+                          background: 'rgba(168, 85, 247, 0.15)',
+                          border: '1px solid rgba(168, 85, 247, 0.35)',
+                          color: '#c084fc',
+                          cursor: downloadingReportId === a.id ? 'wait' : 'pointer',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          marginRight: '8px',
+                          transition: 'all 0.2s',
+                        }}
+                        title={`Generar y descargar ficha forense PDF del agente ${a.id}`}
+                      >
+                        {downloadingReportId === a.id ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          <FileText size={12} />
+                        )}
+                        <span>Reporte PDF</span>
+                      </button>
                       {a.id !== '000' && (
                         <button
                           type="button"
@@ -605,6 +660,7 @@ sudo /Library/Ossec/bin/wazuh-control start`;
                             padding: '4px',
                             borderRadius: '4px',
                             transition: 'color 0.2s',
+                            verticalAlign: 'middle',
                           }}
                           title={`Eliminar agente ${a.id} del Manager`}
                           onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--red-error)')}

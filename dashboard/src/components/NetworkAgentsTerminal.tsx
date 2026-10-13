@@ -45,8 +45,10 @@ import {
   HardDrive,
   ShieldCheck,
   FileCheck,
+  FileText,
   Package,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface NetworkAgentsTerminalProps {
   isOpen?: boolean;
@@ -69,6 +71,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
   // Ficha Forense y Auditoría profunda
   const [fullProfile, setFullProfile] = useState<AgentFullProfile | null>(null);
   const [loadingProfile, setLoadingProfile] = useState<boolean>(false);
+  const [downloadingPdf, setDownloadingPdf] = useState<boolean>(false);
   const [profileTargetAgentId, setProfileTargetAgentId] = useState<string>('000');
   const [packageSearch, setPackageSearch] = useState<string>('');
   const [processSearch, setProcessSearch] = useState<string>('');
@@ -184,6 +187,30 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
       setLoadingProfile(false);
     }
   }, []);
+
+  const handleDownloadAgentPdf = async (agentId: string, agentName: string) => {
+    setDownloadingPdf(true);
+    try {
+      toast.info(`Generando reporte forense PDF para agente [${agentId}] ${agentName}...`);
+      const blob = await dashboardService.getAgentReportBlob(agentId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const now = new Date();
+      const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+      a.download = `reporte_forense_agente_${agentId}_${ts}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`Reporte forense del agente [${agentId}] descargado exitosamente`);
+    } catch (err: any) {
+      console.error('Error al descargar reporte forense:', err);
+      toast.error(`Error al generar reporte PDF del agente ${agentId}`);
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
 
   useEffect(() => {
     fetchSummary();
@@ -1626,11 +1653,37 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                   Perfil integral del agente {fullProfile ? `[${fullProfile.agent_id}] ${fullProfile.name}` : 'seleccionado'}: hardware, SO, seguridad (SCA/FIM), software y procesos.
                 </p>
               </div>
-              {fullProfile && (
-                <span style={{ fontSize: '11px', color: '#c084fc', background: 'rgba(168, 85, 247, 0.1)', border: '1px solid rgba(168, 85, 247, 0.25)', padding: '3px 8px', borderRadius: '6px' }}>
-                  Última sincronización: {new Date(fullProfile.timestamp * 1000).toLocaleString('es-AR')}
-                </span>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {fullProfile && (
+                  <button
+                    onClick={() => handleDownloadAgentPdf(fullProfile.agent_id, fullProfile.name)}
+                    disabled={downloadingPdf}
+                    style={{
+                      background: 'rgba(56, 189, 248, 0.15)',
+                      border: '1px solid rgba(56, 189, 248, 0.4)',
+                      color: '#38bdf8',
+                      padding: '5px 12px',
+                      borderRadius: '6px',
+                      cursor: downloadingPdf ? 'not-allowed' : 'pointer',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'all 0.2s ease',
+                    }}
+                    title="Descargar reporte forense oficial en PDF"
+                  >
+                    {downloadingPdf ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+                    <span>{downloadingPdf ? 'Generando PDF...' : '📄 Descargar Reporte PDF'}</span>
+                  </button>
+                )}
+                {fullProfile && (
+                  <span style={{ fontSize: '11px', color: '#c084fc', background: 'rgba(168, 85, 247, 0.1)', border: '1px solid rgba(168, 85, 247, 0.25)', padding: '5px 8px', borderRadius: '6px' }}>
+                    Última sincronización: {new Date(fullProfile.timestamp * 1000).toLocaleString('es-AR')}
+                  </span>
+                )}
+              </div>
             </div>
 
             {loadingProfile ? (

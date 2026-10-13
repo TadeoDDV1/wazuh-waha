@@ -1620,6 +1620,41 @@ async def network_stream(
         try:
             yield f"data: {json.dumps({'type': 'connected', 'msg': 'Terminal de Red, Sitios & Agentes Conectada', 'ts': time.time()})}\n\n"
 
+            # Si la caché está vacía, refrescar de inmediato
+            if not _SITES_HISTORY_CACHE:
+                try:
+                    await _fetch_agent_traffic_details("all")
+                except Exception:
+                    pass
+
+            # Emitir de inmediato sitios conocidos al conectar
+            init_now = time.time()
+            for s_init in list(_SITES_HISTORY_CACHE.values())[:15]:
+                site_init_evt = {
+                    "type": "site_activity",
+                    "subtype": "web_connection",
+                    "id": f"site-init-{s_init['agent_id']}-{int(init_now * 1000)}-{s_init.get('remote_ip')}",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "agent_id": s_init["agent_id"],
+                    "agent_name": s_init["agent_name"],
+                    "agent_ip": s_init.get("agent_ip", ""),
+                    "src_ip": s_init.get("agent_ip", "127.0.0.1"),
+                    "dst_ip": s_init["remote_ip"],
+                    "dst_port": str(s_init["remote_port"]),
+                    "remote_ip": s_init["remote_ip"],
+                    "remote_port": s_init["remote_port"],
+                    "site_name": s_init["site_name"],
+                    "domain": s_init["domain"],
+                    "protocol": s_init["protocol"],
+                    "process": s_init["process"],
+                    "category": s_init["category"],
+                    "category_label": s_init["category_label"],
+                    "is_web": s_init["is_web"],
+                    "status": "ACTIVA" if ("estab" in s_init["state"].lower() or "activa" in s_init.get("state_label", "").lower()) else "REGISTRADA",
+                    "description": f"[{s_init['process']}] Destino: {s_init['site_name']} ({s_init['domain']}:{s_init['remote_port']})",
+                }
+                yield f"data: {json.dumps({'type': 'network_event', 'data': site_init_evt})}\n\n"
+
             while True:
                 if await request.is_disconnected():
                     break
@@ -1665,7 +1700,7 @@ async def network_stream(
                 if step % 2 == 0:
                     try:
                         active_sites = list(_SITES_HISTORY_CACHE.values())
-                        for site in active_sites[:10]:
+                        for site in active_sites[:15]:
                             site_evt = {
                                 "type": "site_activity",
                                 "subtype": "web_connection",
@@ -1687,14 +1722,14 @@ async def network_stream(
                                 "category_label": site["category_label"],
                                 "is_web": site["is_web"],
                                 "status": "ACTIVA" if ("estab" in site["state"].lower() or "activa" in site.get("state_label", "").lower()) else "REGISTRADA",
-                                "description": f"[{site['process']}] Destino: {site['site_name']} ({site['domain']})",
+                                "description": f"[{site['process']}] Destino: {site['site_name']} ({site['domain']}:{site['remote_port']})",
                             }
                             yield f"data: {json.dumps({'type': 'network_event', 'data': site_evt})}\n\n"
                     except Exception:
                         pass
 
-                # Refresco asíncrono no bloqueante del inventario de red
-                if step % 10 == 0:
+                # Refresco asíncrono no bloqueante del inventario de red cada 4 pasos
+                if step % 4 == 0:
                     asyncio.create_task(_fetch_agent_traffic_details("all"))
 
                 # 3. Pulso de heartbeat de agentes

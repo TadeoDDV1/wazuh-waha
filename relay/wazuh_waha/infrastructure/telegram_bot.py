@@ -327,6 +327,42 @@ async def send_message(
         return False
 
 
+async def send_document(
+    document_bytes: bytes,
+    filename: str,
+    caption: str = "",
+    chat_id: str | None = None,
+    token: str | None = None,
+) -> bool:
+    """Envía un archivo/documento (como reporte PDF) a Telegram."""
+    tk = token or getattr(settings, "telegram_bot_token", "")
+    cid = chat_id or getattr(settings, "telegram_chat_id", "")
+    if not tk or not cid:
+        log.debug("telegram_send_document_skipped (token o chat_id vacio)")
+        return False
+
+    url = _bot_url("sendDocument", tk)
+    data: dict[str, Any] = {"chat_id": cid}
+    if caption:
+        data["caption"] = caption[:1024]
+        data["parse_mode"] = "Markdown"
+
+    files = {
+        "document": (filename, document_bytes, "application/pdf")
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=35) as client:
+            resp = await client.post(url, data=data, files=files)
+            if resp.is_success:
+                return True
+            log.warning("telegram_send_document_fail status=%d body=%r", resp.status_code, resp.text[:200])
+            return False
+    except Exception as e:
+        log.warning("telegram_send_document_err err=%s", e)
+        return False
+
+
 async def get_updates(token: str | None = None, offset: int = 0, timeout: int = 5) -> list[dict]:
     """Lee updates pendientes vía long polling."""
     tk = token or settings.telegram_bot_token
@@ -993,38 +1029,222 @@ def _get_help_menu() -> str:
         f"🛡️ *PANEL DE CONTROL Y MONITOREO WAZUH-WAHA*\n"
         f"Servidor: `{platform.node()}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📋 *Comandos de Monitoreo Disponibles:*\n\n"
-        f"• `/status` o `/estado`\n"
-        f"  Muestra CPU Load, RAM, Disco, Uptime y fecha del sistema.\n\n"
-        f"• `/servicios`\n"
-        f"  Verifica el estado en tiempo real de Wazuh, WAHA, Relay y Ollama.\n\n"
-        f"• `/red` o `/trafico`\n"
-        f"  Inspecciona puertos clave (1514, 55000, 8765, 3001, 8001, 22), sockets y tráfico.\n\n"
-        f"• `/sitios` o `/webs`\n"
-        f"  Lista los sitios web y destinos navegados por los agentes en la red.\n\n"
-        f"• `/agentes` o `/equipos`\n"
-        f"  Lista los equipos conectados al SOC con su IP, SO y estado.\n\n"
-        f"• `/agente <id> [submódulo]`\n"
-        f"  Ficha forense de un equipo (ej: `/agente 001 hardware`, `red`, `sca`, `procesos`, `paquetes`, `fim`).\n\n"
-        f"• `/alertas`\n"
-        f"  Muestra las últimas alertas de seguridad procesadas en español.\n\n"
-        f"• `/kpis` o `/metricas`\n"
-        f"  Estadísticas de alertas por minuto, supresiones y latencias.\n\n"
-        f"• `/canales`\n"
-        f"  Consulta qué medios de notificación están activos.\n\n"
-        f"• `/reglas`\n"
-        f"  Listado de reglas de seguridad locales de Wazuh.\n\n"
-        f"• `/ping`\n"
-        f"  Prueba de disponibilidad y latencia con el servidor."
+        f"📋 *Comandos de Monitoreo:*\n"
+        f"• `/status` — CPU Load, RAM, Disco, Uptime\n"
+        f"• `/servicios` — Estado de Wazuh, WAHA, Relay, Dashboard\n"
+        f"• `/red` — Puertos del ecosistema y sockets activos\n"
+        f"• `/sitios` — Sitios web y destinos navegados por los equipos\n"
+        f"• `/agentes` — Lista de equipos conectados al SOC\n"
+        f"• `/agente <id> [módulo]` — Ficha forense (hardware, red, sca, etc.)\n"
+        f"• `/alertas [n]` — Últimas alertas de seguridad en español\n"
+        f"• `/kpis` — Estadísticas de despacho, deduplicación y latencia\n"
+        f"• `/canales` — Estado de WhatsApp, Telegram y Correo\n"
+        f"• `/reglas` — Reglas de seguridad activas en Wazuh\n"
+        f"• `/ping` — Prueba de disponibilidad y latencia\n\n"
+        f"⚙️ *Comandos de Configuración y Reportes:*\n"
+        f"• `/config` — Ver configuración activa del sistema\n"
+        f"• `/set_nivel <8-15>` — Ajustar severidad mínima de alertas\n"
+        f"• `/set_canal <whatsapp|telegram|email> <on|off>` — Activar o silenciar canal\n"
+        f"• `/set_phone <numero>` — Actualizar móvil admin WhatsApp\n"
+        f"• `/set_email <correo>` — Actualizar email destino de alertas\n"
+        f"• `/reporte <id_agente>` — Generar y recibir PDF del agente en el chat\n"
+        f"• `/reiniciar <waha|dashboard|relay>` — Reiniciar servicio"
     )
+
+
+def _get_configuration_summary() -> str:
+    from ..config import settings
+    w_on = "🟢 ACTIVO" if getattr(settings, "whatsapp_enabled", True) else "🔴 INACTIVO"
+    t_on = "🟢 ACTIVO" if getattr(settings, "telegram_enabled", False) else "🔴 INACTIVO"
+    e_on = "🟢 ACTIVO" if getattr(settings, "email_alerts_enabled", False) else "🔴 INACTIVO"
+    min_lvl = getattr(settings, "telegram_min_level", getattr(settings, "relay_min_level_unknown", 8))
+    phone = getattr(settings, "admin_phone", "") or "No configurado"
+    email = getattr(settings, "smtp_to", "") or getattr(settings, "admin_email", "") or "No configurado"
+    mgr_ip = getattr(settings, "wazuh_server_ip", "") or getattr(settings, "wazuh_manager_host", "") or "127.0.0.1"
+    ttl = getattr(settings, "relay_dedup_ttl", 300)
+
+    return (
+        f"⚙️ *CONFIGURACIÓN DEL SISTEMA WAZUH-WAHA*\n"
+        f"Servidor: `{platform.node()}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🔔 *Canales de Notificación:*\n"
+        f"• WhatsApp: {w_on} (Admin: `{phone}`)\n"
+        f"• Telegram: {t_on} (Chat ID: `{getattr(settings, 'telegram_chat_id', '-')}`)\n"
+        f"• Correo SMTP: {e_on} (Destino: `{email}`)\n\n"
+        f"🛡️ *Parámetros de Seguridad:*\n"
+        f"• Nivel mínimo de alerta: `Nivel {min_lvl}`\n"
+        f"• Ventana de deduplicación (TTL): `{ttl} seg`\n"
+        f"• Wazuh Manager IP: `{mgr_ip}`\n"
+        f"• Puerto Relay: `{getattr(settings, 'relay_port', 8765)}`\n"
+        f"• Puerto Dashboard: `8001`\n\n"
+        f"💡 *Comandos para Modificar Parámetros:*\n"
+        f"• `/set_nivel <8-15>` — Cambiar severidad mínima\n"
+        f"• `/set_canal <whatsapp|telegram|email> <on|off>`\n"
+        f"• `/set_phone <numero>` — Actualizar móvil WhatsApp\n"
+        f"• `/set_email <correo>` — Actualizar email de alertas\n"
+        f"• `/reporte <agent_id>` — Generar y recibir PDF del equipo\n"
+        f"• `/reiniciar <waha|dashboard|relay>` — Reiniciar servicio"
+    )
+
+
+def _set_alert_min_level(arg: str) -> str:
+    try:
+        val = int(arg)
+        if not (1 <= val <= 15):
+            return "⚠️ El nivel debe ser un número entero entre 1 y 15 (recomendado 8 a 12)."
+        from ..config import settings, load_overrides, save_overrides
+        setattr(settings, "telegram_min_level", val)
+        setattr(settings, "relay_min_level_unknown", val)
+        ov = load_overrides()
+        ov["telegram_min_level"] = val
+        ov["relay_min_level_unknown"] = val
+        save_overrides(ov)
+        _save_to_env({"RELAY_MIN_LEVEL_UNKNOWN": str(val), "TELEGRAM_MIN_LEVEL": str(val)})
+        _sync_systemd_env()
+        save_telegram_session(min_level=val)
+        return f"✅ *Nivel mínimo de alertas actualizado:*\nNuevo umbral: `Nivel {val}`.\nSe notificarán únicamente eventos con severidad >= {val}."
+    except ValueError:
+        return "⚠️ Uso incorrecto. Ejemplo: `/set_nivel 10`"
+
+
+def _set_channel_state(channel_arg: str, state_arg: str) -> str:
+    ch = channel_arg.lower().strip()
+    st = state_arg.lower().strip()
+    enable = st in ("on", "1", "true", "activar", "activo", "si", "sí")
+    disable = st in ("off", "0", "false", "desactivar", "inactivo", "no")
+    if not (enable or disable):
+        return "⚠️ Estado no válido. Usa `on` u `off`. Ejemplo: `/set_canal whatsapp on`"
+
+    val = enable
+    from ..config import settings, load_overrides, save_overrides
+    ov = load_overrides()
+    env_up = {}
+
+    if "what" in ch:
+        setattr(settings, "whatsapp_enabled", val)
+        ov["whatsapp_enabled"] = val
+        env_up["WHATSAPP_ENABLED"] = "true" if val else "false"
+        nombre = "WhatsApp"
+    elif "tele" in ch:
+        setattr(settings, "telegram_enabled", val)
+        ov["telegram_enabled"] = val
+        env_up["TELEGRAM_ENABLED"] = "true" if val else "false"
+        save_telegram_session(enabled=val)
+        nombre = "Telegram"
+    elif "mail" in ch or "corr" in ch:
+        setattr(settings, "email_alerts_enabled", val)
+        ov["email_alerts_enabled"] = val
+        env_up["EMAIL_ALERTS_ENABLED"] = "true" if val else "false"
+        nombre = "Correo Electrónico"
+    else:
+        return "⚠️ Canal no reconocido. Opciones: `whatsapp`, `telegram`, `email`."
+
+    save_overrides(ov)
+    _save_to_env(env_up)
+    _sync_systemd_env()
+    estado_str = "🟢 Activado" if val else "🔴 Desactivado"
+    return f"✅ *Canal {nombre} actualizado:*\nEstado: {estado_str}."
+
+
+def _set_admin_phone(phone_arg: str) -> str:
+    clean = "".join(c for c in phone_arg if c.isdigit())
+    if len(clean) < 10:
+        return "⚠️ Número de teléfono inválido. Ingresa el número con código de país (ej: `5219991234567`)."
+    from ..config import settings, load_overrides, save_overrides
+    setattr(settings, "admin_phone", clean)
+    ov = load_overrides()
+    ov["admin_phone"] = clean
+    save_overrides(ov)
+    _save_to_env({"ADMIN_PHONE": clean})
+    _sync_systemd_env()
+    return f"✅ *Teléfono WhatsApp del Administrador actualizado:*\nNúmero: `{clean}`."
+
+
+def _set_admin_email(email_arg: str) -> str:
+    em = email_arg.strip()
+    if "@" not in em or "." not in em:
+        return "⚠️ Dirección de correo inválida. Ejemplo: `/set_email soc@empresa.com`"
+    from ..config import settings, load_overrides, save_overrides
+    setattr(settings, "admin_email", em)
+    setattr(settings, "smtp_to", em)
+    ov = load_overrides()
+    ov["admin_email"] = em
+    ov["smtp_to"] = em
+    save_overrides(ov)
+    _save_to_env({"ADMIN_EMAIL": em, "SMTP_TO": em})
+    _sync_systemd_env()
+    return f"✅ *Correo de alertas del Administrador actualizado:*\nEmail: `{em}`."
+
+
+async def _generate_and_send_agent_report(agent_id: str, chat_id: str | None = None) -> str:
+    aid = str(agent_id).strip()
+    if not aid:
+        return "ℹ️ Especifica el ID del agente. Ejemplo: `/reporte 001` o `/reporte 000`"
+    try:
+        from ..api.telemetry import _fetch_agent_full_profile
+        from ..api.reports import _build_pdf
+
+        profile = await _fetch_agent_full_profile(aid)
+        ag_name = profile.get("agent_name", aid)
+        pdf_bytes = _build_pdf(profile)
+        now_str = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"reporte_agente_{aid}_{now_str}.pdf"
+
+        caption = (
+            f"📄 *Reporte Forense y Auditoría de Seguridad Wazuh*\n"
+            f"• Agente: `{ag_name}` (ID: `{aid}`)\n"
+            f"• Sistema: `{profile.get('os', {}).get('name', 'Linux')}`\n"
+            f"• Fecha: `{time.strftime('%d/%m/%Y %H:%M:%S')}`\n"
+            f"• Tamaño: `{round(len(pdf_bytes)/1024, 1)} KB`\n\n"
+            f"_Generado por Wazuh-WAHA SOC Relay_"
+        )
+
+        ok = await send_document(
+            document_bytes=pdf_bytes,
+            filename=filename,
+            caption=caption,
+            chat_id=chat_id,
+        )
+        if ok:
+            return f"✅ Reporte PDF del agente [{aid}] generado y enviado con éxito a tu chat."
+        else:
+            return f"⚠️ Se generó el PDF ({round(len(pdf_bytes)/1024, 1)} KB), pero falló el envío por Telegram."
+    except Exception as e:
+        log.exception("telegram_report_generate_err aid=%s", aid)
+        return f"❌ Error generando reporte PDF del agente [{aid}]: {e}"
+
+
+async def _restart_service(service_arg: str) -> str:
+    svc = service_arg.lower().strip()
+    import subprocess
+    if svc in ("waha", "whatsapp"):
+        cmd = "docker restart wazuh-waha"
+        label = "Contenedor WAHA (WhatsApp)"
+    elif svc in ("dashboard", "panel", "nginx"):
+        cmd = "docker restart wazuh-waha-dashboard"
+        label = "Contenedor Dashboard Web"
+    elif svc in ("relay", "wazuh-waha"):
+        cmd = "sudo systemctl restart wazuh-waha.service"
+        label = "Servicio Relay (wazuh-waha)"
+    elif svc in ("wazuh", "manager"):
+        cmd = "sudo systemctl restart wazuh-manager.service"
+        label = "Servicio Wazuh Manager"
+    else:
+        return "⚠️ Servicio no reconocido. Opciones: `waha`, `dashboard`, `relay`, `manager`."
+
+    try:
+        subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return f"🔄 Orden de reinicio enviada para *{label}* (`{cmd}`). Revisa en unos segundos con `/servicios`."
+    except Exception as e:
+        return f"❌ Error ejecutando reinicio: {e}"
 
 
 # ─────────────────────────────────────────────────────────────
 # 4. Procesador Central de Comandos (Telegram + WhatsApp)
 # ─────────────────────────────────────────────────────────────
 
-async def process_admin_command(text: str, source: str = "telegram") -> str:
-    """Ejecuta comandos de administración y monitoreo desde Telegram o WhatsApp."""
+async def process_admin_command(text: str, source: str = "telegram", chat_id: str | None = None) -> str:
+    """Ejecuta comandos de administración, configuración y monitoreo desde Telegram o WhatsApp."""
     clean = text.strip()
     if not clean:
         return _get_help_menu()
@@ -1062,6 +1282,31 @@ async def process_admin_command(text: str, source: str = "telegram") -> str:
         return _get_channels_summary()
     elif cmd in ("/reglas", "/rules"):
         return _get_rules_summary()
+    elif cmd in ("/config", "/configuracion", "/settings"):
+        return _get_configuration_summary()
+    elif cmd in ("/set_nivel", "/nivel"):
+        if not arg:
+            return "ℹ️ Especifica el nuevo nivel. Ejemplo: `/set_nivel 10`"
+        return _set_alert_min_level(arg)
+    elif cmd in ("/set_canal", "/canal"):
+        if not arg or len(parts) < 3:
+            return "ℹ️ Uso: `/set_canal <whatsapp|telegram|email> <on|off>`. Ejemplo: `/set_canal whatsapp on`"
+        return _set_channel_state(arg, parts[2])
+    elif cmd in ("/set_phone", "/phone", "/telefono"):
+        if not arg:
+            return "ℹ️ Especifica el número con código de país. Ejemplo: `/set_phone 5219991234567`"
+        return _set_admin_phone(arg)
+    elif cmd in ("/set_email", "/email", "/correo"):
+        if not arg:
+            return "ℹ️ Especifica el email. Ejemplo: `/set_email soc@empresa.com`"
+        return _set_admin_email(arg)
+    elif cmd in ("/reporte", "/report", "/pdf"):
+        target_aid = arg if arg else "001"
+        return await _generate_and_send_agent_report(target_aid, chat_id=chat_id)
+    elif cmd in ("/reiniciar", "/restart"):
+        if not arg:
+            return "ℹ️ Especifica el servicio a reiniciar (`waha`, `dashboard`, `relay`, `manager`). Ejemplo: `/reiniciar waha`"
+        return await _restart_service(arg)
     elif cmd in ("/ping",):
         t0 = time.time()
         load = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
@@ -1176,8 +1421,9 @@ class TelegramBotWorker:
             return
 
         # Procesar comando y responder
-        reply = await process_admin_command(text, source="telegram")
-        await send_message(reply, chat_id=chat_id)
+        reply = await process_admin_command(text, source="telegram", chat_id=chat_id)
+        if reply:
+            await send_message(reply, chat_id=chat_id)
 
 
 telegram_bot = TelegramBotWorker()

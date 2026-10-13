@@ -10,10 +10,12 @@
  *  - Top 5 agentes con más actividad
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTelemetry } from '../hooks/useTelemetry';
 import { useDashboardContext } from '../context/DashboardContext';
+import { dashboardService } from '../services/api';
 import type { LiveAlertEntry } from '../types/telemetry';
+import type { NetworkSitesSummary } from '../types/dashboard';
 import {
   Radio,
   AlertTriangle,
@@ -26,6 +28,9 @@ import {
   ChevronDown,
   ChevronRight,
   TerminalSquare,
+  Globe,
+  Wifi,
+  ExternalLink,
 } from 'lucide-react';
 
 /* ── Utilidades ─────────────────────────────────────────────────────────── */
@@ -215,9 +220,28 @@ const AlertRow: React.FC<{ alert: LiveAlertEntry }> = ({ alert }) => (
 /* ── Main Component ──────────────────────────────────────────────────────── */
 export const TelemetryGlobalCard: React.FC = () => {
   const { snapshot, connected, mode, error } = useTelemetry();
-  const { setShowTrafficTerminal } = useDashboardContext();
+  const { setShowTrafficTerminal, setActiveView } = useDashboardContext();
   const [expanded, setExpanded] = useState(true);
   const [showFeed, setShowFeed] = useState(false);
+  const [sitesData, setSitesData] = useState<NetworkSitesSummary | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadSites = async () => {
+      try {
+        const res = await dashboardService.getNetworkSites('all');
+        if (mounted) setSitesData(res);
+      } catch {
+        // ignore
+      }
+    };
+    loadSites();
+    const t = setInterval(loadSites, 10000);
+    return () => {
+      mounted = false;
+      clearInterval(t);
+    };
+  }, []);
 
   /* ── Estado de conexión badge ── */
   const connectionBadge = () => {
@@ -456,6 +480,158 @@ export const TelemetryGlobalCard: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Sitios Web y Tráfico Detectado en los Equipos */}
+          <div
+            style={{
+              background: 'var(--bg-card-hover)',
+              borderRadius: '10px',
+              padding: '14px 16px',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '12px',
+                flexWrap: 'wrap',
+                gap: '8px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Globe size={15} style={{ color: '#38bdf8' }} />
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.07em',
+                  }}
+                >
+                  Sitios Web y Destinos de Tráfico Capturados
+                </span>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    padding: '2px 8px',
+                    borderRadius: '10px',
+                    background: 'rgba(56, 189, 248, 0.15)',
+                    color: '#38bdf8',
+                    fontWeight: 700,
+                  }}
+                >
+                  {sitesData?.web_sites_count || 0} webs activas · {sitesData?.total_sites || 0} destinos
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveView('network_agents')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--cyan-accent)',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: 0,
+                }}
+              >
+                <span>Ver todos en Terminal Red & Agentes</span>
+                <ExternalLink size={12} />
+              </button>
+            </div>
+
+            {(!sitesData || !sitesData.sites || sitesData.sites.length === 0) ? (
+              <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>
+                Sincronizando inventario de sitios y sockets con los agentes Wazuh...
+              </p>
+            ) : (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                  gap: '10px',
+                }}
+              >
+                {sitesData.sites.slice(0, 8).map((st, idx) => {
+                  const isAct = st.state.includes('estab') || st.state.includes('syn') || st.state_label.includes('ACTIVA');
+                  return (
+                    <div
+                      key={`${st.domain}-${st.remote_port}-${idx}`}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.03)',
+                        border: '1px solid rgba(255, 255, 255, 0.06)',
+                        borderRadius: '8px',
+                        padding: '9px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '8px',
+                      }}
+                    >
+                      <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div
+                          style={{
+                            width: '26px',
+                            height: '26px',
+                            borderRadius: '6px',
+                            background: st.is_web ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: st.is_web ? '#38bdf8' : 'var(--text-secondary)',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {st.is_web ? <Globe size={13} /> : <Wifi size={13} />}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              color: 'var(--text-primary)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                            title={st.site_name}
+                          >
+                            {st.site_name}
+                          </div>
+                          <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                            {st.domain}:{st.remote_port} · <span style={{ color: 'var(--cyan-accent)' }}>{st.process}</span> ({st.agent_name})
+                          </div>
+                        </div>
+                      </div>
+
+                      <span
+                        style={{
+                          fontSize: '9px',
+                          fontWeight: 700,
+                          padding: '2px 6px',
+                          borderRadius: '8px',
+                          background: isAct ? 'rgba(46, 204, 113, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                          color: isAct ? 'var(--green-healthy)' : 'var(--text-muted)',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {isAct ? 'ACTIVA' : 'REGISTRADA'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Banner de acceso directo a la Terminal de Tráfico */}

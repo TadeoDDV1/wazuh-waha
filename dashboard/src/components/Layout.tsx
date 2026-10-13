@@ -7,6 +7,7 @@ import RecentAlertsDrawer from './RecentAlertsDrawer';
 import SettingsSection from './SettingsSection';
 import LiveTrafficTerminal from './LiveTrafficTerminal';
 import NetworkAgentsTerminal from './NetworkAgentsTerminal';
+import { ReportsCard } from './ReportsCard';
 import LoginScreen from './LoginScreen';
 import { Toaster } from 'sonner';
 import { useDashboardContext } from '../context/DashboardContext';
@@ -20,6 +21,7 @@ const LayoutContent: React.FC = () => {
     setShowTrafficTerminal,
     showNetworkTerminal,
     setShowNetworkTerminal,
+    activeView,
   } = useDashboardContext();
 
   return (
@@ -38,6 +40,18 @@ const LayoutContent: React.FC = () => {
             onClose={() => setShowTrafficTerminal(false)}
             asPanel
           />
+        ) : activeView === 'reports' ? (
+          <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px 24px 50px' }}>
+            <div style={{ marginBottom: '20px' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '24px' }}>📄</span> Generador de Reportes de Actividad Forense y Auditoría
+              </h2>
+              <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                Genera y descarga fichas forenses ejecutivas en PDF para cualquier agente registrado en el Wazuh Manager. Incluye telemetría de hardware, sistema operativo, sockets y puertos activos, evaluación de cumplimiento CIS (SCA), paquetes instalados e integridad de archivos (FIM).
+              </p>
+            </div>
+            <ReportsCard />
+          </div>
         ) : (
           <Dashboard />
         )}
