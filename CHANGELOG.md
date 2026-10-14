@@ -5,6 +5,25 @@ en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Rediseño Forense de Reportes PDF (v2.0)**:
+  - Generador ReportLab con paleta visual SOC slate (`#0f172a`, `#0284c7`, `#10b981`, `#cbd5e1`) y foliado dinámico institucional (`NumberedCanvas`, paginación "Página X de Y" y encabezado superior automático).
+  - **Tarjeta de Resumen Ejecutivo & Postura Global:** Mini-dashboard al inicio del reporte con 4 KPIs (Estado de enlace, Cumplimiento CIS SCA %, Alertas críticas/altas y Sockets/FIM).
+  - **Explicación Contextual de los 10 Apartados Forenses:** Cada sección incluye un recuadro explicativo (Callout) con:
+    - 🎯 *Objetivo de Auditoría*
+    - 🛡️ *Relevancia para la Seguridad*
+    - 💡 *Criterio de Análisis*
+  - **Dashboard Web (`ReportsCard.tsx`):** Guía interactiva desplegable que detalla los 10 apartados forenses con iconografía y descripciones antes de iniciar la descarga.
+  - **Bot de Telegram (`telegram_bot.py`):** Notificación de `/reporte` enriquecida con métricas de postura, conteo de alertas y sockets.
+
+### Changed / Cleaned
+- **Depuración Integral del Repositorio:**
+  - Limpieza de 17 copias sueltas de `.env.bak.*` en la raíz; copia de seguridad limpia consolidada en `backups/env-latest.bak`.
+  - Archivado de planes obsoletos y guía de migración histórica en `docs/archive/` (`PLAN-2026-06-16-refactor.md`, `PLAN-2026-06-16-reconnect.md`, `migration-from-wazuh-integration.md`).
+  - Eliminación de directorios vacíos remanentes de actualizaciones previas (`manager-side/test/`).
+  - Reemplazo de la plantilla genérica de Vite en `dashboard/README.md` con documentación oficial del panel web.
+  - Homologación de rutas relativas y referencias en `README.md`, `docs/README.md`, `docs/deployment.md`, `docs/rules-coverage.md`, `docs/ollama.md`, `docs/troubleshooting.md`, `deploy/README.md`, `deploy/vm-manager/README.md`, `scripts/README.md` y `tests/README.md`.
+
 ### Security
 - **Hardening completo de la telemetría en vivo y del relay** (auditoría
   completa de `/api/v1/telemetry/*`, `/debug/*`, nginx y frontend):

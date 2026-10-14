@@ -1,145 +1,120 @@
-# wazuh-waha
+# wazuh-waha — SOC Operations & Notification Suite
 
-Pipeline para mandar **alertas de Wazuh** a **WhatsApp** vía **WAHA** (WhatsApp HTTP API).
+Ecosistema de monitoreo, telemetría y respuesta ante incidentes para **Wazuh SIEM**, con entrega de alertas multicanal (**WhatsApp**, **Telegram**, **Email**), dashboard analítico en tiempo real, bot interactivo de administración y generador de **reportes forenses en PDF**.
 
 ```
-Wazuh manager (ver WAZUH_SERVER_IP en .env)
-  └── regla matchea (level >= 8)
-       └── <integration> ejecuta whatsapp_alert.py
+Wazuh Manager (Alertas de seguridad)
+  └── Regla activada (level >= 8)
+       └── Integración whatsapp_alert.py
             └── POST http://<relay-host>:8765/alerts
-                 ├── dedup con fcntl.flock (multi-worker safe)
-                 ├── template por rule_id
-                 └── POST http://localhost:3000/api/sendText (WAHA)
-                      └── WhatsApp del admin
+                 ├── Deduplicación concurrente con fcntl.flock
+                 ├── Enriquecimiento contextual con IA Local (Ollama LLM)
+                 ├── Despacho a WhatsApp (WAHA) + Telegram + Email SMTP
+                 ├── Journaling de tráfico y telemetría SSE
+                 └── Generación de Reportes Forenses PDF por Agente
 ```
 
-> **Nota:** La IP del manager Wazuh vive en **una sola variable** del `.env`:
-> `WAZUH_SERVER_IP`. Cambiarla ahí y todos los scripts + el helper
-> `scripts/render_manager_snippet.py` la reflejan automáticamente.
+---
 
-## Estado actual (junio 2026)
+## 🌟 Capacidades del Sistema
 
-- ✅ WAHA Docker (`:3000`), sesión WhatsApp activa.
-- ✅ Relay `wazuh-waha` con FastAPI + dedup multi-worker + templates.
-- ✅ Manager Wazuh configurado con `<integration>` y reglas custom.
-- ✅ Pipeline end-to-end validado (alerta real → WhatsApp recibido).
-- ✅ Watchdog de sesión WAHA (`wazuh-waha-watchdog.timer` cada 5 min).
-- ✅ Watchdog de drift de IP del manager (`watch_manager_ip.timer` cada 5 min).
-- ✅ Heartbeat de boot (`wazuh-waha-boot-notify`): email + WhatsApp al iniciar el host.
+- 📱 **Alertas Multicanal**: Despacho instantáneo a WhatsApp (WAHA), Telegram Bot y Email corporativo con plantillas por severidad.
+- 🤖 **Bot Administrativo de Telegram**: Control total del SOC desde el móvil (`/reporte`, `/servicios`, `/silenciar`, `/reiniciar`, `/scan`, `/agentes`).
+- 📊 **Dashboard Web en Tiempo Real**: Panel React 18 + Vite con stream de eventos SSE, métricas en vivo y editor de entorno `.env`.
+- 📄 **Generador de Reportes Forenses PDF**: Informes de seguridad ejecutivos y técnicos por agente (Hardware, SO, Red, Sockets, Procesos, Software, SCA CIS, FIM y Alertas).
+- 🧠 **Diagnóstico con IA Local (Ollama)**: Análisis inteligente de causa raíz sin enviar telemetría a nubes externas.
+- 🛡️ **Seguridad BFF & RBAC**: Autenticación estricta con API keys, cookies seguras HTTP-only y rate limiting preventivo.
 
-## Quickstart (5 pasos para alguien nuevo)
+---
 
-1. Clonar: `git clone <repo-url> wazuh-waha && cd wazuh-waha`
-2. Copiar `.env.example` a `.env` y completar (`openssl rand -hex 24` para API keys).
-3. Instalar el relay: `bash scripts/install-wazuh-waha.sh` (necesita TTY con sudo).
-4. Instalar en la VM del manager: ver [`docs/deployment.md` §2](docs/deployment.md).
-5. Test: `bash scripts/diagnose.sh` para ver el estado de toda la stack.
+## 🚀 Quickstart
 
-## Heartbeat de boot (email + WhatsApp al iniciar el host)
+1. **Clonar repositorio**:
+   ```bash
+   git clone <repo-url> wazuh-waha && cd wazuh-waha
+   ```
+2. **Configurar entorno**:
+   ```bash
+   cp .env.example .env
+   # Generar API keys seguras
+   openssl rand -hex 24
+   ```
+3. **Instalar el Relay**:
+   ```bash
+   bash scripts/install-wazuh-waha.sh
+   ```
+4. **Instalar en la VM de Wazuh Manager**:
+   Seguir instrucciones en [`docs/deployment.md`](docs/deployment.md#2-instalar-en-la-vm-del-manager).
+5. **Diagnóstico general**:
+   ```bash
+   bash scripts/diagnose.sh
+   ```
 
-Manda un email siempre, y un WhatsApp si WAHA responde, 90s después del
-boot. Útil para enterarte si el host arrancó bien o si la red cambió
-mientras estabas fuera.
+---
+
+## 📄 Reportes Forenses de Agentes (PDF)
+
+El sistema genera informes detallados de actividad y postura de seguridad por agente:
+
+- **Desde el Dashboard**: Acceder a la tarjeta "Reportes de Actividad por Agente", seleccionar el endpoint y descargar el PDF.
+- **Desde Telegram**: Enviar `/reporte <agent_id>` (ej. `/reporte 001`) al bot para recibir el documento directamente en el chat.
+- **Vía API REST**:
+  ```bash
+  curl -H "X-Api-Key: $RELAY_API_KEY" http://localhost:8765/api/v1/reports/agent/001 -o reporte_001.pdf
+  ```
+
+---
+
+## 🛠️ Comandos Frecuentes de Operación
 
 ```bash
-sudo cp deploy/arch-host/wazuh-waha-boot-notify.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now wazuh-waha-boot-notify.timer
-```
-
-Orden de notificación: **email primero, WhatsApp después** (no al revés),
-para que si WAHA está caido igual te enteres por correo.
-
-Ver [`docs/boot-notify.md`](docs/boot-notify.md) para detalle completo,
-testing y troubleshooting.
-
-## Comandos frecuentes
-
-```bash
-# Estado de WAHA
-docker ps --filter "name=wazuh-waha"
-curl -H "X-Api-Key: $(grep ^WAHA_API_KEY=*** | cut -d= -f2)" http://localhost:3000/api/sessions/default
-
-# Estado del relay
+# Estado del relay y healthcheck
 systemctl status wazuh-waha
 curl http://localhost:8765/health
-# /debug/* exige auth (header de servicios o sesión del dashboard)
-curl -H "X-Api-Key: $RELAY_API_KEY" http://localhost:8765/debug/recent
-curl -H "X-Api-Key: $RELAY_API_KEY" http://localhost:8765/debug/workers
 
-# Ver logs del relay
+# Contenedores Docker (WAHA y Dashboard)
+docker ps --filter "name=wazuh-waha"
+
+# Diagnóstico integral de la stack
+bash scripts/diagnose.sh
+
+# Logs en tiempo real del relay
 journalctl -u wazuh-waha -f
 
-# Reiniciar el relay si está zombie
-bash scripts/fix-wazuh-waha.sh
-
-# Recuperar sesión WAHA pegada
+# Recuperación de sesión WAHA si se traba
 bash scripts/recover-waha.sh
-
-# Diagnóstico read-only de toda la stack
-bash scripts/diagnose.sh
 ```
 
-## Problemas del build del dashboard
+---
 
-Si `docker compose build` falla con `/app/dist: not found`,
-`no space left on device` o el aviso
-`Bake, but buildx isn't installed`:
-
-```bash
-# 1. Espacio: Docker no vive en / — revisar su root real
-docker info --format '{{.DockerRootDir}}' | xargs df -h
-
-# 2. Caché de build corrupta (rebuild limpio)
-docker compose build --no-cache dashboard
-#    o: docker builder prune -af
-
-# 3. Si el warning de Bake/buildx molesta (el build aun funciona):
-#    instalar docker-buildx-plugin o exportar COMPOSE_BAKE=false
-```
-
-Notas del build:
-- El build inyecta `VITE_RELAY_API_KEY` desde `RELAY_API_KEY` del `.env` raíz
-  (misma key que valida el relay). `dashboard/.env` solo se usa en `npm run dev`.
-- `dashboard/package-lock.json` está trackeado: `npm ci` es reproducible.
-
-
-## Estructura del proyecto
+## 📂 Estructura del Repositorio
 
 ```
-wazuh-waha/                       ← repo root
-├── README.md                     # este archivo
-├── ARCHITECTURE.md               # decisiones técnicas, diagrama
-├── CHANGELOG.md                  # historial de cambios
-├── .env.example                  # plantilla de variables
-├── docker-compose.yml            # WAHA
-├── docs/                         # documentación larga
-├── scripts/                      # bash ejecutables
-├── relay/                        # servicio Python (el relay FastAPI)
-│   ├── pyproject.toml
-│   ├── systemd/                  # *.service + *.timer para relay + watchdog
-│   └── wazuh_waha/               # módulo Python (main, config, dedup, etc.)
-├── manager-side/                 # archivos para subir a la VM Wazuh
-│   ├── ossec.conf.snippet.xml
-│   ├── rules/local_rules.xml
-│   └── wsl-relay.conf.example
-├── deploy/                       # config específica por host
-│   ├── arch-host/                # systemd override + env file para este host
-│   └── vm-manager/               # scripts para la VM del manager
-└── tests/                        # tests del relay
+wazuh-waha/
+├── README.md                     # Documento central
+├── ARCHITECTURE.md               # Arquitectura técnica detallada
+├── CHANGELOG.md                  # Historial de versiones y cambios
+├── .env.example                  # Plantilla de variables de configuración
+├── docker-compose.yml            # Orquestación de WAHA y Dashboard
+├── docs/                         # Documentación operativa y técnica
+│   └── archive/                  # Planes históricos archivados
+├── dashboard/                    # Interfaz web React + Vite + TypeScript
+├── relay/                        # Servicio central FastAPI + Uvicorn
+│   ├── pyproject.toml            # Dependencias Python
+│   ├── systemd/                  # Units systemd del servicio y watchdog
+│   └── wazuh_waha/               # Módulo Python (API, Notifiers, Telemetría)
+├── manager-side/                 # Configuraciones para la VM Wazuh Manager
+├── scripts/                      # Utilidades y scripts de mantenimiento
+├── backups/                      # Copias de seguridad de alertas y entorno
+└── tests/                        # Suite de pruebas automatizadas
 ```
 
-## Documentación
+---
 
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — decisiones técnicas, por qué se hizo así.
-- [`docs/deployment.md`](docs/deployment.md) — instalación paso a paso.
-- [`docs/troubleshooting.md`](docs/troubleshooting.md) — issues frecuentes.
-- [`docs/multi-worker.md`](docs/multi-worker.md) — consideraciones con `--workers N`.
-- [`docs/ollama.md`](docs/ollama.md) — estado de la integración con IA local.
-- [`docs/rules-coverage.md`](docs/rules-coverage.md) — qué rule_ids tienen template.
-- [`docs/migration-from-wazuh-integration.md`](docs/migration-from-wazuh-integration.md) — si venís del proyecto viejo.
-- [`CHANGELOG.md`](CHANGELOG.md) — historial de versiones.
+## 📚 Documentación
 
-## Changelog
-
-Ver [`CHANGELOG.md`](CHANGELOG.md).
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — Decisiones de diseño y flujo de datos.
+- [`docs/README.md`](docs/README.md) — Índice completo de documentación técnica.
+- [`docs/deployment.md`](docs/deployment.md) — Instalación paso a paso.
+- [`docs/troubleshooting.md`](docs/troubleshooting.md) — Matriz de errores comunes.
+- [`dashboard/README.md`](dashboard/README.md) — Documentación del Dashboard Web.

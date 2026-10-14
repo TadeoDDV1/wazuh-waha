@@ -17,7 +17,7 @@ Ver `docs/deployment.md` §2.
 ## Snippets específicos de este host
 
 Por ejemplo, si esta VM tiene un path distinto para `ossec.conf` o reglas
-custom propias, van en subcarpetas de `vm-manager-side/`:
+custom propias, van en subcarpetas de `deploy/vm-manager/`:
 
-- `vm-manager-side/extra-rules.xml` — reglas que no van en el repo principal.
-- `vm-manager-side/ossec.conf.patches.md` — diffs manuales aplicados a esta VM.
+- `deploy/vm-manager/extra-rules.xml` — reglas que no van en el repo principal.
+- `deploy/vm-manager/ossec.conf.patches.md` — diffs manuales aplicados a esta VM.

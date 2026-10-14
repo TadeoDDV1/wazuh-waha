@@ -32,7 +32,7 @@ Mapeo rule_id → plantilla de mensaje → level mínimo en el `<integration>`.
 
 ## Cómo agregar un nuevo template
 
-1. Editar `wazuh-waha/wazuh_waha/templates.py`.
+1. Editar `relay/wazuh_waha/domain/templates.py`.
 2. Agregar el `rule_id` en el dict `TEMPLATES` con su función lambda.
 3. Si la regla es custom (fuera de stock Wazuh), agregar el bloque en
    `manager-side/rules/local_rules.xml` y reiniciar el manager.
@@ -40,6 +40,6 @@ Mapeo rule_id → plantilla de mensaje → level mínimo en el `<integration>`.
 
 ## Cómo desactivar un template
 
-Borrar (o comentar) la entrada del dict `TEMPLATES` en `templates.py`.
+Borrar (o comentar) la entrada del dict `TEMPLATES` en `relay/wazuh_waha/domain/templates.py`.
 Reiniciar el servicio. Las alertas que matcheen ese rule_id caerán a
 `render_default()` (formato genérico).

@@ -122,23 +122,17 @@ Defense in depth: el relay solo escribe a `/var/log/wazuh-waha` y `/var/lib/wazu
 
 `on_event` está deprecated desde FastAPI 0.110. `lifespan` es el reemplazo oficial. Misma funcionalidad, sintaxis más limpia.
 
-## Limitaciones conocidas
+### ¿Por qué ReportLab en memoria y NumberedCanvas para los reportes PDF?
 
-- **Sin webhook entrante de WAHA.** El relay solo recibe, no escucha mensajes. Si alguien manda un WhatsApp al admin, no hay forma de procesarlo (no es requerimiento).
-- **Un solo destinatario.** Configurado en `ADMIN_PHONE`. Si querés mandar a un grupo, hay que cambiar la lógica de `waha_client.send_text()` para que use `chatId` de tipo grupo (`<id>@g.us`).
-- **Rate limiting solo de entrada HTTP.** El relay limita requests entrantes
-  (por IP o sesión: 600/min telemetría, 120/min `/alerts`, 5/min login), pero
-  no limita la salida hacia WAHA: si Wazuh dispara 100 alertas en 1 segundo,
-  el relay intenta mandar 100 WhatsApps. WAHA puede rate-limitar, y el counter
-  de fallos en `waha_client` eventualmente lo va a detectar.
-- **TTS sin input.** No hay forma de "responder" al WhatsApp para, por ejemplo, silenciar una regla. YAGNI por ahora.
-- **`ollama_client.py` no enchufado.** Implementado pero desactivado. Documentado en `docs/ollama.md`.
+El endpoint `/api/v1/reports/agent/{agent_id}` y el bot de Telegram generan el PDF de forma dinámica en memoria (`io.BytesIO`) consumiendo el perfil forense completo del agente:
+1. **Sin persistencia temporal en disco:** Evita fugas de I/O y acumulación de PDFs temporales en el servidor; el stream se sirve directamente en la respuesta HTTP o en la llamada multipart de Telegram.
+2. **Canvas de dos pasos (`NumberedCanvas`):** Permite resolver el total de páginas (`Página X de Y`) y dibujar el encabezado y pie de página institucional sin interferir con el cálculo de flujo de las tablas.
+3. **Consistencia multicanal:** El mismo generador alimenta las descargas desde el Dashboard Web y los envíos instantáneos a los chats de Telegram de los analistas de seguridad.
 
-## Próximos pasos sugeridos (no en alcance)
+## Hitos de Arquitectura Completados
 
-1. Tests (pytest). Crítico para que el próximo cambio no rompa silenciosamente.
-2. Webhook entrante de WAHA para ack/control remoto.
-3. Soporte para múltiples destinatarios (lista en `ADMIN_PHONES`).
-4. Migrar `dedup_state.json` a SQLite cuando el lock se vuelva contended.
-5. Métricas Prometheus (counter de alertas por rule_id, histogram de latencia).
-6. Activar Ollama para `level >= 12` con timeout 3s.
+1. **Suite de Pruebas Automatizadas (pytest):** 9 módulos cubriendo reportes, autenticación BFF, journal de tráfico, backup rotativo, reglas Wazuh y bot de Telegram.
+2. **Control Interactivo Vía Telegram:** Soporte para silenciar/reactivar reglas, consultar estado de servicios, disparar escaneos y recibir reportes PDF forenses directamente en chat.
+3. **Dashboard Web SOC (React 18 + Vite):** Panel analítico en tiempo real con streaming SSE, visor de eventos y editor de configuración.
+4. **Motor de Reportes Forenses PDF:** Informes de auditoría con 10 apartados técnicos explicados y métricas ejecutivas.
+

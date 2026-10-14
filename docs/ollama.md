@@ -1,75 +1,40 @@
-# Ollama integration
+# Integración con Ollama (IA Local)
 
-## Estado actual (junio 2026)
+Diagnóstico y enriquecimiento contextual de alertas de seguridad mediante Modelos de Lenguaje Locales (LLM) corriendo en infraestructura propia sin envío de datos a nubes de terceros.
 
-- `ollama_client.py` está **implementado** pero **desconectado** del formatter.
-- Por default `OLLAMA_ENABLED=false` en `.env.example`.
-- Si querés activarlo, hay un único cambio en `formatter.py` (ver abajo).
+---
 
-## Por qué off por default
+## 🌟 Estado Actual y Capacidades
 
-Wazuh corre el script de integración con un timeout corto (~5s). Ollama
-`qwen2.5:0.5b` en CPU tarda **~10s por resumen**. Eso excede el timeout, Wazuh
-mata el script, y el `print(..., file=sys.stderr)` que documenta el error
-tampoco se loguea (el proceso murió antes).
+- **Módulo de Inferencia:** [`relay/wazuh_waha/infrastructure/ollama_client.py`](file:///home/tadeo/Desktop/wazuh-waha/relay/wazuh_waha/infrastructure/ollama_client.py) cliente HTTP asíncrono optimizado.
+- **Control Centralizado:** Habilitación y configuración directa desde el **Dashboard Web** (pestaña *AI / Ollama*) o vía variables de entorno en `.env`.
+- **Monitoreo en Vivo:** Chequeo de salud del modelo y latencia a través del bot de Telegram (`/servicios`).
 
-En resumen: con IA activada, **algunas alertas no se mandan y no sabemos por
-qué**.
+---
 
-## Cuándo tiene sentido activarlo
-
-- Tenés GPU disponible (`llama3.2:3b` con GPU corre en ~1s).
-- Querés resumen para alertas que no tienen template (actualmente caen a
-  `render_default()`, que es solo la metadata en texto plano).
-- Podés tolerar que las alertas `level >= 12` tarden 2-3s más.
-
-## Cómo activarlo
-
-### 1. Setear env
+## ⚙️ Configuración (`.env`)
 
 ```ini
-# .env
+# Habilitar o deshabilitar inferencia local
 OLLAMA_ENABLED=true
-OLLAMA_MODEL=qwen2.5:0.5b   # o el que prefieras
-OLLAMA_TIMEOUT=5            # segundos antes de fallback a default
+
+# Endpoint del servicio Ollama
+OLLAMA_HOST=http://localhost:11434
+
+# Modelo sugerido (liviano y rápido en CPU o GPU)
+OLLAMA_MODEL=qwen2.5:0.5b
+
+# Timeout estricto en segundos (evita demorar el flujo de despacho)
+OLLAMA_TIMEOUT=8
 ```
 
-### 2. Enchufar en `formatter.py`
+---
 
-Cambiar la rama "default" en `format_alert()`:
+## 💡 Recomendaciones Operativas
 
-```python
-# Antes:
-meta["decision"] = "default"
-return (templates.render_default(alert), meta)
+1. **Aceleración por Hardware:**
+   - Si se cuenta con GPU dedicada (NVIDIA / ROCm), modelos como `llama3.2:3b` o `qwen2.5:1.5b` infieren en $\sim 1\text{-}2$ segundos.
+   - En entornos solo-CPU, se recomienda mantener `qwen2.5:0.5b` y fijar un `OLLAMA_TIMEOUT` estricto (5 a 8s) para que las alertas no retrasen la entrega por WhatsApp o Telegram.
 
-# Después:
-from . import ollama_client
-from .config import settings
-if settings.ollama_enabled:
-    summary = await ollama_client.summarize(alert, timeout=settings.ollama_timeout)
-    if summary:
-        meta["decision"] = "ollama"
-        return (summary, meta)
-meta["decision"] = "default"
-return (templates.render_default(alert), meta)
-```
-
-### 3. Subir el timeout del integration
-
-En el bloque `<integration>` del manager:
-```xml
-<options>--script /var/ossec/integrations/custom/whatsapp_alert.py --timeout 30</options>
-```
-
-### 4. Reiniciar
-
-```bash
-sudo systemctl restart wazuh-waha
-```
-
-## Cuándo NO activarlo
-
-- En hot path para TODAS las alertas (cuelga el manager).
-- Sin GPU (CPU + qwen2.5:0.5b = ~10s, inaceptable).
-- Si el operador no entiende por qué algunas alertas tardan más.
+2. **Mecanismo de Respaldo (Fallback Seguro):**
+   - Si Ollama supera el tiempo límite configurado o el servicio no responde, el pipeline conmuta automáticamente a la plantilla predeterminada del motor SIEM, garantizando que **ninguna alerta se pierda**.

@@ -6,4 +6,4 @@ su subcarpeta. El código de `wazuh-waha/` y `manager-side/` no se toca por depl
 | Subdir | Para qué sirve |
 |---|---|
 | `arch-host/` | Ejemplo: el host Arch donde corre el relay. |
-| `vm-manager-side/` | Ejemplo: la VM Wazuh 4.x que manda las alertas. |
+| `vm-manager/` | Ejemplo: la VM Wazuh 4.x que manda las alertas. |

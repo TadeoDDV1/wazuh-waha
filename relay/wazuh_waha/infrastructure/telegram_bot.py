@@ -1099,7 +1099,7 @@ def _get_rules_summary() -> str:
 def _get_help_menu() -> str:
     """Menú de comandos de ayuda en español con cobertura total del ecosistema."""
     return (
-        f"🛡️ *CENTRO DE OPERACIONES DE SEGURIDAD (SOC) — COMANDOS*\n"
+        f"🛡️ *CENTRO DE OPERACIONES DE SEGURIDAD (SOC) — PANEL DE CONTROL*\n"
         f"Servidor: `{platform.node()}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"👥 *Gestión de Agentes y Ficha Forense:*\n"
@@ -1292,13 +1292,20 @@ async def _generate_and_send_agent_report(agent_id: str, chat_id: str | None = N
         now_str = time.strftime("%Y%m%d_%H%M%S")
         filename = f"reporte_agente_{aid}_{now_str}.pdf"
 
+        sca_val = profile.get("sca", {}).get("score")
+        sca_str = f"{sca_val}%" if sca_val is not None else "N/A"
+        det_count = len(profile.get("recent_detections") or [])
+        sites_count = len(profile.get("active_sites") or [])
+
         caption = (
-            f"📄 *Reporte Forense y Auditoría de Seguridad Wazuh*\n"
-            f"• Agente: `{ag_name}` (ID: `{aid}`)\n"
-            f"• Sistema: `{profile.get('os', {}).get('name', 'Linux')}`\n"
-            f"• Fecha: `{time.strftime('%d/%m/%Y %H:%M:%S')}`\n"
-            f"• Tamaño: `{round(len(pdf_bytes)/1024, 1)} KB`\n\n"
-            f"_Generado por Wazuh-WAHA SOC Relay_"
+            f"📄 *Reporte Forense & Auditoría SOC (PDF v2.0)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"• *Endpoint:* `{ag_name}` (ID: `{aid}`)\n"
+            f"• *Sistema:* `{profile.get('os', {}).get('name', 'Linux')}`\n"
+            f"• *SCA CIS:* `{sca_str}` · *Alertas:* `{det_count}` · *Destinos:* `{sites_count}`\n"
+            f"• *Contenido:* 10 apartados explicados (Hardware, Red, Sockets, Procesos, Software, SCA CIS, FIM y Alertas)\n"
+            f"• *Emisión:* `{time.strftime('%d/%m/%Y %H:%M:%S')}` ({round(len(pdf_bytes)/1024, 1)} KB)\n\n"
+            f"_Wazuh-WAHA SOC Operations Suite_"
         )
 
         ok = await send_document(

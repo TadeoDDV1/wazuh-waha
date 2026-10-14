@@ -6,6 +6,7 @@ Estos son los archivos que tenés que llevar a la **VM del manager Wazuh**.
 
 | Archivo en el repo | Destino en la VM | Permisos |
 |---|---|---|
+| `manager-side/custom/whatsapp_alert.py` | `/var/ossec/integrations/custom/whatsapp_alert.py` | `0750 root:wazuh` |
 | `manager-side/rules/local_rules.xml` | `/var/ossec/etc/rules/local_rules.xml` | `0640 root:wazuh` |
 | `manager-side/wsl-relay.conf.example` | `/var/ossec/etc/wsl-relay.conf` (con valores reales) | `0640 root:wazuh` |
 | `manager-side/ossec.conf.snippet.xml` | pegar bloque `<integration>` en `/var/ossec/etc/ossec.conf` | n/a |

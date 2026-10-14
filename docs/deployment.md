@@ -28,9 +28,10 @@ openssl rand -hex 24   # pegar en RELAY_API_KEY
 ### 1.3 Crear venv e instalar deps
 
 ```bash
-cd wazuh-waha
+cd relay
 python3.11 -m venv .venv
 .venv/bin/pip install -e .
+cd ..
 ```
 
 (Si el sistema tiene Python < 3.11, instalar `python3.11` desde AUR o usar
@@ -39,11 +40,12 @@ el `pyenv` del usuario.)
 ### 1.4 Instalar como servicio systemd
 
 ```bash
-sudo cp systemd/wazuh-waha.service /etc/systemd/system/wazuh-waha.service
+sudo cp relay/systemd/wazuh-waha.service /etc/systemd/system/wazuh-waha.service
 sudo mkdir -p /etc/wazuh-waha
-sudo cp ../deploy/arch-host/relay.env /etc/wazuh-waha/relay.env
+sudo cp deploy/arch-host/relay.env /etc/wazuh-waha/relay.env
 sudo chmod 600 /etc/wazuh-waha/relay.env
-sudo cp ../deploy/arch-host/wazuh-waha.service.override.conf \
+sudo mkdir -p /etc/systemd/system/wazuh-waha.service.d
+sudo cp deploy/arch-host/wazuh-waha.service.override.conf \
         /etc/systemd/system/wazuh-waha.service.d/override.conf
 
 sudo systemctl daemon-reload

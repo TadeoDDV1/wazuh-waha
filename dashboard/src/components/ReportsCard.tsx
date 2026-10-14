@@ -8,6 +8,18 @@ import {
   Loader2,
   RefreshCw,
   Server,
+  ShieldCheck,
+  Cpu,
+  Activity,
+  Network,
+  Package,
+  Layers,
+  FileCode,
+  Terminal,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Info,
 } from 'lucide-react';
 
 interface Agent {
@@ -17,11 +29,95 @@ interface Agent {
   status?: string;
 }
 
+const REPORT_SECTIONS = [
+  {
+    num: '01',
+    title: 'Identificación y Enlace',
+    icon: Server,
+    color: '#0284c7',
+    desc: 'ID, hostname, IP de enlace, versión de agente y vigencia de sincronización con el Manager (keep-alive).',
+    detail: 'Garantiza que el canal criptográfico esté sincronizado y que el endpoint no haya sido desconectado o aislado.',
+  },
+  {
+    num: '02',
+    title: 'Hardware y Recursos',
+    icon: Cpu,
+    color: '#0284c7',
+    desc: 'Microprocesador (CPU, núcleos, MHz), memoria RAM (total, usada, % y libre) y serial de placa madre.',
+    detail: 'Permite detectar saturación por ataques DoS o minería no autorizada, y valida números de serie contra activos inventariados.',
+  },
+  {
+    num: '03',
+    title: 'Sistema Operativo y Kernel',
+    icon: Layers,
+    color: '#059669',
+    desc: 'Distribución, arquitectura, hostname y versión exacta del kernel en ejecución.',
+    detail: 'Delimita la superficie de ataque inicial y permite evaluar la exposición frente a exploits locales de escalamiento (LPE).',
+  },
+  {
+    num: '04',
+    title: 'Interfaces de Red y Tráfico',
+    icon: Network,
+    color: '#0891b2',
+    desc: 'Adaptadores físicos y virtuales, IPv4, MAC address, MTU y volumen acumulado de tráfico RX y TX.',
+    detail: 'Descubre adaptadores en modo promiscuo, interfaces bridge sospechosas o volúmenes anómalos de exfiltración de datos.',
+  },
+  {
+    num: '05',
+    title: 'Destinos de Red & Sockets',
+    icon: Activity,
+    color: '#0284c7',
+    desc: 'Sockets activos hacia IPs remotas, puertos, procesos locales asociados y categorización de dominio.',
+    detail: 'Primera línea de defensa para identificar balizas de Command & Control (C2), troyanos o navegación indebida.',
+  },
+  {
+    num: '06',
+    title: 'Procesos en Ejecución',
+    icon: Terminal,
+    color: '#059669',
+    desc: 'Listado de binarios en memoria con su PID, nombre ejecutable, usuario y estado de ejecución.',
+    detail: 'Permite descubrir scripts ocultos, procesos sospechosos corriendo como root/SYSTEM o ejecutables desde rutas temporales.',
+  },
+  {
+    num: '07',
+    title: 'Software y Paquetería',
+    icon: Package,
+    color: '#ea580c',
+    desc: 'Inventario SBOM de paquetes y aplicaciones registradas por el módulo Syscollector de Wazuh.',
+    detail: 'Base para la gestión de vulnerabilidades conocidas (CVEs), control de parches y detección de software no homologado.',
+  },
+  {
+    num: '08',
+    title: 'Seguridad SCA (CIS Benchmark)',
+    icon: ShieldCheck,
+    color: '#059669',
+    desc: 'Score global de cumplimiento frente a normas CIS, controles aprobados, fallidos y remediaciones.',
+    detail: 'Audita directrices de hardening del sistema (permisos, contraseñas, servicios seguros) con comandos técnicos de solución.',
+  },
+  {
+    num: '09',
+    title: 'Integridad de Archivos (FIM)',
+    icon: FileCode,
+    color: '#7c3aed',
+    desc: 'Auditoría Syscheck de archivos modificados, eliminados o creados con hashes criptográficos MD5/SHA256.',
+    detail: 'Detecta manipulación de ficheros críticos de autenticación (/etc/passwd) o sustitución maliciosa de binarios del sistema.',
+  },
+  {
+    num: '10',
+    title: 'Detecciones SIEM Wazuh',
+    icon: AlertTriangle,
+    color: '#dc2626',
+    desc: 'Incidentes y alertas correlacionadas por reglas Wazuh, clasificadas por severidad (L1 a L15).',
+    detail: 'Evidencia directa de ataques e intrusiones (fuerza bruta, escaneo de puertos, inyecciones) para respuesta inmediata del SOC.',
+  },
+];
+
 export const ReportsCard: React.FC = () => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
   const [loadingAgents, setLoadingAgents] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   const fetchAgents = useCallback(async () => {
     setLoadingAgents(true);
@@ -91,16 +187,16 @@ export const ReportsCard: React.FC = () => {
           </div>
           <div>
             <div className="card-title-line">
-              <span className="card-title">Reportes de Actividad por Agente</span>
+              <span className="card-title">Reportes Forenses & Auditoría de Seguridad</span>
               <span
                 className="status-pill healthy"
                 style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' }}
               >
-                PDF
+                PDF SOC v2.0
               </span>
             </div>
             <div className="card-category">
-              Generá y descargá un reporte PDF con la ficha forense completa de cualquier agente Wazuh: hardware, SO, red, SCA, FIM, software, procesos y detecciones.
+              Generá y descargá un informe forense con diseño ejecutivo, KPIs de postura, explicaciones técnicas por sección y foliado institucional para cualquier agente Wazuh.
             </div>
           </div>
         </div>
@@ -132,7 +228,7 @@ export const ReportsCard: React.FC = () => {
             }}
           >
             <Server size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-            Seleccionar Agente
+            Seleccionar Agente Wazuh
           </label>
           <select
             id="report-agent-select"
@@ -192,12 +288,12 @@ export const ReportsCard: React.FC = () => {
           {downloading ? (
             <>
               <Loader2 size={15} className="animate-spin" />
-              Generando PDF...
+              Compilando Informe PDF...
             </>
           ) : (
             <>
               <Download size={15} />
-              Descargar Reporte PDF
+              Descargar Informe Forense PDF
             </>
           )}
         </button>
@@ -216,11 +312,12 @@ export const ReportsCard: React.FC = () => {
             color: 'var(--text-secondary)',
             display: 'flex',
             gap: '20px',
+            alignItems: 'center',
             flexWrap: 'wrap',
           }}
         >
           <span>
-            Agente: <strong style={{ color: '#fff' }}>[{selectedAgent.id}] {selectedAgent.name}</strong>
+            Endpoint: <strong style={{ color: '#fff' }}>[{selectedAgent.id}] {selectedAgent.name}</strong>
           </span>
           {selectedAgent.ip && (
             <span>
@@ -229,17 +326,106 @@ export const ReportsCard: React.FC = () => {
           )}
           {selectedAgent.status && (
             <span>
-              Estado:{' '}
+              Enlace:{' '}
               <strong style={{ color: selectedAgent.status === 'active' ? 'var(--green-healthy)' : 'var(--red-error)' }}>
-                {selectedAgent.status}
+                {selectedAgent.status.toUpperCase()}
               </strong>
             </span>
           )}
-          <span style={{ color: 'var(--text-secondary)' }}>
-            El reporte incluye: identificación, hardware, SO, interfaces de red, destinos activos, SCA CIS, FIM, software, procesos y alertas Wazuh.
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span
+              style={{
+                fontSize: '11px',
+                padding: '2px 8px',
+                borderRadius: '12px',
+                background: 'rgba(56, 189, 248, 0.1)',
+                color: '#38bdf8',
+                border: '1px solid rgba(56, 189, 248, 0.2)',
+              }}
+            >
+              10 Secciones Forenses
+            </span>
           </span>
         </div>
       )}
+
+      {/* Botón para expandir guía explicativa de apartados */}
+      <div style={{ marginTop: '12px' }}>
+        <button
+          type="button"
+          onClick={() => setShowGuide(!showGuide)}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: '#c084fc',
+            fontSize: '12px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '4px 0',
+          }}
+        >
+          <Info size={14} />
+          {showGuide ? 'Ocultar estructura de apartados' : 'Ver apartados y objetivos explicados en el informe'}
+          {showGuide ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+
+        {showGuide && (
+          <div
+            style={{
+              marginTop: '10px',
+              padding: '14px',
+              borderRadius: '8px',
+              background: 'rgba(0, 0, 0, 0.25)',
+              border: '1px solid rgba(168, 85, 247, 0.2)',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+              gap: '10px',
+            }}
+          >
+            {REPORT_SECTIONS.map((sec) => {
+              const IconComp = sec.icon;
+              return (
+                <div
+                  key={sec.num}
+                  style={{
+                    padding: '10px',
+                    borderRadius: '6px',
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid rgba(255, 255, 255, 0.05)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                    <div
+                      style={{
+                        padding: '4px',
+                        borderRadius: '4px',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        color: sec.color,
+                        display: 'flex',
+                      }}
+                    >
+                      <IconComp size={14} />
+                    </div>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9' }}>
+                      <span style={{ color: sec.color, marginRight: '4px' }}>{sec.num}.</span>
+                      {sec.title}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '11px', color: '#94a3b8', margin: '2px 0 4px 0', lineHeight: 1.35 }}>
+                    {sec.desc}
+                  </p>
+                  <p style={{ fontSize: '10px', color: '#64748b', margin: 0, fontStyle: 'italic', lineHeight: 1.3 }}>
+                    💡 {sec.detail}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {agents.length === 0 && !loadingAgents && (
         <div

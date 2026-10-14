@@ -110,6 +110,6 @@ sudo -u <usuario> touch /var/lib/wazuh-waha/test
 # Todos los workers deben escribir al mismo path
 ```
 
-## "Quiero separar `wazuh-integration/` en su propio repo → renombrar a wazuh-waha"
+## "Historial: Migración desde el proyecto anterior `wazuh-integration/`"
 
-Ver `docs/migration-from-wazuh-integration.md`.
+Ver [`docs/archive/migration-from-wazuh-integration.md`](archive/migration-from-wazuh-integration.md).
