@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import './ComponentCard.css';
+import './ReportsCard.css';
 import { dashboardService } from '../services/api';
 import { toast } from 'sonner';
 import {
@@ -8,22 +9,19 @@ import {
   Loader2,
   RefreshCw,
   Server,
-  ShieldCheck,
-  Cpu,
   Activity,
-  Network,
-  Package,
   Layers,
   FileCode,
   Terminal,
   AlertTriangle,
-  ChevronDown,
-  ChevronUp,
-  Info,
   Scan,
   Send,
-  Copy,
-  Check,
+  CheckCircle2,
+  FileCheck,
+  HardDrive,
+  Cpu,
+  Globe,
+  Lock,
 } from 'lucide-react';
 
 interface Agent {
@@ -53,116 +51,116 @@ interface AgentPreview {
   total_packages: number;
 }
 
-interface ReportSection {
+interface ReportSectionInfo {
   num: string;
   title: string;
   category: 'general' | 'red' | 'cumplimiento' | 'siem';
-  icon: any;
-  color: string;
+  icon: React.ReactNode;
+  source: string;
   desc: string;
-  detail: string;
+  details: string;
 }
 
-const REPORT_SECTIONS: ReportSection[] = [
+const REPORT_SECTIONS: ReportSectionInfo[] = [
   {
-    num: '01',
-    title: 'Identificación y Enlace',
+    num: '§01',
+    title: 'Portada y Metadatos del Expediente',
     category: 'general',
-    icon: Server,
-    color: '#0284c7',
-    desc: 'ID, hostname, IP de enlace, versión de agente y vigencia de sincronización con el Manager (keep-alive).',
-    detail: 'Garantiza que el canal criptográfico esté sincronizado y que el endpoint no haya sido desconectado o aislado.',
+    icon: <FileText size={14} />,
+    source: 'Metadata Relay / Wazuh API',
+    desc: 'Foliado institucional único, fecha ISO, autor del informe y alcance forense.',
+    details: 'Incluye folio dinámico SOC-REP-ID-TS, hash de integridad, datos de la organización y sellado de tiempo de emisión.',
   },
   {
-    num: '02',
-    title: 'Hardware y Recursos',
+    num: '§02',
+    title: 'Resumen Ejecutivo y Estado del Host',
     category: 'general',
-    icon: Cpu,
-    color: '#0284c7',
-    desc: 'Microprocesador (CPU, núcleos, MHz), memoria RAM (total, usada, % y libre) y serial de placa madre.',
-    detail: 'Permite detectar saturación por ataques DoS o minería no autorizada, y valida números de serie contra activos inventariados.',
+    icon: <Cpu size={14} />,
+    source: 'wazuh-manager syscollector_os',
+    desc: 'Postura global del endpoint, hardware, uptime y distribución Linux/Windows.',
+    details: 'Detalla nombre del host, IP de conexión, sistema operativo, versión del kernel, arquitectura CPU y memoria RAM asignada.',
   },
   {
-    num: '03',
-    title: 'Sistema Operativo y Kernel',
+    num: '§03',
+    title: 'Topología e Interfaces de Red',
+    category: 'red',
+    icon: <Globe size={14} />,
+    source: 'syscollector_netiface',
+    desc: 'Direcciones IP asignadas, máscaras de subred, puertas de enlace y MACs.',
+    details: 'Mapea adaptadores Ethernet, Wi-Fi y Loopback con direcciones IPv4, IPv6, MTU y métricas de transmisión de paquetes.',
+  },
+  {
+    num: '§04',
+    title: 'Puertos de Red y Sockets Activos',
+    category: 'red',
+    icon: <Globe size={14} />,
+    source: 'syscollector_ports',
+    desc: 'Servicios en escucha (LISTEN) en protocolos TCP/UDP y procesos asociados.',
+    details: 'Inventario de superficie de ataque externa con números de puerto, IP de enlace local y PID del proceso en ejecución.',
+  },
+  {
+    num: '§05',
+    title: 'Inventario de Software Instalado (SBOM)',
     category: 'general',
-    icon: Layers,
-    color: '#059669',
-    desc: 'Distribución, arquitectura, hostname y versión exacta del kernel en ejecución.',
-    detail: 'Delimita la superficie de ataque inicial y permite evaluar la exposición frente a exploits locales de escalamiento (LPE).',
+    icon: <HardDrive size={14} />,
+    source: 'syscollector_packages',
+    desc: 'Catálogo de paquetería de software detectada para análisis de CVEs.',
+    details: 'Listado exhaustivo de aplicaciones instaladas (apt, dpkg, rpm, pacman o MSI) con versión exacta y vendor para auditoría de vulnerabilidades.',
   },
   {
-    num: '04',
-    title: 'Interfaces de Red y Tráfico',
-    category: 'red',
-    icon: Network,
-    color: '#0891b2',
-    desc: 'Adaptadores físicos y virtuales, IPv4, MAC address, MTU y volumen acumulado de tráfico RX y TX.',
-    detail: 'Descubre adaptadores en modo promiscuo, interfaces bridge sospechosas o volúmenes anómalos de exfiltración de datos.',
+    num: '§06',
+    title: 'Procesos Activos y Consumo de Recursos',
+    category: 'general',
+    icon: <Activity size={14} />,
+    source: 'syscollector_processes',
+    desc: 'Árbol de procesos en ejecución, consumo de CPU/RAM y usuario titular.',
+    details: 'Forense de procesos activos identificando PIDs anómalos, rutas de binarios y comandos completos de inicialización.',
   },
   {
-    num: '05',
-    title: 'Destinos de Red & Sockets',
-    category: 'red',
-    icon: Activity,
-    color: '#0284c7',
-    desc: 'Sockets activos hacia IPs remotas, puertos, procesos locales asociados y categorización de dominio.',
-    detail: 'Primera línea de defensa para identificar balizas de Command & Control (C2), troyanos o navegación indebida.',
-  },
-  {
-    num: '06',
-    title: 'Procesos en Ejecución',
-    category: 'red',
-    icon: Terminal,
-    color: '#059669',
-    desc: 'Listado de binarios en memoria con su PID, nombre ejecutable, usuario y estado de ejecución.',
-    detail: 'Permite descubrir scripts ocultos, procesos sospechosos corriendo como root/SYSTEM o ejecutables desde rutas temporales.',
-  },
-  {
-    num: '07',
-    title: 'Software y Paquetería',
+    num: '§07',
+    title: 'Auditoría de Configuración de Seguridad (CIS SCA)',
     category: 'cumplimiento',
-    icon: Package,
-    color: '#ea580c',
-    desc: 'Inventario SBOM de paquetes y aplicaciones registradas por el módulo Syscollector de Wazuh.',
-    detail: 'Base para la gestión de vulnerabilidades conocidas (CVEs), control de parches y detección de software no homologado.',
+    icon: <Lock size={14} />,
+    source: 'sca_checks_eval',
+    desc: 'Puntaje de cumplimiento CIS Benchmark con fallos de hardening específicos.',
+    details: 'Porcentaje de cumplimiento de seguridad del sistema, pruebas aprobadas vs falladas, con archivo de políticas y remediación recomendada.',
   },
   {
-    num: '08',
-    title: 'Seguridad SCA (CIS Benchmark)',
+    num: '§08',
+    title: 'Monitoreo de Integridad de Archivos (FIM / Syscheck)',
     category: 'cumplimiento',
-    icon: ShieldCheck,
-    color: '#10b981',
-    desc: 'Score global de cumplimiento frente a normas CIS, controles aprobados, fallidos y remediaciones.',
-    detail: 'Audita directrices de hardening del sistema (permisos, contraseñas, servicios seguros) con comandos técnicos de solución.',
+    icon: <FileCheck size={14} />,
+    source: 'syscheck_database',
+    desc: 'Archivos críticos del sistema monitoreados con hashes MD5/SHA256.',
+    details: 'Rastreo de modificaciones no autorizadas en archivos binarios, directorios de configuración `/etc` y registros del sistema.',
   },
   {
-    num: '09',
-    title: 'Integridad de Archivos (FIM)',
-    category: 'cumplimiento',
-    icon: FileCode,
-    color: '#a855f7',
-    desc: 'Auditoría Syscheck de archivos modificados, eliminados o creados con hashes criptográficos MD5/SHA256.',
-    detail: 'Detecta manipulación de ficheros críticos de autenticación (/etc/passwd) o sustitución maliciosa de binarios del sistema.',
-  },
-  {
-    num: '10',
-    title: 'Detecciones SIEM Wazuh',
+    num: '§09',
+    title: 'Alertas Recientes y Eventos SIEM Correlacionados',
     category: 'siem',
-    icon: AlertTriangle,
-    color: '#ef4444',
-    desc: 'Incidentes y alertas correlacionadas por reglas Wazuh, clasificadas por severidad (L1 a L15).',
-    detail: 'Evidencia directa de ataques e intrusiones (fuerza bruta, escaneo de puertos, inyecciones) para respuesta inmediata del SOC.',
+    icon: <AlertTriangle size={14} />,
+    source: 'wazuh_alerts_log',
+    desc: 'Últimos incidentes de seguridad registrados por el motor de análisis de reglas.',
+    details: 'Historial de alertas SIEM con ID de regla, nivel de severidad (8-15), descripción de la anomalía y MITRE ATT&CK ID asociado.',
+  },
+  {
+    num: '§10',
+    title: 'Conclusiones y Recomendaciones de Hardening',
+    category: 'siem',
+    icon: <CheckCircle2 size={14} />,
+    source: 'Motor Forense SOC',
+    desc: 'Veredicto de riesgo, acciones de mitigación prioritarias y sello del SOC.',
+    details: 'Dictamen de seguridad ejecutivo con matriz de acciones preventivas, cierre criptográfico y sello de autenticidad institucional.',
   },
 ];
 
 export const ReportsCard: React.FC = () => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
-  const [loadingAgents, setLoadingAgents] = useState(true);
+  const [loadingAgents, setLoadingAgents] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [auditing, setAuditing] = useState(false);
-  const [showGuide, setShowGuide] = useState(false);
+  const [activeTab, setActiveTab] = useState<'secciones' | 'guia' | 'telegram'>('secciones');
   const [activeGuideCategory, setActiveGuideCategory] = useState<'todos' | 'general' | 'red' | 'cumplimiento' | 'siem'>('todos');
   const [preview, setPreview] = useState<AgentPreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -177,9 +175,8 @@ export const ReportsCard: React.FC = () => {
       if (list.length > 0 && !selectedAgentId) {
         setSelectedAgentId(list[0].id);
       }
-    } catch (err) {
-      console.error('Error fetching agents for reports:', err);
-      toast.error('No se pudo cargar la lista de agentes.');
+    } catch {
+      setAgents([]);
     } finally {
       setLoadingAgents(false);
     }
@@ -187,14 +184,13 @@ export const ReportsCard: React.FC = () => {
 
   useEffect(() => {
     fetchAgents();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchAgents]);
 
-  // Cargar vista previa del agente seleccionado
-  const fetchPreview = useCallback(async (agentId: string) => {
-    if (!agentId) return;
+  const fetchPreview = useCallback(async (aid: string) => {
+    if (!aid) return;
     setLoadingPreview(true);
     try {
-      const data = await dashboardService.getAgentReportPreview(agentId);
+      const data = await dashboardService.getAgentReportPreview(aid);
       if (data?.ok) {
         setPreview(data);
       } else {
@@ -215,7 +211,7 @@ export const ReportsCard: React.FC = () => {
 
   const handleDownload = async () => {
     if (!selectedAgentId) {
-      toast.warning('Seleccioná un agente para generar el reporte.');
+      toast.warning('Selecciona un agente para generar el reporte forense.');
       return;
     }
     setDownloading(true);
@@ -231,19 +227,9 @@ export const ReportsCard: React.FC = () => {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast.success(`Informe Forense PDF [${selectedAgentId}] generado y descargado exitosamente.`);
-    } catch (err: any) {
-      console.error('Error downloading agent report:', err);
-      const status = err?.response?.status;
-      if (status === 401) {
-        toast.error('Sesión expirada. Volvé a iniciar sesión para descargar el reporte.');
-      } else if (status === 403) {
-        toast.error('Permisos insuficientes para descargar reportes.');
-      } else if (err?.message?.includes('Network Error')) {
-        toast.error('Sin conexión con el relay. Verificá que esté activo.');
-      } else {
-        toast.error('Error al generar el reporte PDF. Reintenta en unos segundos.');
-      }
+      toast.success(`Informe Forense PDF del Agente [${selectedAgentId}] descargado exitosamente`);
+    } catch (e: any) {
+      toast.error('Error al generar el reporte: ' + (e.message || String(e)));
     } finally {
       setDownloading(false);
     }
@@ -252,24 +238,22 @@ export const ReportsCard: React.FC = () => {
   const handleAuditScan = async () => {
     if (!selectedAgentId) return;
     setAuditing(true);
-    toast.info(`Disparando escaneo de integridad Wazuh para el agente [${selectedAgentId}]...`);
     try {
       const res = await dashboardService.auditAgentBeforeReport(selectedAgentId);
       if (res?.ok) {
-        toast.success(res.detail || 'Escaneo Syscheck/FIM disparado exitosamente');
-        // Refrescar preview
-        setTimeout(() => fetchPreview(selectedAgentId), 2500);
+        toast.success(`✓ ${res.detail || 'Escaneo FIM disparado correctamente'}`);
+        fetchPreview(selectedAgentId);
       } else {
-        toast.warning(res?.detail || 'El manager no pudo iniciar el escaneo');
+        toast.error(res?.detail || 'No se pudo iniciar el escaneo de auditoría');
       }
-    } catch (err: any) {
-      toast.error('Error al solicitar escaneo: ' + (err.message || String(err)));
+    } catch (e: any) {
+      toast.error('Error al iniciar auditoría: ' + (e.message || String(e)));
     } finally {
       setAuditing(false);
     }
   };
 
-  const handleCopyTelegramShortcut = () => {
+  const handleCopyTelegramCommand = () => {
     const cmd = `/reporte ${selectedAgentId || '000'}`;
     navigator.clipboard.writeText(cmd);
     setCopiedTelegramCmd(true);
@@ -283,467 +267,413 @@ export const ReportsCard: React.FC = () => {
   );
 
   return (
-    <div
-      className="component-card healthy"
-      style={{
-        borderColor: 'rgba(168, 85, 247, 0.45)',
-        background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.4) 100%)',
-      }}
-    >
-      {/* Cabecera */}
-      <div className="card-top-row">
-        <div className="card-identity">
+    <div className="component-card reports-card status-healthy">
+      {/* Cabecera Estándar ComponentCard */}
+      <div className="card-header">
+        <div className="card-title-group">
           <div
-            className="service-icon-box"
+            className="card-icon-wrapper"
             style={{
-              background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(147, 51, 234, 0.15))',
-              color: '#c084fc',
-              border: '1px solid rgba(192, 132, 252, 0.3)',
+              background: 'rgba(168, 85, 247, 0.15)',
+              borderColor: 'rgba(168, 85, 247, 0.35)',
             }}
           >
-            <FileText size={20} />
+            <FileText size={18} style={{ color: '#c084fc' }} />
           </div>
-          <div>
-            <div className="card-title-line">
-              <span className="card-title">Generador de Reportes Forenses SOC</span>
-              <span
-                className="status-pill healthy"
-                style={{
-                  background: 'rgba(168, 85, 247, 0.18)',
-                  color: '#c084fc',
-                  border: '1px solid rgba(192, 132, 252, 0.3)',
-                }}
-              >
-                PDF SOC v2.0 • 10 SECCIONES
-              </span>
-            </div>
-            <div className="card-category">
-              Expedientes forenses ejecutivos con foliado institucional dinámico, evaluación CIS Benchmark y auditoría profunda por host.
-            </div>
+          <div className="card-name-block">
+            <h3 className="card-name">Centro de Reportes Forenses & Auditoría SOC</h3>
+            <span className="card-category-tag">EXPEDIENTES OFICIALES · PDF VECTORIAL v2.0</span>
           </div>
         </div>
 
-        <button
-          type="button"
-          className="icon-tool-btn"
-          onClick={fetchAgents}
-          disabled={loadingAgents}
-          title="Refrescar lista de agentes"
-        >
-          <RefreshCw size={14} className={loadingAgents ? 'animate-spin' : ''} />
-        </button>
-      </div>
-
-      {/* Selector de Agente y Botones de Acción */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '12px', marginTop: '16px', flexWrap: 'wrap' }}>
-        <div style={{ flex: '1 1 280px', minWidth: '220px' }}>
-          <label
-            htmlFor="report-agent-select"
-            style={{
-              display: 'block',
-              fontSize: '11px',
-              fontWeight: 700,
-              color: 'var(--text-secondary)',
-              marginBottom: '6px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-            }}
-          >
-            <Server size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '5px', color: '#c084fc' }} />
-            Seleccionar Endpoint a Auditar
-          </label>
-          <select
-            id="report-agent-select"
-            value={selectedAgentId}
-            onChange={(e) => setSelectedAgentId(e.target.value)}
-            disabled={loadingAgents || agents.length === 0}
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              borderRadius: '8px',
-              border: '1px solid rgba(168, 85, 247, 0.3)',
-              background: 'rgba(0, 0, 0, 0.4)',
-              color: '#fff',
-              fontSize: '13px',
-              fontWeight: 600,
-              outline: 'none',
-              cursor: loadingAgents || agents.length === 0 ? 'not-allowed' : 'pointer',
-              appearance: 'auto',
-            }}
-          >
-            {loadingAgents ? (
-              <option value="">Cargando endpoints del cluster...</option>
-            ) : agents.length === 0 ? (
-              <option value="">Sin endpoints disponibles</option>
-            ) : (
-              agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  [{a.id}] {a.name}{a.ip ? ` • IP: ${a.ip}` : ''} {a.status ? `(${a.status.toUpperCase()})` : ''}
-                </option>
-              ))
-            )}
-          </select>
-        </div>
-
-        {/* Botón Disparar Escaneo previo */}
-        <button
-          type="button"
-          onClick={handleAuditScan}
-          disabled={auditing || !selectedAgentId}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '10px 14px',
-            borderRadius: '8px',
-            border: '1px solid rgba(56, 189, 248, 0.35)',
-            background: 'rgba(56, 189, 248, 0.12)',
-            color: '#38bdf8',
-            fontSize: '12px',
-            fontWeight: 600,
-            cursor: auditing || !selectedAgentId ? 'not-allowed' : 'pointer',
-            transition: 'all 0.2s ease',
-            whiteSpace: 'nowrap',
-          }}
-          title="Fuerza un escaneo Syscheck/FIM antes de compilar el informe"
-        >
-          {auditing ? <Loader2 size={14} className="animate-spin" /> : <Scan size={14} />}
-          <span>{auditing ? 'Escaneando...' : '🔍 Escaneo Pre-Reporte'}</span>
-        </button>
-
-        {/* Botón Descargar Reporte */}
-        <button
-          type="button"
-          onClick={handleDownload}
-          disabled={downloading || !selectedAgentId}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '10px 20px',
-            borderRadius: '8px',
-            border: '1px solid rgba(168, 85, 247, 0.6)',
-            background: downloading || !selectedAgentId
-              ? 'rgba(168, 85, 247, 0.1)'
-              : 'linear-gradient(135deg, rgba(168, 85, 247, 0.35), rgba(99, 102, 241, 0.35))',
-            color: downloading || !selectedAgentId ? 'var(--text-secondary)' : '#f1f5f9',
-            fontSize: '13px',
-            fontWeight: 700,
-            cursor: downloading || !selectedAgentId ? 'not-allowed' : 'pointer',
-            whiteSpace: 'nowrap',
-            boxShadow: '0 4px 12px rgba(168, 85, 247, 0.2)',
-            transition: 'all 0.2s ease',
-          }}
-        >
-          {downloading ? (
-            <>
-              <Loader2 size={15} className="animate-spin" />
-              <span>Compilando PDF SOC v2.0...</span>
-            </>
-          ) : (
-            <>
-              <Download size={15} />
-              <span>Descargar Informe PDF</span>
-            </>
-          )}
-        </button>
-      </div>
-
-      {/* Snapshot Ejecutivo en Vivo del Endpoint */}
-      {preview && (
-        <div
-          style={{
-            marginTop: '16px',
-            padding: '14px 16px',
-            borderRadius: '10px',
-            background: 'rgba(0, 0, 0, 0.3)',
-            border: '1px solid rgba(168, 85, 247, 0.25)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9' }}>
-                Ficha Previa: [{selectedAgentId}] {preview.name}
-              </span>
-              {loadingPreview && <Loader2 size={12} className="animate-spin" style={{ color: '#a855f7' }} />}
-              <span
-                style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: '10px',
-                  background: preview.status === 'active' ? 'rgba(46, 204, 113, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                  color: preview.status === 'active' ? 'var(--green-healthy)' : 'var(--red-error)',
-                }}
-              >
-                {preview.status.toUpperCase()}
-              </span>
-            </div>
-
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>
-              SO: <strong style={{ color: '#e2e8f0' }}>{preview.os_desc}</strong> ({preview.arch})
-            </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="status-badge-chip healthy">
+            <span className="status-dot" />
+            <span>10 SECCIONES ACTIVAS</span>
           </div>
-
-          {/* Tarjetas de postura rápida */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-              gap: '10px',
-            }}
+          <button
+            type="button"
+            className="card-action-btn"
+            onClick={fetchAgents}
+            disabled={loadingAgents}
+            title="Refrescar lista de agentes"
+            style={{ padding: '0.35rem 0.55rem' }}
           >
-            {/* CIS SCA */}
-            <div
-              style={{
-                padding: '8px 10px',
-                background: 'rgba(255, 255, 255, 0.02)',
-                borderRadius: '6px',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-              }}
+            <RefreshCw size={13} className={loadingAgents ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </div>
+
+      {/* Cuerpo de la Tarjeta */}
+      <div className="card-body">
+        <p className="card-description">
+          Expedientes forenses ejecutivos con foliado institucional dinámico, evaluación CIS Benchmark y auditoría profunda por host.
+        </p>
+
+        {/* Panel de Control y Selección de Endpoint */}
+        <div className="reports-control-panel">
+          <div className="reports-agent-selector-wrap">
+            <label htmlFor="report-agent-select" className="reports-select-label">
+              <Server size={12} style={{ color: '#c084fc' }} />
+              <span>Seleccionar Endpoint a Auditar</span>
+            </label>
+            <select
+              id="report-agent-select"
+              value={selectedAgentId}
+              onChange={(e) => setSelectedAgentId(e.target.value)}
+              disabled={loadingAgents || agents.length === 0}
+              className="reports-select-control"
             >
-              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '2px' }}>
-                POSTURA CIS SCA
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+              {loadingAgents ? (
+                <option value="">Cargando endpoints del cluster...</option>
+              ) : agents.length === 0 ? (
+                <option value="">Sin endpoints disponibles</option>
+              ) : (
+                agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    [{a.id}] {a.name}{a.ip ? ` • IP: ${a.ip}` : ''} {a.status ? `(${a.status.toUpperCase()})` : ''}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleAuditScan}
+            disabled={auditing || !selectedAgentId}
+            className="reports-btn-scan"
+            title="Fuerza un escaneo Syscheck/FIM antes de compilar el informe"
+          >
+            {auditing ? <Loader2 size={14} className="animate-spin" /> : <Scan size={14} />}
+            <span>{auditing ? 'Escaneando...' : 'Escaneo Pre-Reporte'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={downloading || !selectedAgentId}
+            className="reports-btn-download"
+          >
+            {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+            <span>{downloading ? 'Compilando PDF SOC v2.0...' : 'Descargar Informe PDF'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCopyTelegramCommand}
+            className="card-action-btn"
+            title="Copia el comando para solicitar el PDF directamente en Telegram"
+            style={{ padding: '0.6rem 0.85rem' }}
+          >
+            <Send size={13} style={{ color: '#38bdf8' }} />
+            <span>{copiedTelegramCmd ? '¡Copiado!' : `/reporte ${selectedAgentId || '000'}`}</span>
+          </button>
+        </div>
+
+        {/* Snapshot Ejecutivo en Vivo del Endpoint */}
+        {preview && (
+          <div className="reports-snapshot-panel">
+            <div className="reports-snapshot-header">
+              <div className="reports-snapshot-host">
+                <span className="reports-host-tag">
+                  [{selectedAgentId}] {preview.name}
+                </span>
+                {loadingPreview && <Loader2 size={12} className="animate-spin" style={{ color: '#a855f7' }} />}
                 <span
                   style={{
-                    fontSize: '15px',
-                    fontWeight: 800,
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '10px',
+                    background: preview.status === 'active' ? 'rgba(46, 204, 113, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                    color: preview.status === 'active' ? 'var(--green-healthy)' : 'var(--red-error)',
+                  }}
+                >
+                  {preview.status.toUpperCase()}
+                </span>
+              </div>
+
+              <span className="reports-host-os">
+                SO: <strong style={{ color: '#e2e8f0' }}>{preview.os_desc}</strong> ({preview.arch}) · Kernel: {preview.kernel}
+              </span>
+            </div>
+
+            {/* Grilla Forense de 4 Widgets */}
+            <div className="reports-kpi-grid">
+              {/* CIS SCA */}
+              <div className="reports-kpi-box">
+                <span className="reports-kpi-title">Postura CIS SCA</span>
+                <span
+                  className="reports-kpi-metric"
+                  style={{
                     color: preview.sca_score >= 80 ? 'var(--green-healthy)' : preview.sca_score >= 60 ? 'var(--yellow-warning)' : 'var(--red-error)',
                   }}
                 >
                   {preview.sca_score.toFixed(1)}%
                 </span>
-                <span style={{ fontSize: '10px', color: '#64748b' }}>
-                  ({preview.sca_pass} / {preview.sca_total})
+                <div className="reports-progress-track">
+                  <div
+                    className="reports-progress-fill"
+                    style={{
+                      width: `${Math.min(Math.max(preview.sca_score, 5), 100)}%`,
+                      background: preview.sca_score >= 80 ? 'var(--green-healthy)' : preview.sca_score >= 60 ? 'var(--yellow-warning)' : 'var(--red-error)',
+                    }}
+                  />
+                </div>
+                <span className="reports-kpi-detail">
+                  {preview.sca_pass} ok / {preview.sca_fail} fail ({preview.sca_total} eval)
+                </span>
+              </div>
+
+              {/* Inventario SBOM */}
+              <div className="reports-kpi-box">
+                <span className="reports-kpi-title">Inventario SBOM</span>
+                <span className="reports-kpi-metric" style={{ color: '#38bdf8' }}>
+                  {preview.total_packages.toLocaleString()}
+                </span>
+                <span className="reports-kpi-detail">
+                  Paquetes y bibliotecas en Syscollector
+                </span>
+              </div>
+
+              {/* Alertas SIEM */}
+              <div className="reports-kpi-box">
+                <span className="reports-kpi-title">Alertas SIEM Host</span>
+                <span className="reports-kpi-metric" style={{ color: preview.critical_alerts_count > 0 ? 'var(--red-error)' : '#c084fc' }}>
+                  {preview.recent_alerts_count}
+                </span>
+                <span className="reports-kpi-detail">
+                  {preview.critical_alerts_count > 0 ? `${preview.critical_alerts_count} Críticas correlacionadas` : 'Sin eventos críticos recientes'}
+                </span>
+              </div>
+
+              {/* Hardware & Sockets */}
+              <div className="reports-kpi-box">
+                <span className="reports-kpi-title">Memoria & Sockets</span>
+                <span className="reports-kpi-metric" style={{ color: '#f59e0b' }}>
+                  {preview.ram_usage_pct}% RAM
+                </span>
+                <span className="reports-kpi-detail">
+                  {preview.sockets_count} Sockets activos ({Math.round(preview.ram_used_mb)} / {Math.round(preview.ram_total_mb)} MB)
                 </span>
               </div>
             </div>
-
-            {/* Sockets Activos */}
-            <div
-              style={{
-                padding: '8px 10px',
-                background: 'rgba(255, 255, 255, 0.02)',
-                borderRadius: '6px',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-              }}
-            >
-              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '2px' }}>
-                SOCKETS DE RED
-              </div>
-              <div style={{ fontSize: '15px', fontWeight: 800, color: '#38bdf8' }}>
-                {preview.sockets_count} activos
-              </div>
-            </div>
-
-            {/* Paquetes SBOM */}
-            <div
-              style={{
-                padding: '8px 10px',
-                background: 'rgba(255, 255, 255, 0.02)',
-                borderRadius: '6px',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-              }}
-            >
-              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '2px' }}>
-                SOFTWARE (SBOM)
-              </div>
-              <div style={{ fontSize: '15px', fontWeight: 800, color: '#f59e0b' }}>
-                {preview.total_packages} paquetes
-              </div>
-            </div>
-
-            {/* Alertas SIEM */}
-            <div
-              style={{
-                padding: '8px 10px',
-                background: 'rgba(255, 255, 255, 0.02)',
-                borderRadius: '6px',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-              }}
-            >
-              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '2px' }}>
-                ALERTAS CRÍTICAS
-              </div>
-              <div style={{ fontSize: '15px', fontWeight: 800, color: preview.critical_alerts_count > 0 ? '#ef4444' : 'var(--green-healthy)' }}>
-                {preview.critical_alerts_count} (L10+)
-              </div>
-            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Atajo con Telegram Bot */}
-      <div
-        style={{
-          marginTop: '12px',
-          padding: '10px 14px',
-          borderRadius: '8px',
-          background: 'rgba(56, 189, 248, 0.04)',
-          border: '1px solid rgba(56, 189, 248, 0.2)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '10px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#94a3b8' }}>
-          <Send size={14} style={{ color: '#38bdf8' }} />
-          <span>
-            ¿Estás en tu móvil? Puedes pedir este mismo reporte en Telegram enviando: <code style={{ color: '#38bdf8', fontWeight: 700 }}>/reporte {selectedAgentId || '000'}</code>
-          </span>
-        </div>
-
-        <button
-          type="button"
-          onClick={handleCopyTelegramShortcut}
-          style={{
-            background: 'transparent',
-            border: '1px solid rgba(56, 189, 248, 0.3)',
-            borderRadius: '6px',
-            color: copiedTelegramCmd ? 'var(--green-healthy)' : '#38bdf8',
-            fontSize: '11px',
-            fontWeight: 600,
-            cursor: 'pointer',
-            padding: '4px 10px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-          }}
-        >
-          {copiedTelegramCmd ? <Check size={12} /> : <Copy size={12} />}
-          <span>{copiedTelegramCmd ? 'Copiado' : 'Copiar Comando'}</span>
-        </button>
-      </div>
-
-      {/* Explorador de los 10 Apartados Forenses */}
-      <div style={{ marginTop: '14px' }}>
-        <button
-          type="button"
-          onClick={() => setShowGuide(!showGuide)}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: '#c084fc',
-            fontSize: '12px',
-            fontWeight: 600,
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '4px 0',
-          }}
-        >
-          <Info size={14} />
-          {showGuide ? 'Ocultar desglose de los 10 apartados forenses' : 'Ver apartados, evidencias y objetivos del informe oficial'}
-          {showGuide ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
-
-        {showGuide && (
-          <div
-            style={{
-              marginTop: '10px',
-              padding: '14px',
-              borderRadius: '8px',
-              background: 'rgba(0, 0, 0, 0.3)',
-              border: '1px solid rgba(168, 85, 247, 0.2)',
-            }}
+        {/* Sub-Pestañas de Navegación del Centro de Reportes */}
+        <div className="soc-nav-tabs" style={{ marginTop: '16px' }}>
+          <button
+            type="button"
+            className={`soc-tab-btn ${activeTab === 'secciones' ? 'active' : ''}`}
+            onClick={() => setActiveTab('secciones')}
           >
-            {/* Pestañas de categorías */}
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
-              {(['todos', 'general', 'red', 'cumplimiento', 'siem'] as const).map((cat) => (
+            <Layers size={14} />
+            <span>Estructura del Expediente (10 Secciones)</span>
+          </button>
+          <button
+            type="button"
+            className={`soc-tab-btn ${activeTab === 'guia' ? 'active' : ''}`}
+            onClick={() => setActiveTab('guia')}
+          >
+            <FileCode size={14} />
+            <span>Guía Técnica & Normativas</span>
+          </button>
+          <button
+            type="button"
+            className={`soc-tab-btn ${activeTab === 'telegram' ? 'active' : ''}`}
+            onClick={() => setActiveTab('telegram')}
+          >
+            <Terminal size={14} />
+            <span>Comandos Móviles Telegram</span>
+          </button>
+        </div>
+
+        {/* Pestaña 1: Estructura de las 10 Secciones Forenses */}
+        {activeTab === 'secciones' && (
+          <div className="reports-sections-grid">
+            {REPORT_SECTIONS.map((sec) => (
+              <div key={sec.num} className="reports-section-card">
+                <div className="reports-section-head">
+                  <div className="reports-section-title">
+                    <span style={{ color: '#c084fc' }}>{sec.icon}</span>
+                    <span>{sec.title}</span>
+                  </div>
+                  <span
+                    className="reports-section-badge"
+                    style={{
+                      background: 'rgba(168, 85, 247, 0.15)',
+                      color: '#c084fc',
+                      border: '1px solid rgba(168, 85, 247, 0.3)',
+                    }}
+                  >
+                    {sec.num}
+                  </span>
+                </div>
+
+                <p className="reports-section-desc">{sec.desc}</p>
+
+                <div className="reports-section-source">
+                  <FileText size={11} />
+                  <span>{sec.source}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Pestaña 2: Guía Técnica con Filtro */}
+        {activeTab === 'guia' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+              {[
+                { id: 'todos', label: 'Todos los Apartados', count: 10 },
+                { id: 'general', label: 'General & Sistema', count: 4 },
+                { id: 'red', label: 'Red & Sockets', count: 2 },
+                { id: 'cumplimiento', label: 'Cumplimiento CIS', count: 2 },
+                { id: 'siem', label: 'SIEM & Mitigación', count: 2 },
+              ].map((c) => (
                 <button
-                  key={cat}
+                  key={c.id}
                   type="button"
-                  onClick={() => setActiveGuideCategory(cat)}
-                  style={{
-                    padding: '3px 10px',
-                    borderRadius: '12px',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    border: '1px solid',
-                    borderColor: activeGuideCategory === cat ? '#c084fc' : 'rgba(255, 255, 255, 0.08)',
-                    background: activeGuideCategory === cat ? 'rgba(168, 85, 247, 0.2)' : 'rgba(255, 255, 255, 0.02)',
-                    color: activeGuideCategory === cat ? '#c084fc' : 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    textTransform: 'capitalize',
-                  }}
+                  className={`category-pill ${activeGuideCategory === c.id ? 'active' : ''}`}
+                  onClick={() => setActiveGuideCategory(c.id as any)}
                 >
-                  {cat === 'todos' ? 'Todos los 10 Apartados' : cat}
+                  <span>{c.label}</span>
+                  <span style={{ opacity: 0.65, fontSize: '10px' }}>({c.count})</span>
                 </button>
               ))}
             </div>
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                gap: '10px',
-              }}
-            >
-              {filteredSections.map((sec) => {
-                const IconComp = sec.icon;
-                return (
-                  <div
-                    key={sec.num}
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      background: 'rgba(255, 255, 255, 0.02)',
-                      border: '1px solid rgba(255, 255, 255, 0.05)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                      <div
-                        style={{
-                          padding: '5px',
-                          borderRadius: '5px',
-                          background: 'rgba(255, 255, 255, 0.05)',
-                          color: sec.color,
-                          display: 'flex',
-                        }}
-                      >
-                        <IconComp size={14} />
-                      </div>
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9' }}>
-                        <span style={{ color: sec.color, marginRight: '4px' }}>{sec.num}.</span>
-                        {sec.title}
-                      </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {filteredSections.map((s) => (
+                <div
+                  key={s.num}
+                  style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '8px',
+                    padding: '12px 16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ color: '#c084fc', fontSize: '12px', fontWeight: 800 }}>{s.num}</span>
+                      <strong style={{ color: '#f8fafc', fontSize: '13px' }}>{s.title}</strong>
                     </div>
-                    <p style={{ fontSize: '11px', color: '#94a3b8', margin: '3px 0 5px 0', lineHeight: 1.35 }}>
-                      {sec.desc}
-                    </p>
-                    <p style={{ fontSize: '10px', color: '#64748b', margin: 0, fontStyle: 'italic', lineHeight: 1.3 }}>
-                      💡 {sec.detail}
-                    </p>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                      {s.source}
+                    </span>
                   </div>
-                );
-              })}
+                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                    {s.details}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Pestaña 3: Automatización Móvil vía Telegram */}
+        {activeTab === 'telegram' && (
+          <div
+            style={{
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '8px',
+              padding: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Send size={16} style={{ color: '#38bdf8' }} />
+              <h4 style={{ margin: 0, fontSize: '14px', color: '#f8fafc' }}>
+                Solicitud y Despacho Automatizado de Reportes desde Telegram
+              </h4>
+            </div>
+            <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Puedes solicitar informes forenses completos desde tu teléfono móvil. El Bot compila el PDF vectorial en el servidor en tiempo real y te envía el archivo directamente por el chat.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+              <div
+                style={{
+                  background: 'rgba(0,0,0,0.3)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '6px',
+                  padding: '10px 12px',
+                }}
+              >
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#38bdf8', fontWeight: 700 }}>
+                  /reporte {selectedAgentId || '000'}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  Compila y descarga el PDF forense completo de 10 secciones en el chat.
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: 'rgba(0,0,0,0.3)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '6px',
+                  padding: '10px 12px',
+                }}
+              >
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#38bdf8', fontWeight: 700 }}>
+                  /analizar_agente {selectedAgentId || '000'}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  Dispara escaneos Wazuh FIM/SCA y entrega resumen de hardening inmediato.
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: 'rgba(0,0,0,0.3)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '6px',
+                  padding: '10px 12px',
+                }}
+              >
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#38bdf8', fontWeight: 700 }}>
+                  /sca {selectedAgentId || '000'}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  Consulta inmediata de la evaluación de cumplimiento CIS Benchmark.
+                </div>
+              </div>
             </div>
           </div>
         )}
       </div>
 
-      {agents.length === 0 && !loadingAgents && (
-        <div
-          style={{
-            marginTop: '14px',
-            padding: '16px',
-            textAlign: 'center',
-            color: 'var(--text-secondary)',
-            fontSize: '12px',
-            background: 'rgba(255, 255, 255, 0.02)',
-            borderRadius: '8px',
-          }}
-        >
-          No se encontraron endpoints registrados en Wazuh. Verificá la conectividad con el Manager.
+      {/* Footer Estándar ComponentCard */}
+      <div className="card-footer">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            Foliado Institucional: SOC-REP-{selectedAgentId || '000'}-v2
+          </span>
         </div>
-      )}
+
+        <div className="card-actions">
+          <button
+            type="button"
+            className="card-action-btn"
+            onClick={handleDownload}
+            disabled={downloading || !selectedAgentId}
+          >
+            {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+            <span>{downloading ? 'Descargando...' : 'Descargar PDF'}</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
-
-export default ReportsCard;
