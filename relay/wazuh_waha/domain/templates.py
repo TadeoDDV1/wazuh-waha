@@ -1,3 +1,4 @@
+import time
 from typing import Callable
 
 TemplateFn = Callable[[dict], str]
@@ -37,326 +38,487 @@ def _cvss(alert: dict, version: str = "cvss3", default: str = "?") -> str:
     return _vuln(alert, "cvss", version, "base_score", default=default)
 
 
+def render_soc_alert(
+    alert: dict,
+    title: str,
+    fields: list[tuple[str, str]],
+    recommendation: str = "",
+    evidence: str = "",
+) -> str:
+    """Construye una tarjeta forense SOC con diseño estructurado, nivel de severidad y atajos rápidos."""
+    rule = alert.get("rule", {}) or {}
+    rule_id = str(rule.get("id", "0"))
+    level = int(rule.get("level", 0))
+    agent_obj = alert.get("agent", {}) or {}
+    agent_name = agent_obj.get("name") or agent_obj.get("id") or "Servidor Local"
+    agent_id = str(agent_obj.get("id", "000"))
+    timestamp = alert.get("timestamp") or time.strftime("%Y-%m-%d %H:%M:%S")
+
+    if level >= 15:
+        level_badge = f"🚨 *[CRÍTICO • L{level}]*"
+    elif level >= 12:
+        level_badge = f"🟠 *[ALTO • L{level}]*"
+    elif level >= 8:
+        level_badge = f"🟡 *[MEDIO • L{level}]*"
+    else:
+        level_badge = f"🔵 *[INFO • L{level}]*"
+
+    agent_suffix = f" _(ID: {agent_id})_" if agent_id and agent_id != "000" else ""
+    lines = [
+        level_badge,
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"🛡️ *Regla #{rule_id}:* *{title}*",
+        f"💻 *Equipo / Agente:* `{agent_name}`{agent_suffix}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    for label, val in fields:
+        if val and val != "?" and val != "None":
+            lines.append(f"{label} `{val}`")
+
+    if evidence and evidence != "?":
+        cleaned_ev = translate_full_log_es(evidence)
+        lines.append(f"📝 *Evidencia:* `{cleaned_ev[:150]}`")
+
+    lines.append(f"⏰ *Hora:* `{timestamp}`")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    if recommendation:
+        lines.append(f"💡 *Acción SOC:* {recommendation}\n")
+
+    lines.append("⚡ *Acciones rápidas:*")
+    lines.append(f"• Ficha forense: `/agente {agent_id}`")
+    lines.append(f"• Reporte PDF: `/reporte {agent_id}`")
+    lines.append(f"• Silenciar regla: `/silenciar {rule_id}`")
+
+    return "\n".join(lines)
+
+
 TEMPLATES: dict[str, TemplateFn] = {
     # --- Seguridad existente ---
-    "5710": lambda a: (
-        f"🔐 *SSH fallido*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Origen: `{_field(a, 'srcip')}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`"
+    "5710": lambda a: render_soc_alert(
+        a,
+        title="SSH fallido (Autenticación rechazada)",
+        fields=[
+            ("🌐 Origen:", _field(a, "srcip")),
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+            ("⚙️ Proceso:", _field(a, "program_name", default="sshd")),
+        ],
+        recommendation="Validar si la IP es conocida; bloquear temporalmente si los intentos continúan.",
+        evidence=a.get("full_log", ""),
     ),
-    "5712": lambda a: (
-        f"🔐 *Multiples SSH fallidos*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Origen: `{_field(a, 'srcip')}`"
+    "5712": lambda a: render_soc_alert(
+        a,
+        title="Múltiples fallos SSH (Posible ataque de fuerza bruta)",
+        fields=[
+            ("🌐 Origen:", _field(a, "srcip")),
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+        ],
+        recommendation="Aislar IP en firewall o revisar reglas de Fail2ban en el host.",
+        evidence=a.get("full_log", ""),
     ),
-    "5715": lambda a: (
-        f"🔐 *su fallido*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`"
+    "5715": lambda a: render_soc_alert(
+        a,
+        title="Elevación su fallida (Contraseña errónea)",
+        fields=[
+            ("👤 Usuario origen:", _field(a, "srcuser", default="?")),
+            ("👤 Usuario destino:", _field(a, "dstuser", default="?")),
+            ("⚙️ Proceso:", _field(a, "program_name", default="su")),
+        ],
+        recommendation="Investigar usuario que ejecutó su; posible intento no autorizado de cambio a root.",
+        evidence=a.get("full_log", ""),
     ),
-    "5401": lambda a: (
-        f"🔐 *sudo fallido*\n"
-        f"Agente: `{_agent(a)}`"
+    "5401": lambda a: render_soc_alert(
+        a,
+        title="Ejecución de sudo fallida (Contraseña incorrecta)",
+        fields=[
+            ("👤 Usuario:", _field(a, "dstuser", default=_field(a, "srcuser", default="?"))),
+            ("⚙️ Proceso:", "sudo"),
+        ],
+        recommendation="Verificar si el usuario tiene privilegios sudo autorizados.",
+        evidence=a.get("full_log", ""),
     ),
-    "550": lambda a: (
-        f"📁 *Archivo nuevo*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Path: `{_field(a, 'path', default=_field(a, 'file', default='?'))}`"
+    "550": lambda a: render_soc_alert(
+        a,
+        title="FIM - Archivo nuevo agregado en ruta supervisada",
+        fields=[
+            ("📁 Archivo:", _field(a, "path", default=_field(a, "file", default="?"))),
+        ],
+        recommendation="Confirmar si el archivo nuevo corresponde a un despliegue o software programado.",
+        evidence=a.get("full_log", ""),
     ),
-    "553": lambda a: (
-        f"✏️ *Archivo modificado*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Path: `{_field(a, 'path', default=_field(a, 'file', default='?'))}`"
+    "553": lambda a: render_soc_alert(
+        a,
+        title="FIM - Archivo modificado en ruta supervisada",
+        fields=[
+            ("📁 Archivo:", _field(a, "path", default=_field(a, "file", default="?"))),
+        ],
+        recommendation="Verificar si la alteración fue realizada por un proceso administrativo autorizado.",
+        evidence=a.get("full_log", ""),
     ),
-    "554": lambda a: (
-        f"🗑️ *Archivo eliminado*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Path: `{_field(a, 'path', default=_field(a, 'file', default='?'))}`"
+    "554": lambda a: render_soc_alert(
+        a,
+        title="FIM - Archivo eliminado del sistema",
+        fields=[
+            ("📁 Archivo:", _field(a, "path", default=_field(a, "file", default="?"))),
+        ],
+        recommendation="Confirmar que la eliminación no afecte la integridad del sistema o registros.",
+        evidence=a.get("full_log", ""),
     ),
-    "520": lambda a: (
-        f"⚠️ *Binario SUID*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Path: `{_field(a, 'path', default='?')}`"
+    "520": lambda a: render_soc_alert(
+        a,
+        title="Binario SUID detectado en el sistema",
+        fields=[
+            ("📁 Archivo:", _field(a, "path", default="?")),
+        ],
+        recommendation="Los binarios SUID corren con privilegios de root. Verificar si fue creado intencionalmente.",
+        evidence=a.get("full_log", ""),
     ),
-    "2902": lambda a: (
-        f"🌐 *Descarga web*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"URL: `{_field(a, 'url')}`"
+    "2902": lambda a: render_soc_alert(
+        a,
+        title="Descarga web registrada desde el endpoint",
+        fields=[
+            ("🌐 URL:", _field(a, "url")),
+        ],
+        recommendation="Verificar reputación de la URL y si la descarga fue autorizada por el usuario.",
     ),
-    "2903": lambda a: (
-        f"🌐 *Descarga sospechosa*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"URL: `{_field(a, 'url')}`"
+    "2903": lambda a: render_soc_alert(
+        a,
+        title="Descarga web sospechosa detectada",
+        fields=[
+            ("🌐 URL:", _field(a, "url")),
+        ],
+        recommendation="Posible descarga de payload malicioso. Analizar URL en VirusTotal o aislar endpoint.",
     ),
     # --- Login exitoso (custom) ---
-    "57100": lambda a: (
-        f"✅ *Login SSH exitoso*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Origen: `{_field(a, 'srcip', default='local')}:{_field(a, 'srcport', default='?')}`\n"
-        f"Proceso: `{_field(a, 'program_name', default='sshd')}`\n"
-        f"Ubicacion: `{a.get('location', '?')}`\n"
-        f"Log: `{a.get('full_log', '')[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57100": lambda a: render_soc_alert(
+        a,
+        title="Login SSH exitoso por contraseña",
+        fields=[
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+            ("🌐 Origen:", f"{_field(a, 'srcip', default='local')}:{_field(a, 'srcport', default='?')}"),
+            ("⚙️ Proceso:", _field(a, "program_name", default="sshd")),
+            ("📍 Ubicación:", a.get("location", "?")),
+        ],
+        recommendation="Confirmar si este acceso interactivo por contraseña era esperado.",
+        evidence=a.get("full_log", ""),
     ),
-    "57101": lambda a: (
-        f"🔑 *Login SSH con clave publica*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Origen: `{_field(a, 'srcip', default='local')}:{_field(a, 'srcport', default='?')}`\n"
-        f"Proceso: `{_field(a, 'program_name', default='sshd')}`\n"
-        f"Ubicacion: `{a.get('location', '?')}`\n"
-        f"Log: `{a.get('full_log', '')[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57101": lambda a: render_soc_alert(
+        a,
+        title="Login SSH exitoso con clave pública",
+        fields=[
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+            ("🌐 Origen:", f"{_field(a, 'srcip', default='local')}:{_field(a, 'srcport', default='?')}"),
+            ("⚙️ Proceso:", _field(a, "program_name", default="sshd")),
+        ],
+        recommendation="Acceso verificado mediante llave criptográfica autorizada.",
+        evidence=a.get("full_log", ""),
     ),
-    "57102": lambda a: (
-        f"🚨 *ROOT LOGIN por SSH* (CRITICO)\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Origen: `{_field(a, 'srcip', default='local')}:{_field(a, 'srcport', default='?')}`\n"
-        f"Proceso: `{_field(a, 'program_name', default='sshd')}`\n"
-        f"Ubicacion: `{a.get('location', '?')}`\n"
-        f"Log: `{a.get('full_log', '')[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`\n"
-        f"⚠️ Verificar si este acceso era esperado"
+    "57102": lambda a: render_soc_alert(
+        a,
+        title="ROOT LOGIN directo por SSH (CRÍTICO)",
+        fields=[
+            ("👤 Usuario:", "root"),
+            ("🌐 Origen:", f"{_field(a, 'srcip', default='local')}:{_field(a, 'srcport', default='?')}"),
+            ("⚙️ Proceso:", _field(a, "program_name", default="sshd")),
+        ],
+        recommendation="Acceso directo de superusuario. Se recomienda deshabilitar PermitRootLogin en sshd_config.",
+        evidence=a.get("full_log", ""),
     ),
-    "57103": lambda a: (
-        f"🔄 *Cambio de usuario (su) exitoso*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario origen: `{_field(a, 'srcuser', default='?')}`\n"
-        f"Usuario destino: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Proceso: `{_field(a, 'program_name', default='su')}`\n"
-        f"Log: `{a.get('full_log', '')[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57103": lambda a: render_soc_alert(
+        a,
+        title="Cambio de usuario (su) exitoso",
+        fields=[
+            ("👤 Usuario origen:", _field(a, "srcuser", default="?")),
+            ("👤 Usuario destino:", _field(a, "dstuser", default="?")),
+            ("⚙️ Proceso:", _field(a, "program_name", default="su")),
+        ],
+        recommendation="Transición de privilegios registrada en el host.",
+        evidence=a.get("full_log", ""),
     ),
-    "57104": lambda a: (
-        f"🔑 *Comando sudo ejecutado*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Comando: `{_field(a, 'command', default='?')[:120]}`\n"
-        f"Directorio: `{_field(a, 'pwd', default='?')}`\n"
-        f"TTY: `{_field(a, 'tty', default='?')}`\n"
-        f"Proceso: `{_field(a, 'program_name', default='sudo')}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57104": lambda a: render_soc_alert(
+        a,
+        title="Comando sudo ejecutado con privilegios",
+        fields=[
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+            ("⚙️ Comando:", _field(a, "command", default="?")[:120]),
+            ("📂 Directorio:", _field(a, "pwd", default="?")),
+            ("🖥️ TTY:", _field(a, "tty", default="?")),
+        ],
+        recommendation="Auditar si el comando ejecutado bajo sudo corresponde al mantenimiento habitual.",
+        evidence=a.get("full_log", ""),
     ),
-    "57105": lambda a: (
-        f"🖥️ *Login local (TTY/consola)*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"TTY: `{_field(a, 'tty', default='?')}`\n"
-        f"Proceso: `{_field(a, 'program_name', default='?')}`\n"
-        f"Ubicacion: `{a.get('location', '?')}`\n"
-        f"Log: `{a.get('full_log', '')[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57105": lambda a: render_soc_alert(
+        a,
+        title="Login local interactivo (TTY / Consola)",
+        fields=[
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+            ("🖥️ TTY:", _field(a, "tty", default="?")),
+            ("⚙️ Proceso:", _field(a, "program_name", default="?")),
+        ],
+        recommendation="Acceso físico o por consola virtual en el servidor.",
+        evidence=a.get("full_log", ""),
     ),
-    "57106": lambda a: (
-        f"👋 *Logout / sesion cerrada*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Proceso: `{_field(a, 'program_name', default='?')}`\n"
-        f"Duracion: `{_field(a, 'session_time', default='?')}`\n"
-        f"Log: `{a.get('full_log', '')[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57106": lambda a: render_soc_alert(
+        a,
+        title="Sesión cerrada / Logout del sistema",
+        fields=[
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+            ("⏱️ Duración:", _field(a, "session_time", default="?")),
+            ("⚙️ Proceso:", _field(a, "program_name", default="?")),
+        ],
+        recommendation="Cierre normal de sesión de usuario.",
+        evidence=a.get("full_log", ""),
     ),
     # --- Vulnerability Detector ---
-    "23505": lambda a: (
-        f"🛡️ *Vulnerabilidad ALTA*\n"
-        f"CVE: `{_vuln(a, 'cve')}`\n"
-        f"Paquete: `{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}`\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"CVSS: `{_cvss(a, 'cvss3')} / {_cvss(a, 'cvss2')}`\n"
-        f"Publicado: `{_vuln(a, 'published', default='?')[:10]}`"
+    "23505": lambda a: render_soc_alert(
+        a,
+        title="Vulnerabilidad de seguridad de nivel ALTO (CVE)",
+        fields=[
+            ("🛡️ CVE:", _vuln(a, "cve")),
+            ("📦 Paquete:", f"{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}"),
+            ("📊 CVSS v3:", _cvss(a, "cvss3")),
+            ("📅 Publicado:", _vuln(a, "published", default="?")[:10]),
+        ],
+        recommendation="Planificar actualización del paquete vulnerable mediante el gestor del SO.",
     ),
-    "23506": lambda a: (
-        f"🚨 *Vulnerabilidad CRITICA*\n"
-        f"CVE: `{_vuln(a, 'cve')}`\n"
-        f"Paquete: `{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}`\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"CVSS: `{_cvss(a, 'cvss3')} / {_cvss(a, 'cvss2')}`\n"
-        f"Severidad: `{_vuln(a, 'severity')}`\n"
-        f"Publicado: `{_vuln(a, 'published', default='?')[:10]}`"
+    "23506": lambda a: render_soc_alert(
+        a,
+        title="Vulnerabilidad de seguridad de nivel CRÍTICO (CVE)",
+        fields=[
+            ("🚨 CVE:", _vuln(a, "cve")),
+            ("📦 Paquete:", f"{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}"),
+            ("📊 CVSS v3:", _cvss(a, "cvss3")),
+            ("🔥 Severidad:", _vuln(a, "severity")),
+        ],
+        recommendation="Actualización urgente requerida; evaluar exposición del servicio a redes públicas.",
     ),
-    "57107": lambda a: (
-        f"🟡 *Vulnerabilidad MEDIA*\n"
-        f"CVE: `{_vuln(a, 'cve')}`\n"
-        f"Paquete: `{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}`\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"CVSS: `{_cvss(a, 'cvss3')} / {_cvss(a, 'cvss2')}`"
+    "57107": lambda a: render_soc_alert(
+        a,
+        title="Vulnerabilidad de seguridad de nivel MEDIO (CVE)",
+        fields=[
+            ("🟡 CVE:", _vuln(a, "cve")),
+            ("📦 Paquete:", f"{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}"),
+            ("📊 CVSS v3:", _cvss(a, "cvss3")),
+        ],
+        recommendation="Incluir en el siguiente ciclo ordinario de parches de seguridad.",
     ),
-    "57108": lambda a: (
-        f"🟢 *Vulnerabilidad BAJA*\n"
-        f"CVE: `{_vuln(a, 'cve')}`\n"
-        f"Paquete: `{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}`\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"CVSS: `{_cvss(a, 'cvss3')} / {_cvss(a, 'cvss2')}`"
+    "57108": lambda a: render_soc_alert(
+        a,
+        title="Vulnerabilidad de seguridad de nivel BAJO (CVE)",
+        fields=[
+            ("🟢 CVE:", _vuln(a, "cve")),
+            ("📦 Paquete:", f"{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}"),
+            ("📊 CVSS v3:", _cvss(a, "cvss3")),
+        ],
+        recommendation="Monitorear avisos del fabricante del sistema operativo.",
     ),
-    "57109": lambda a: (
-        f"✅ *Vulnerabilidad RESUELTA*\n"
-        f"CVE: `{_vuln(a, 'cve')}`\n"
-        f"Paquete: `{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}`\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Severidad: `{_vuln(a, 'severity')}`\n"
-        f"CVSS: `{_cvss(a, 'cvss3')} / {_cvss(a, 'cvss2')}`"
+    "57109": lambda a: render_soc_alert(
+        a,
+        title="Vulnerabilidad corregida / Resuelta",
+        fields=[
+            ("✅ CVE:", _vuln(a, "cve")),
+            ("📦 Paquete:", f"{_vuln(a, 'package', 'name')} {_vuln(a, 'package', 'version')}"),
+        ],
+        recommendation="El parche de seguridad fue aplicado y la debilidad quedó mitigada.",
     ),
-    "57110": lambda a: (
-        f"🧹 *Vulnerabilidades limpiadas*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Se limpiaron todas las vulnerabilidades del inventario"
+    "57110": lambda a: render_soc_alert(
+        a,
+        title="Inventario de vulnerabilidades depurado",
+        fields=[],
+        recommendation="Base de datos de vulnerabilidades del agente sincronizada con éxito.",
     ),
     # --- Nuevas reglas de seguridad avanzadas (57120 - 57130) ---
-    "57120": lambda a: (
-        f"🚨 *Ataque de fuerza bruta SSH persistente* (CRÍTICO)\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Origen: `{_field(a, 'srcip')}`\n"
-        f"Detección: `Más de 10 intentos fallidos de login en 2 minutos`\n"
-        f"Hora: `{a.get('timestamp', '?')}`\n"
-        f"⚠️ Se recomienda bloqueo preventivo de IP."
+    "57120": lambda a: render_soc_alert(
+        a,
+        title="Ataque de fuerza bruta SSH persistente (CRÍTICO)",
+        fields=[
+            ("🌐 Origen:", _field(a, "srcip")),
+            ("🔍 Detección:", "Más de 10 intentos fallidos de login en 2 minutos"),
+        ],
+        recommendation="Bloqueo preventivo de IP inmediato en Firewall perimetral o iptables.",
+        evidence=a.get("full_log", ""),
     ),
-    "57121": lambda a: (
-        f"🚨 *Ejecución remota sospechosa por tubería* (CRÍTICO)\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Comando detectado: `{_field(a, 'command', default=_field(a, 'full_log', default='?'))[:140]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`\n"
-        f"⚠️ Posible ejecución de script externo o payload en memoria."
+    "57121": lambda a: render_soc_alert(
+        a,
+        title="Ejecución remota sospechosa por tubería (CRÍTICO)",
+        fields=[
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+            ("⚙️ Comando:", _field(a, "command", default=_field(a, "full_log", default="?"))[:140]),
+        ],
+        recommendation="Posible ejecución en memoria (curl | bash). Aislar proceso y host preventivamente.",
+        evidence=a.get("full_log", ""),
     ),
-    "57122": lambda a: (
-        f"⚠️ *Ejecución de binario/script en carpeta temporal*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Comando: `{_field(a, 'command', default='?')[:120]}`\n"
-        f"Directorio: `{_field(a, 'pwd', default='?')}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57122": lambda a: render_soc_alert(
+        a,
+        title="Ejecución de binario/script en carpeta temporal (/tmp)",
+        fields=[
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+            ("⚙️ Comando:", _field(a, "command", default="?")[:120]),
+            ("📂 Directorio:", _field(a, "pwd", default="?")),
+        ],
+        recommendation="Revisar origen del binario en /tmp; rutas temporales no deben alojar ejecutables.",
+        evidence=a.get("full_log", ""),
     ),
-    "57123": lambda a: (
-        f"⛔ *Violación de seguridad: Usuario no autorizado en sudoers*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario infractor: `{_field(a, 'srcuser', default=_field(a, 'dstuser', default='?'))}`\n"
-        f"Log: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57123": lambda a: render_soc_alert(
+        a,
+        title="Violación de seguridad: Usuario no autorizado en sudoers",
+        fields=[
+            ("👤 Usuario infractor:", _field(a, "srcuser", default=_field(a, "dstuser", default="?"))),
+        ],
+        recommendation="Intento de ejecución con privilegios sin autorización en /etc/sudoers.",
+        evidence=a.get("full_log", ""),
     ),
-    "57124": lambda a: (
-        f"🚨 *Intentos reiterados de login como ROOT por SSH*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Origen: `{_field(a, 'srcip')}`\n"
-        f"Log: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57124": lambda a: render_soc_alert(
+        a,
+        title="Intentos reiterados de login como ROOT por SSH",
+        fields=[
+            ("🌐 Origen:", _field(a, "srcip")),
+        ],
+        recommendation="Tráfico dirigido contra la cuenta root. Verificar si la IP debe bloquearse.",
+        evidence=a.get("full_log", ""),
     ),
-    "57125": lambda a: (
-        f"🚨 *Modificación de archivo crítico del sistema (/etc/shadow, passwd, sudoers)* (CRÍTICO)\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Archivo: `{_field(a, 'path', default=_field(a, 'file', default='?'))}`\n"
-        f"Log FIM: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`\n"
-        f"⚠️ Verificación urgente de integridad requerida."
+    "57125": lambda a: render_soc_alert(
+        a,
+        title="Modificación de archivo crítico (/etc/shadow, passwd, sudoers) (CRÍTICO)",
+        fields=[
+            ("📁 Archivo:", _field(a, "path", default=_field(a, "file", default="?"))),
+        ],
+        recommendation="Alerta de máxima prioridad FIM. Validar inmediatamente si se añadieron usuarios o claves.",
+        evidence=a.get("full_log", ""),
     ),
-    "57126": lambda a: (
-        f"🛑 *Detención de servicio crítico del sistema (Wazuh / SSH / Firewall)*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Detalle: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57126": lambda a: render_soc_alert(
+        a,
+        title="Detención de servicio crítico del sistema (Wazuh / SSH / Firewall)",
+        fields=[],
+        recommendation="Servicio esencial detenido. Confirmar si se trata de mantenimiento o sabotaje.",
+        evidence=a.get("full_log", ""),
     ),
-    "57127": lambda a: (
-        f"🔥 *Kernel OOM Killer activado (Memoria RAM agotada)*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Detalle: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57127": lambda a: render_soc_alert(
+        a,
+        title="Kernel OOM Killer activado (Memoria RAM agotada)",
+        fields=[],
+        recommendation="El kernel eliminó procesos por saturación de RAM. Revisar consumo con /procesos.",
+        evidence=a.get("full_log", ""),
     ),
-    "57128": lambda a: (
-        f"🛡️ *Escaneo de puertos detectado / bloqueado por Firewall*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Origen: `{_field(a, 'srcip')}`\n"
-        f"Log: `{a.get('full_log', '')[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57128": lambda a: render_soc_alert(
+        a,
+        title="Escaneo de puertos detectado / bloqueado por Firewall",
+        fields=[
+            ("🌐 Origen:", _field(a, "srcip")),
+        ],
+        recommendation="Paquetes hacia puertos cerrados bloqueados por cortafuegos.",
+        evidence=a.get("full_log", ""),
     ),
-    "57129": lambda a: (
-        f"🔑 *Modificación en authorized_keys (Llaves SSH de acceso)*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Archivo: `{_field(a, 'path', default=_field(a, 'file', default='?'))}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`\n"
-        f"⚠️ Verificar si se añadieron llaves públicas no autorizadas."
+    "57129": lambda a: render_soc_alert(
+        a,
+        title="Modificación en authorized_keys (Llaves SSH de acceso)",
+        fields=[
+            ("📁 Archivo:", _field(a, "path", default=_field(a, "file", default="?"))),
+        ],
+        recommendation="Revisar llaves públicas añadidas a ~/.ssh/authorized_keys para descartar persistencia.",
+        evidence=a.get("full_log", ""),
     ),
-    "57130": lambda a: (
-        f"🐳 *Contenedor Docker detenido o en fallo de ejecución*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Log: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57130": lambda a: render_soc_alert(
+        a,
+        title="Contenedor Docker detenido o en fallo de ejecución",
+        fields=[],
+        recommendation="Comprobar estado de los contenedores con /servicios.",
+        evidence=a.get("full_log", ""),
     ),
-    "57131": lambda a: (
-        f"🔐 *Intento fallido de autenticación por SSH*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario intentado: `{_field(a, 'dstuser', default=_field(a, 'srcuser', default='?'))}`\n"
-        f"Origen: `{_field(a, 'srcip')}:{_field(a, 'srcport', default='?')}`\n"
-        f"Log: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57131": lambda a: render_soc_alert(
+        a,
+        title="Intento fallido de autenticación por SSH",
+        fields=[
+            ("👤 Usuario intentado:", _field(a, "dstuser", default=_field(a, "srcuser", default="?"))),
+            ("🌐 Origen:", f"{_field(a, 'srcip')}:{_field(a, 'srcport', default='?')}"),
+        ],
+        recommendation="Acceso SSH rechazado. Monitorear si proviene de IP desconocida.",
+        evidence=a.get("full_log", ""),
     ),
-    "57132": lambda a: (
-        f"⚠️ *Intento de acceso SSH con usuario no existente*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario no válido: `{_field(a, 'srcuser', default=_field(a, 'dstuser', default='?'))}`\n"
-        f"Origen: `{_field(a, 'srcip')}:{_field(a, 'srcport', default='?')}`\n"
-        f"Log: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57132": lambda a: render_soc_alert(
+        a,
+        title="Intento de acceso SSH con usuario no existente",
+        fields=[
+            ("👤 Usuario no válido:", _field(a, "srcuser", default=_field(a, "dstuser", default="?"))),
+            ("🌐 Origen:", f"{_field(a, 'srcip')}:{_field(a, 'srcport', default='?')}"),
+        ],
+        recommendation="Patrón clásico de diccionario / escaneo automatizado contra nombres comunes.",
+        evidence=a.get("full_log", ""),
     ),
-    "57133": lambda a: (
-        f"🌐 *Escaneo / Sondeo de red en puerto SSH (Probe scan)*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Origen: `{_field(a, 'srcip')}:{_field(a, 'srcport', default='?')}`\n"
-        f"Detección: `Intento de conexión o sondeo sin identificación válida de protocolo`\n"
-        f"Log: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57133": lambda a: render_soc_alert(
+        a,
+        title="Escaneo o sondeo de red en puerto SSH (Probe scan)",
+        fields=[
+            ("🌐 Origen:", f"{_field(a, 'srcip')}:{_field(a, 'srcport', default='?')}"),
+            ("🔍 Detección:", "Conexión sin intercambio válido de protocolo SSH"),
+        ],
+        recommendation="Sondeo de conectividad previo a intrusión. Monitorear dirección IP.",
+        evidence=a.get("full_log", ""),
     ),
-    "57134": lambda a: (
-        f"🚨 *Múltiples conexiones cerradas en SSH (Escaneo de puertos detectado)*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Origen: `{_field(a, 'srcip')}`\n"
-        f"Detección: `Ráfaga de desconexiones preauth en puerto 22 (posible barrido de puertos)`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57134": lambda a: render_soc_alert(
+        a,
+        title="Múltiples conexiones cerradas en SSH (Barrido de puertos)",
+        fields=[
+            ("🌐 Origen:", _field(a, "srcip")),
+            ("🔍 Detección:", "Ráfaga de desconexiones preauth en puerto 22"),
+        ],
+        recommendation="Barrido rápido de puertos detectado por el sensor.",
+        evidence=a.get("full_log", ""),
     ),
-    "57135": lambda a: (
-        f"🔥 *Escaneo masivo de puertos detectado por Firewall* (CRÍTICO)\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Origen sospechoso: `{_field(a, 'srcip')}`\n"
-        f"Detección: `Múltiples paquetes bloqueados a puertos cerrados en menos de 30 segundos`\n"
-        f"Log: `{a.get('full_log', '')[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`\n"
-        f"⚠️ Se recomienda bloqueo preventivo en Firewall."
+    "57135": lambda a: render_soc_alert(
+        a,
+        title="Escaneo masivo de puertos detectado por Firewall (CRÍTICO)",
+        fields=[
+            ("🌐 Origen sospechoso:", _field(a, "srcip")),
+            ("🔍 Detección:", "Múltiples paquetes a puertos cerrados en < 30s"),
+        ],
+        recommendation="Escaneo agresivo de reconocimiento. Bloquear IP en el router o cortafuegos perimetral.",
+        evidence=a.get("full_log", ""),
     ),
-    "57136": lambda a: (
-        f"⚠️ *Usuario o grupo eliminado del sistema*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Detalle: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57136": lambda a: render_soc_alert(
+        a,
+        title="Usuario o grupo del sistema eliminado",
+        fields=[],
+        recommendation="Confirmar si la baja de la cuenta fue autorizada por el equipo de TI.",
+        evidence=a.get("full_log", ""),
     ),
-    "57137": lambda a: (
-        f"⏰ *Modificación en tareas programadas Crontab*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Detalle: `{translate_full_log_es(a.get('full_log', ''))[:160]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`\n"
-        f"⚠️ Verificar si la tarea programada es legítima."
+    "57137": lambda a: render_soc_alert(
+        a,
+        title="Modificación en tareas programadas Crontab",
+        fields=[],
+        recommendation="Verificar persistencia; inspeccionar nuevas tareas en /etc/cron* o crontab -l.",
+        evidence=a.get("full_log", ""),
     ),
-    "57138": lambda a: (
-        f"🚨 *Intento crítico de Reverse Shell o Tubería de red* (CRÍTICO)\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Comando sospechoso: `{_field(a, 'command', default=_field(a, 'full_log', default='?'))[:140]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`\n"
-        f"⚠️ Intento activo de evasión o conexión reversa hacia atacante."
+    "57138": lambda a: render_soc_alert(
+        a,
+        title="Intento crítico de Reverse Shell o Tubería de red (CRÍTICO)",
+        fields=[
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+            ("⚙️ Comando sospechoso:", _field(a, "command", default=_field(a, "full_log", default="?"))[:140]),
+        ],
+        recommendation="Detección de shell reversa. Aislar el host de la red inmediatamente e iniciar forense.",
+        evidence=a.get("full_log", ""),
     ),
-    "57139": lambda a: (
-        f"📡 *Herramienta de escaneo de red o captura ejecutada en el servidor*\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Herramienta detectada: `{_field(a, 'command', default='?')[:120]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`"
+    "57139": lambda a: render_soc_alert(
+        a,
+        title="Herramienta de escaneo o captura ejecutada en el servidor",
+        fields=[
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+            ("⚙️ Herramienta detectada:", _field(a, "command", default="?")[:120]),
+        ],
+        recommendation="Uso de tcpdump/nmap/wireshark en el host. Confirmar autorización de diagnóstico.",
+        evidence=a.get("full_log", ""),
     ),
-    "57140": lambda a: (
-        f"🚨 *Intento de borrado de logs o desactivación de cortafuegos* (CRÍTICO)\n"
-        f"Agente: `{_agent(a)}`\n"
-        f"Usuario: `{_field(a, 'dstuser', default='?')}`\n"
-        f"Acción detectada: `{_field(a, 'command', default=_field(a, 'full_log', default='?'))[:140]}`\n"
-        f"Hora: `{a.get('timestamp', '?')}`\n"
-        f"⚠️ Intento de evasión de defensas o eliminación de evidencias forenses."
+    "57140": lambda a: render_soc_alert(
+        a,
+        title="Intento de borrado de logs o desactivación de cortafuegos (CRÍTICO)",
+        fields=[
+            ("👤 Usuario:", _field(a, "dstuser", default="?")),
+            ("⚙️ Acción detectada:", _field(a, "command", default=_field(a, "full_log", default="?"))[:140]),
+        ],
+        recommendation="Intento activo de evasión de defensas (MITRE T1070). Bloquear usuario y aislar host.",
+        evidence=a.get("full_log", ""),
     ),
 }
 
@@ -514,24 +676,26 @@ def render(rule_id: str, alert: dict) -> str | None:
 
 def render_default(alert: dict) -> str:
     rule = alert.get("rule", {}) or {}
-    rule_id = rule.get("id", "?")
+    rule_id = str(rule.get("id", "?"))
     raw_desc = rule.get("description", "?")
     desc_es = _translate_description_es(raw_desc)
     level = rule.get("level", 0)
     level_es = _format_level_es(level)
     agent = _agent(alert)
+    agent_id = str((alert.get("agent") or {}).get("id", "000"))
     timestamp = alert.get("timestamp", "?")
     src_ip = _field(alert, "srcip", default="")
     user = _field(alert, "dstuser", default="")
     raw_log = alert.get("full_log", "") or ""
     log_es = translate_full_log_es(raw_log)
 
+    agent_suffix = f" _(ID: {agent_id})_" if agent_id and agent_id != "000" else ""
     lines = [
         "🚨 *ALERTA DE SEGURIDAD WAZUH*",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━",
         f"📊 *Nivel:* {level_es}",
         f"🛡️ *Regla:* `#{rule_id}` - *{desc_es}*",
-        f"🖥️ *Equipo / Agente:* `{agent}`",
+        f"🖥️ *Equipo / Agente:* `{agent}`{agent_suffix}",
     ]
     if src_ip and src_ip != "?":
         lines.append(f"🌐 *IP Origen:* `{src_ip}`")
@@ -540,5 +704,10 @@ def render_default(alert: dict) -> str:
     if log_es:
         lines.append(f"📝 *Detalle:* `{log_es[:140]}`")
     lines.append(f"⏰ *Hora:* `{timestamp}`")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("⚡ *Acciones rápidas:*")
+    lines.append(f"• Ficha forense: `/agente {agent_id}`")
+    lines.append(f"• Reporte PDF: `/reporte {agent_id}`")
+    lines.append(f"• Silenciar regla: `/silenciar {rule_id}`")
     return "\n".join(lines)
 

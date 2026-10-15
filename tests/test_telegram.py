@@ -146,6 +146,32 @@ class TestTelegramIntegration:
         res_ping = await telegram_bot.process_admin_command("/ping")
         assert "Pong" in res_ping
 
+        # /comandos (catálogo general)
+        res_cmd = await telegram_bot.process_admin_command("/comandos")
+        assert "CATÁLOGO MAESTRO" in res_cmd
+        assert "/comandos agentes" in res_cmd
+        assert "/comandos reportes" in res_cmd
+        assert "38 Comandos Disponibles" in res_cmd
+
+        # /comandos por categorías
+        res_cmd_ag = await telegram_bot.process_admin_command("/comandos agentes")
+        assert "GESTIÓN DE AGENTES" in res_cmd_ag
+        assert "/agente <id>" in res_cmd_ag
+
+        res_cmd_rep = await telegram_bot.process_admin_command("/comandos reportes")
+        assert "REPORTES EJECUTIVOS FORENSES" in res_cmd_rep
+        assert "/reporte <agent_id>" in res_cmd_rep
+
+        res_cmd_all = await telegram_bot.process_admin_command("/comandos todos")
+        assert "GESTIÓN DE AGENTES" in res_cmd_all
+        assert "REPORTES EJECUTIVOS" in res_cmd_all
+        assert "ALERTAS Y REGLAS" in res_cmd_all
+
+        # /sync_comandos
+        with patch.object(telegram_bot, "register_bot_commands", return_value=True):
+            res_sync = await telegram_bot.process_admin_command("/sync_comandos")
+            assert "Comandos sincronizados con éxito" in res_sync
+
     def test_waha_webhook_command_processing(self):
         old_admin = settings.admin_phone
         try:

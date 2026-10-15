@@ -471,6 +471,49 @@ async def pair_session(token: str | None = None, wait_seconds: int = 25) -> dict
     }
 
 
+BOT_COMMANDS_SPEC = [
+    {"command": "comandos", "description": "Directorio maestro de comandos SOC"},
+    {"command": "agentes", "description": "Lista de agentes y estado de enlace"},
+    {"command": "agente", "description": "Ficha forense de un agente (/agente <id>)"},
+    {"command": "reporte", "description": "Generar PDF forense SOC (/reporte <id>)"},
+    {"command": "alertas", "description": "Ultimas alertas de seguridad recibidas"},
+    {"command": "buscar_alerta", "description": "Buscar alerta por termino (/buscar <texto>)"},
+    {"command": "silenciar", "description": "Silenciar regla temporalmente (/silenciar <id>)"},
+    {"command": "reactivar", "description": "Reactivar regla silenciada (/reactivar <id>)"},
+    {"command": "status", "description": "Recursos del servidor (CPU/RAM/Disco/Uptime)"},
+    {"command": "servicios", "description": "Estado de Wazuh, Relay, WAHA y Dashboard"},
+    {"command": "red", "description": "Sockets activos y telemetria de red"},
+    {"command": "sitios", "description": "Sitios web y destinos navegados"},
+    {"command": "sca", "description": "Evaluacion de seguridad CIS Benchmark"},
+    {"command": "fim", "description": "Monitoreo de integridad de archivos"},
+    {"command": "config", "description": "Configuracion y canales de alerta"},
+    {"command": "waha_status", "description": "Estado de sesion WhatsApp (WAHA)"},
+    {"command": "waha_qr", "description": "Recibir codigo QR para WhatsApp"},
+    {"command": "logs", "description": "Ver ultimos logs del relay"},
+    {"command": "ayuda", "description": "Menu de ayuda general"},
+]
+
+
+async def register_bot_commands() -> bool:
+    """Registra la lista oficial de comandos en Telegram vía API setMyCommands."""
+    token = getattr(settings, "telegram_bot_token", "")
+    if not token:
+        return False
+    url = f"{TELEGRAM_API_BASE}{token}/setMyCommands"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.post(url, json={"commands": BOT_COMMANDS_SPEC})
+            if res.status_code == 200 and res.json().get("ok"):
+                log.info("telegram_bot_commands_registered count=%d", len(BOT_COMMANDS_SPEC))
+                return True
+            else:
+                log.warning("telegram_bot_commands_register_failed status=%d res=%s", res.status_code, res.text)
+                return False
+    except Exception as e:
+        log.warning("telegram_bot_commands_register_error err=%s", e)
+        return False
+
+
 async def send_alert(
     message_text: str,
     level: int = 0,
@@ -485,27 +528,39 @@ async def send_alert(
     if level < getattr(settings, "telegram_min_level", 8):
         return False
 
-    prefix = "🚨 *ALERTA WAZUH*" if level >= 10 else "⚠️ *AVISO DE SEGURIDAD*"
-    formatted = f"{prefix}\n\n{message_text}"
+    # Evitar duplicar prefijo si el mensaje ya tiene formato de tarjeta SOC
+    if any(h in message_text for h in ("ALERTA DE SEGURIDAD WAZUH", "[CRÍTICO", "[ALTO", "[MEDIO", "[INFO", "CRÍTICO •", "ALTO •")):
+        formatted = message_text
+    else:
+        prefix = "🚨 *ALERTA WAZUH*" if level >= 10 else "⚠️ *AVISO DE SEGURIDAD*"
+        formatted = f"{prefix}\n\n{message_text}"
+
     return await send_message(formatted)
 
 
 async def send_health_notice(description: str, level: int = 15, **fields) -> bool:
-    """Envía un evento de salud de la infraestructura a Telegram."""
+    """Envía un evento de salud de la infraestructura a Telegram con diseño SOC Card."""
     if not getattr(settings, "telegram_enabled", False):
         return False
     if not getattr(settings, "telegram_bot_token", "") or not getattr(settings, "telegram_chat_id", ""):
         return False
 
     emoji = "🔥" if level >= 15 else "⚠️"
+    level_tag = f"[{'CRÍTICO' if level >= 15 else 'AVISO'} • L{level}]"
     lines = [
-        f"{emoji} *EVENTO DE SALUD - WAZUH-WAHA*",
-        f"*Descripción:* {description}",
-        f"*Nivel:* {level}",
-        f"*Hora:* {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"{emoji} *EVENTO DE SALUD DE INFRAESTRUCTURA*",
+        f"📊 *Severidad:* `{level_tag}`",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"🚨 *Descripción:* *{description}*",
+        f"🖥️ *Servidor Host:* `{platform.node()}`",
     ]
     for k, v in fields.items():
-        lines.append(f"• *{k}:* `{v}`")
+        k_label = k.replace("_", " ").capitalize()
+        lines.append(f"• *{k_label}:* `{v}`")
+
+    lines.append(f"⏰ *Hora:* `{time.strftime('%Y-%m-%d %H:%M:%S')}`")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("⚡ *Acciones de diagnóstico:* `/servicios`  •  `/status`  •  `/logs`")
 
     return await send_message("\n".join(lines))
 
@@ -1096,61 +1151,180 @@ def _get_rules_summary() -> str:
     )
 
 
-def _get_help_menu() -> str:
-    """Menú de comandos de ayuda en español con cobertura total del ecosistema."""
+def _get_commands_catalog(category: str = "") -> str:
+    """Catálogo maestro de comandos SOC organizado por áreas funcionales con soporte de filtrado."""
+    node = platform.node()
+    cat = category.strip().lower()
+
+    if cat in ("agentes", "equipos", "agent", "endpoints"):
+        return (
+            f"👥 *CATÁLOGO DE COMANDOS: GESTIÓN DE AGENTES Y ENDPOINTS*\n"
+            f"Servidor: `{node}`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"• `/agentes` — Lista de equipos conectados, IPs y estado de enlace.\n"
+            f"• `/agente <id> [modulo]` — Ficha forense completa (hardware, os, red, sca, ps).\n"
+            f"• `/agregar_agente <nombre> [ip]` — Registrar nuevo endpoint en Wazuh Manager.\n"
+            f"• `/eliminar_agente <id>` — Dar de baja un endpoint de Wazuh.\n"
+            f"• `/reiniciar_agente <id>` — Reiniciar remotamente el agente Wazuh en el host.\n"
+            f"• `/comando_agente <deb|rpm|arch|win>` — Script curl/bash listo para auto-instalar.\n"
+            f"• `/sca <id>` — Evaluación de seguridad CIS Benchmark y remediaciones.\n"
+            f"• `/fim <id>` — Archivos monitoreados e historial de integridad FIM.\n"
+            f"• `/procesos <id>` — Lista de procesos activos y consumo en el endpoint.\n"
+            f"• `/paquetes <id> [filtro]` — Software instalado (SBOM, ej. `/paquetes 001 ssh`).\n"
+            f"• `/puertos_agente <id>` — Sockets locales y puertos escuchando en el endpoint.\n"
+            f"• `/sitios_agente <id>` — Destinos web navegados recientemente por el host.\n\n"
+            f"💡 *Tip:* Usa `/reporte <id>` para exportar el expediente forense en PDF."
+        )
+
+    if cat in ("reportes", "reporte", "pdf", "informes"):
+        return (
+            f"📄 *CATÁLOGO DE COMANDOS: REPORTES EJECUTIVOS FORENSES*\n"
+            f"Servidor: `{node}`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"• `/reporte <agent_id>` — Genera y despacha el Informe Forense PDF SOC v2.0.\n\n"
+            f"📌 *Contenido del Informe PDF (10 apartados forenses):*\n"
+            f"1. Identificación y Registro del Agente\n"
+            f"2. Capacidad y Consumo de Hardware\n"
+            f"3. Sistema Operativo y Plataforma\n"
+            f"4. Interfaces de Red y Tráfico Acumulado\n"
+            f"5. Destinos de Red Activos & Sockets Remotos\n"
+            f"6. Procesos en Ejecución (Top Processes)\n"
+            f"7. Software Instalado y Paquetería (Syscollector)\n"
+            f"8. Seguridad de Configuración (SCA — CIS Benchmark)\n"
+            f"9. Monitoreo de Integridad de Archivos (FIM / Syscheck)\n"
+            f"10. Detecciones y Alertas SIEM Wazuh\n\n"
+            f"💡 *Ejemplo:* `/reporte 000` (genera el reporte del host local/manager)."
+        )
+
+    if cat in ("red", "telemetria", "sockets", "trafico", "traffic"):
+        return (
+            f"🌐 *CATÁLOGO DE COMANDOS: RED Y TELEMETRÍA*\n"
+            f"Servidor: `{node}`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"• `/red` — Sockets activos del ecosistema, puertos escuchando y tráfico MB.\n"
+            f"• `/sitios` — Auditoría de destinos web y servicios externos navegados.\n"
+            f"• `/escanear_red` — Sondeo y barrido de puertos/red inmediato.\n\n"
+            f"💡 *Ejemplo:* Escribe `/red` para ver puertos del ecosistema (1514, 55000, 8765, 3001, 8001)."
+        )
+
+    if cat in ("alertas", "reglas", "seguridad", "alerts", "rules"):
+        return (
+            f"🚨 *CATÁLOGO DE COMANDOS: ALERTAS Y REGLAS SIEM*\n"
+            f"Servidor: `{node}`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"• `/alertas [n]` — Últimas alertas de seguridad recibidas (ej. `/alertas 5`).\n"
+            f"• `/buscar_alerta <termino>` — Buscar eventos por palabra clave (ej. `/buscar_alerta root`).\n"
+            f"• `/silenciar <rule_id>` — Silenciar temporalmente una regla para no saturar.\n"
+            f"• `/reactivar <rule_id>` — Reactivar regla previamente silenciada.\n"
+            f"• `/reglas_silenciadas` — Lista de reglas actualmente silenciadas.\n"
+            f"• `/limpiar_cache` — Resetear la caché de deduplicación de alertas (TTL).\n"
+            f"• `/reglas` — Reglas de seguridad locales activas en Wazuh Manager.\n\n"
+            f"💡 *Ejemplo:* `/silenciar 5710` silencia las alertas de SSH fallido individual."
+        )
+
+    if cat in ("waha", "whatsapp", "wa"):
+        return (
+            f"📱 *CATÁLOGO DE COMANDOS: PASARELA WHATSAPP (WAHA)*\n"
+            f"Servidor: `{node}`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"• `/waha_status` — Estado de la sesión WhatsApp (CONNECTED / SCAN_QR / STOPPED).\n"
+            f"• `/waha_restart` — Reiniciar la sesión de WhatsApp en el contenedor WAHA.\n"
+            f"• `/waha_qr` — Generar y recibir código QR en este chat para escanear y vincular.\n"
+            f"• `/enviar_wa <numero> <mensaje>` — Enviar un WhatsApp de prueba vía WAHA.\n\n"
+            f"💡 *Ejemplo:* `/enviar_wa 521XXXXXXXXXX Prueba de alerta SOC`"
+        )
+
+    if cat in ("config", "ajustes", "configuracion", "settings"):
+        return (
+            f"⚙️ *CATÁLOGO DE COMANDOS: CONFIGURACIÓN Y PARÁMETROS*\n"
+            f"Servidor: `{node}`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"• `/config` — Ver configuración activa de canales, umbrales y destinos.\n"
+            f"• `/set_nivel <8-15>` — Ajustar nivel de severidad mínima para alertar.\n"
+            f"• `/set_canal <whatsapp|telegram|email> <on|off>` — Activar/pausar canal.\n"
+            f"• `/set_phone <numero>` — Actualizar número de WhatsApp destino.\n"
+            f"• `/set_email <correo>` — Actualizar email destino para alertas SMTP.\n"
+            f"• `/set_dedup <segundos>` — Ajustar ventana de tiempo de deduplicación (TTL).\n"
+            f"• `/set_wazuh_ip <ip>` — Actualizar dirección IP del Wazuh Manager central.\n"
+            f"• `/sync_comandos` — Sincronizar autocompletado oficial con Telegram (setMyCommands).\n\n"
+            f"💡 *Ejemplo:* `/set_canal email on` activa el despacho simultáneo por correo."
+        )
+
+    if cat in ("sistema", "servidor", "server", "host", "ops"):
+        return (
+            f"🖥️ *CATÁLOGO DE COMANDOS: SERVIDOR Y OPERACIONES*\n"
+            f"Servidor: `{node}`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"• `/status` — Métricas del host (CPU load, Memoria RAM, Disco y Uptime).\n"
+            f"• `/servicios` — Diagnóstico de los 4 servicios (Wazuh, Relay, WAHA, Dashboard).\n"
+            f"• `/reiniciar <waha|dashboard|relay|wazuh>` — Reiniciar servicio individual.\n"
+            f"• `/logs [n]` — Ver últimas líneas de logs del servicio Relay.\n"
+            f"• `/audit [n]` — Historial de cambios y auditoría de la sesión de administración.\n"
+            f"• `/ip` — Consultar direcciones IP de red local y pública del host.\n"
+            f"• `/kpis` — Métricas de rendimiento, volumen de alertas, deduplicación y latencia.\n"
+            f"• `/ping` — Prueba rápida de disponibilidad y latencia del bot.\n\n"
+            f"💡 *Ejemplo:* `/servicios` para verificar la salud de toda la pila."
+        )
+
+    if cat in ("todos", "all", "completo"):
+        parts = [
+            _get_commands_catalog("agentes"),
+            _get_commands_catalog("reportes"),
+            _get_commands_catalog("red"),
+            _get_commands_catalog("alertas"),
+            _get_commands_catalog("waha"),
+            _get_commands_catalog("config"),
+            _get_commands_catalog("sistema"),
+        ]
+        return "\n\n".join(parts)
+
+    # Vista general ejecutiva por defecto
     return (
-        f"🛡️ *CENTRO DE OPERACIONES DE SEGURIDAD (SOC) — PANEL DE CONTROL*\n"
+        f"🛡️ *CENTRO DE OPERACIONES DE SEGURIDAD (SOC) — CATÁLOGO MAESTRO*\n"
+        f"Servidor: `{node}` • *38 Comandos Disponibles*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Explora por área funcional escribiendo `/comandos <categoria>`:\n\n"
+        f"👥 `/comandos agentes` — Gestión, hardware, inventario y control de endpoints _(12 comandos)_\n"
+        f"📄 `/comandos reportes` — Generación de PDFs ejecutivos forenses SOC v2.0 _(1 comando)_\n"
+        f"🌐 `/comandos red` — Tráfico, sockets activos y navegación web _(3 comandos)_\n"
+        f"🚨 `/comandos alertas` — Filtro, búsqueda, reglas y silenciamiento _(7 comandos)_\n"
+        f"📱 `/comandos waha` — Pasarela WhatsApp y sesión WAHA _(4 comandos)_\n"
+        f"⚙️ `/comandos config` — Ajustes de umbrales, canales y parámetros _(8 comandos)_\n"
+        f"🖥️ `/comandos sistema` — Diagnóstico del host, métricas y servicios _(8 comandos)_\n"
+        f"📋 `/comandos todos` — Ver el directorio exhaustivo completo\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚡ *Comandos más utilizados:*\n"
+        f"• `/reporte 000` — Descargar PDF forense\n"
+        f"• `/agentes` — Estado de equipos\n"
+        f"• `/servicios` — Salud del sistema\n"
+        f"• `/alertas` — Últimos eventos\n"
+        f"• `/sync_comandos` — Registrar menú en Telegram\n\n"
+        f"💡 *Tip:* Escribe `/` para desplegar el autocompletado nativo de Telegram."
+    )
+
+
+def _get_help_menu() -> str:
+    """Menú de comandos de ayuda rápida con referencia al catálogo maestro."""
+    return (
+        f"🛡️ *CENTRO DE OPERACIONES DE SEGURIDAD (SOC) — PANEL DE CONTROL & AYUDA*\n"
         f"Servidor: `{platform.node()}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👥 *Gestión de Agentes y Ficha Forense:*\n"
-        f"• `/agentes` — Lista de equipos conectados y estado\n"
-        f"• `/agente <id> [módulo]` — Ficha forense completa (hardware, red, sca, ps)\n"
-        f"• `/agregar_agente <nombre> [ip]` — Registrar nuevo equipo en Wazuh\n"
-        f"• `/eliminar_agente <id>` — Dar de baja un equipo de Wazuh\n"
-        f"• `/reiniciar_agente <id>` — Reiniciar agente Wazuh de forma remota\n"
-        f"• `/comando_agente <deb|rpm|arch|win>` — Script listo para instalar agente\n"
-        f"• `/sca <id>` — Chequeos de seguridad CIS Benchmark y remediación\n"
-        f"• `/fim <id>` — Archivos monitoreados e integridad FIM\n"
-        f"• `/procesos <id>` — Procesos en ejecución y PIDs en el equipo\n"
-        f"• `/paquetes <id> [filtro]` — Software instalado (ej. `/paquetes 001 ssh`)\n"
-        f"• `/puertos_agente <id>` — Puertos y sockets del equipo\n"
-        f"• `/sitios_agente <id>` — Sitios web visitados por el equipo\n\n"
-        f"📄 *Reportes Oficiales:*\n"
-        f"• `/reporte <agent_id>` — Generar y recibir PDF forense en el chat\n\n"
-        f"🌐 *Red y Monitoreo de Conectividad:*\n"
-        f"• `/red` — Puertos del ecosistema y conexiones activas\n"
-        f"• `/sitios` — Sitios web y destinos navegados en la red\n"
-        f"• `/escanear_red` — Sondeo y escaneo de puertos/red inmediato\n\n"
-        f"🚨 *Alertas y Seguridad:*\n"
-        f"• `/alertas [n]` — Últimas alertas de seguridad en español\n"
-        f"• `/buscar_alerta <termino>` — Buscar alerta por texto (ej. `/buscar_alerta root`)\n"
-        f"• `/silenciar <rule_id>` — Silenciar regla temporalmente para no saturar\n"
-        f"• `/reactivar <rule_id>` — Reactivar regla silenciada\n"
-        f"• `/reglas_silenciadas` — Lista de reglas actualmente silenciadas\n"
-        f"• `/limpiar_cache` — Limpiar caché de deduplicación (reset TTL)\n"
-        f"• `/reglas` — Reglas de seguridad locales activas en Wazuh\n\n"
-        f"📱 *WhatsApp Gateway (WAHA):*\n"
-        f"• `/waha_status` — Estado de la sesión de WhatsApp\n"
-        f"• `/waha_restart` — Reiniciar sesión de WhatsApp en WAHA\n"
-        f"• `/waha_qr` — Recibir código QR en este chat para vincular WhatsApp\n"
-        f"• `/enviar_wa <numero> <mensaje>` — Enviar WhatsApp vía WAHA\n\n"
-        f"⚙️ *Configuración y Parámetros:*\n"
-        f"• `/config` — Ver configuración activa de canales y umbrales\n"
-        f"• `/set_nivel <8-15>` — Cambiar severidad mínima de alertas\n"
-        f"• `/set_canal <whatsapp|telegram|email> <on|off>` — Activar o silenciar canal\n"
-        f"• `/set_phone <numero>` — Actualizar móvil admin WhatsApp\n"
-        f"• `/set_email <correo>` — Actualizar email destino de alertas\n"
-        f"• `/set_dedup <segundos>` — Cambiar ventana de deduplicación TTL\n"
-        f"• `/set_wazuh_ip <ip>` — Cambiar IP del servidor Wazuh Manager\n\n"
-        f"🖥️ *Servidor y Operaciones:*\n"
-        f"• `/status` — CPU Load, RAM, Disco y Uptime del host\n"
-        f"• `/servicios` — Estado de Wazuh, WAHA, Relay y Dashboard\n"
-        f"• `/reiniciar <waha|dashboard|relay|wazuh>` — Reiniciar servicio\n"
-        f"• `/logs [n]` — Ver últimos logs del servicio relay\n"
-        f"• `/audit [n]` — Ver historial de cambios y auditoría\n"
-        f"• `/ip` — Ver direcciones IP locales y públicas del servidor\n"
-        f"• `/kpis` — Métricas de despacho, deduplicación y latencia\n"
-        f"• `/ping` — Prueba de disponibilidad y latencia"
+        f"📚 *Directorio Completo de Comandos:*\n"
+        f"• `/comandos` — Catálogo maestro organizado por áreas funcionales\n"
+        f"• `/comandos <area>` — Filtrar (agentes, reportes, red, alertas, waha, config, sistema)\n"
+        f"• `/sync_comandos` — Registrar autocompletado nativo en Telegram\n\n"
+        f"⚡ *Comandos Frecuentes:*\n"
+        f"• `/reporte <agent_id>` — Generar y recibir PDF forense oficial SOC v2.0\n"
+        f"• `/agentes` — Lista de equipos conectados y estado de enlace\n"
+        f"• `/agente <id>` — Ficha forense completa de un endpoint\n"
+        f"• `/alertas [n]` — Últimas alertas de seguridad recibidas\n"
+        f"• `/servicios` — Diagnóstico de salud de Wazuh, Relay, WAHA y Dashboard\n"
+        f"• `/status` — CPU, memoria RAM, disco y uptime del host\n"
+        f"• `/red` — Sockets activos y telemetría de red\n"
+        f"• `/waha_status` — Estado de conexión de WhatsApp\n"
+        f"• `/waha_qr` — Recibir código QR para vincular WhatsApp\n"
+        f"• `/config` — Configuración activa de canales y umbrales\n\n"
+        f"💡 Escribe `/comandos` para ver los 38 comandos categorizados con ejemplos."
     )
 
 
@@ -1834,8 +2008,21 @@ async def process_admin_command(text: str, source: str = "telegram", chat_id: st
     arg = parts[1] if len(parts) > 1 else ""
 
     # Menú y ayuda
-    if cmd in ("/start", "/help", "/ayuda", "/comandos"):
+    if cmd in ("/comandos", "/menu"):
+        return _get_commands_catalog(category=arg.lower())
+    elif cmd in ("/start", "/help", "/ayuda"):
         return _get_help_menu()
+    elif cmd in ("/sync_comandos", "/sync_commands"):
+        ok = await register_bot_commands()
+        if ok:
+            return (
+                "✅ *Comandos sincronizados con éxito con Telegram*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Se registraron `{len(BOT_COMMANDS_SPEC)}` comandos oficiales en la API de Telegram.\n"
+                "Ahora puedes escribir `/` o pulsar el botón 'Menú' para ver el autocompletado nativo."
+            )
+        else:
+            return "❌ *Error al sincronizar comandos con Telegram.* Verifica el token del bot en la configuración."
 
     # Diagnóstico del servidor y servicios
     elif cmd in ("/status", "/estado"):
@@ -2055,6 +2242,7 @@ class TelegramBotWorker:
         return await send_message(text, chat_id=chat_id, token=token, parse_mode=parse_mode)
 
     async def _poll_loop(self) -> None:
+        asyncio.create_task(register_bot_commands())
         try:
             init_updates = await get_updates(offset=0, timeout=1)
             if init_updates:
