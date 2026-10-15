@@ -520,6 +520,17 @@ TEMPLATES: dict[str, TemplateFn] = {
         recommendation="Intento activo de evasión de defensas (MITRE T1070). Bloquear usuario y aislar host.",
         evidence=a.get("full_log", ""),
     ),
+    "57150": lambda a: render_soc_alert(
+        a,
+        title="Wazuh Agent conectado al ecosistema",
+        fields=[
+            ("🌐 IP Enlace:", _field(a, "srcip", default="any")),
+            ("🐧 Plataforma:", _field(a, "os", "name", default="Linux")),
+            ("⚙️ Estado:", "🟢 Activo y Sincronizado"),
+        ],
+        recommendation="Endpoint conectado. Se ejecutó el análisis de integridad y postura CIS Benchmark.",
+        evidence=a.get("full_log", ""),
+    ),
 }
 
 

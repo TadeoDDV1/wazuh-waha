@@ -475,6 +475,7 @@ BOT_COMMANDS_SPEC = [
     {"command": "comandos", "description": "Directorio maestro de comandos SOC"},
     {"command": "agentes", "description": "Lista de agentes y estado de enlace"},
     {"command": "agente", "description": "Ficha forense de un agente (/agente <id>)"},
+    {"command": "analizar_agente", "description": "Auditar seguridad y hardening (/analizar_agente <id>)"},
     {"command": "reporte", "description": "Generar PDF forense SOC (/reporte <id>)"},
     {"command": "alertas", "description": "Ultimas alertas de seguridad recibidas"},
     {"command": "buscar_alerta", "description": "Buscar alerta por termino (/buscar <texto>)"},
@@ -1163,6 +1164,7 @@ def _get_commands_catalog(category: str = "") -> str:
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"• `/agentes` — Lista de equipos conectados, IPs y estado de enlace.\n"
             f"• `/agente <id> [modulo]` — Ficha forense completa (hardware, os, red, sca, ps).\n"
+            f"• `/analizar_agente <id>` — Disparar escaneos Wazuh y generar reporte de hardening.\n"
             f"• `/agregar_agente <nombre> [ip]` — Registrar nuevo endpoint en Wazuh Manager.\n"
             f"• `/eliminar_agente <id>` — Dar de baja un endpoint de Wazuh.\n"
             f"• `/reiniciar_agente <id>` — Reiniciar remotamente el agente Wazuh en el host.\n"
@@ -1281,10 +1283,10 @@ def _get_commands_catalog(category: str = "") -> str:
     # Vista general ejecutiva por defecto
     return (
         f"🛡️ *CENTRO DE OPERACIONES DE SEGURIDAD (SOC) — CATÁLOGO MAESTRO*\n"
-        f"Servidor: `{node}` • *38 Comandos Disponibles*\n"
+        f"Servidor: `{node}` • *39 Comandos Disponibles*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"Explora por área funcional escribiendo `/comandos <categoria>`:\n\n"
-        f"👥 `/comandos agentes` — Gestión, hardware, inventario y control de endpoints _(12 comandos)_\n"
+        f"👥 `/comandos agentes` — Gestión, hardware, inventario y control de endpoints _(13 comandos)_\n"
         f"📄 `/comandos reportes` — Generación de PDFs ejecutivos forenses SOC v2.0 _(1 comando)_\n"
         f"🌐 `/comandos red` — Tráfico, sockets activos y navegación web _(3 comandos)_\n"
         f"🚨 `/comandos alertas` — Filtro, búsqueda, reglas y silenciamiento _(7 comandos)_\n"
@@ -2057,6 +2059,10 @@ async def process_admin_command(text: str, source: str = "telegram", chat_id: st
         sub_arg = parts[2].lower() if len(parts) > 2 else ""
         extra_arg = parts[3].lower() if len(parts) > 3 else ""
         return await _get_agent_detail_summary(arg, subcmd=sub_arg, extra_arg=extra_arg)
+    elif cmd in ("/analizar_agente", "/escanear_agente", "/auditar_agente"):
+        target_aid = arg if arg else "000"
+        from .agent_analyzer import analyze_and_notify_agent
+        return await analyze_and_notify_agent(target_aid, reason="solicitud manual")
     elif cmd in ("/agregar_agente", "/crear_agente", "/nuevo_agente"):
         if not arg:
             return "ℹ️ Uso: `/agregar_agente <nombre> [ip]`. Ejemplo: `/agregar_agente servidor-web 192.168.1.50`"

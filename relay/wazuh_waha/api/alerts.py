@@ -182,6 +182,14 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
                     "rule_id": rule_id,
                 }
 
+    # 4. Disparo automático de análisis de seguridad de Wazuh si es evento de conexión de agente
+    if rule_id in ("57150", "501", "502", "503") or ("agent" in description.lower() and "started" in description.lower()):
+        try:
+            from ..infrastructure.agent_analyzer import analyze_and_notify_agent
+            asyncio.create_task(analyze_and_notify_agent(agent_id, reason="alerta de conexión"))
+        except Exception as _an_err:
+            log.warning("agent_analyzer_trigger_err aid=%s err=%s", agent_id, _an_err)
+
     # Si ningún canal está habilitado en configuración
     if not channels_sent and not getattr(settings, "whatsapp_enabled", True):
         log.info("alert_ignored_all_channels_disabled rule=%s agent=%s", rule_id, agent_id)

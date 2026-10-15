@@ -290,6 +290,13 @@
     <group>defense_evasion,anti_forensics</group>
   </rule>
 
+  <!-- 57150: Wazuh Agent conectado o iniciado en el ecosistema (eleva reglas stock 501, 502, 503 de L3 a L10) -->
+  <rule id="57150" level="10">
+    <if_sid>501, 502, 503</if_sid>
+    <description>Wazuh Agent conectado al ecosistema</description>
+    <group>agent_status,connection,compliance</group>
+  </rule>
+
   <!-- 999001: Health event de WAHA / Relay / Agente. El relay inyecta estas alertas -->
   <!-- via POST al manager (puerto 55000 /events). -->
   <rule id="999001" level="10">

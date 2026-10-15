@@ -25,6 +25,7 @@ from .common.logging import log
 from .common.session import COOKIE_NAME, verify_session
 from .common.traffic_stream import traffic_watcher
 from .config import settings
+from .infrastructure.agent_analyzer import agent_watcher
 from .infrastructure.telegram_bot import telegram_bot
 
 
@@ -112,7 +113,9 @@ async def lifespan(app: FastAPI):
     )
     traffic_watcher.start()
     telegram_bot.start()
+    agent_watcher.start()
     yield
+    await agent_watcher.stop()
     await telegram_bot.stop()
     await traffic_watcher.stop()
     log.info("relay_stopping worker_id=%s", WORKER_ID)

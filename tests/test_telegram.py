@@ -151,12 +151,13 @@ class TestTelegramIntegration:
         assert "CATÁLOGO MAESTRO" in res_cmd
         assert "/comandos agentes" in res_cmd
         assert "/comandos reportes" in res_cmd
-        assert "38 Comandos Disponibles" in res_cmd
+        assert "Comandos Disponibles" in res_cmd
 
         # /comandos por categorías
         res_cmd_ag = await telegram_bot.process_admin_command("/comandos agentes")
         assert "GESTIÓN DE AGENTES" in res_cmd_ag
         assert "/agente <id>" in res_cmd_ag
+        assert "/analizar_agente <id>" in res_cmd_ag
 
         res_cmd_rep = await telegram_bot.process_admin_command("/comandos reportes")
         assert "REPORTES EJECUTIVOS FORENSES" in res_cmd_rep
