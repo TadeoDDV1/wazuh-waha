@@ -21,6 +21,29 @@ def test_render_progress_bar():
     assert _render_progress_bar(80) == "████████░░"
 
 
+def test_cis_translator_catalog_and_heuristic():
+    from relay.wazuh_waha.domain.cis_translator import localize_cis_check
+
+    check1 = {
+        "title": "Ensure unused filesystems kernel modules are not available.",
+        "rationale": "While loadable filesystem kernel modules are a convenient method of modifying the running kernel, this can be abused by attackers.",
+        "remediation": "- IF - the module is available in the running kernel: - Unload the filesystem kernel module from the kernel",
+    }
+    loc1 = localize_cis_check(check1)
+    assert "Deshabilitar módulos de kernel" in loc1["title"]
+    assert "superficie de ataque" in loc1["rationale"]
+    assert "modprobe.d" in loc1["remediation"]
+
+    check2 = {
+        "title": "Ensure telnet is not installed",
+        "rationale": "The telnet protocol transmits passwords in cleartext.",
+        "remediation": "apt-get purge telnet",
+    }
+    loc2 = localize_cis_check(check2)
+    assert "Desinstalar software no requerido: telnet" in loc2["title"]
+
+
+
 def test_format_hardening_report_with_failures():
     profile = {
         "name": "srv-db-prod",

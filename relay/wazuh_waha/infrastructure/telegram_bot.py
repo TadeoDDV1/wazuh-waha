@@ -910,12 +910,14 @@ async def _get_agent_detail_summary(agent_id: str, subcmd: str = "", extra_arg: 
             f"• Aprobados: `✅ {sca.get('pass', 0)}` | Fallados: `❌ {sca.get('fail', 0)}`",
         ]
         if failed_checks:
+            from ..domain.cis_translator import localize_cis_check
             lines.append("\n🚨 *Principales Controles Fallados & Remediación:*")
             for idx, c in enumerate(failed_checks[:6], 1):
+                loc = localize_cis_check(c)
                 lines.append(
-                    f"{idx}. *{c.get('title')}*\n"
-                    f"   _Motivo:_ {c.get('rationale')}\n"
-                    f"   🔧 _Remediación:_ `{c.get('remediation')}`"
+                    f"{idx}. *{loc.get('title')}*\n"
+                    f"   💡 _Riesgo:_ {loc.get('rationale')}\n"
+                    f"   🛠️ _Remediación:_ `{loc.get('remediation')}`"
                 )
         return "\n".join(lines)
 

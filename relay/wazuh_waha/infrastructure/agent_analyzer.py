@@ -20,6 +20,7 @@ from typing import Any
 import httpx
 
 from ..config import settings
+from ..domain.cis_translator import localize_cis_check
 
 log = logging.getLogger("wazuh-waha.agent_analyzer")
 
@@ -140,15 +141,10 @@ def format_hardening_report(profile: dict[str, Any], agent_id: str, trigger_reas
 
     if failed_checks:
         for idx, check in enumerate(failed_checks[:4], 1):
-            title = check.get("title", "Control de seguridad").strip()
-            rationale = check.get("rationale", "Reducir superficie de ataque").strip()
-            remediation = check.get("remediation", "Aplicar configuración recomendada por fabricante").strip()
-
-            # Acortar textos largos para que quepan estéticamente en pantalla móvil
-            if len(rationale) > 130:
-                rationale = rationale[:127] + "..."
-            if len(remediation) > 180:
-                remediation = remediation[:177] + "..."
+            localized = localize_cis_check(check)
+            title = localized["title"]
+            rationale = localized["rationale"]
+            remediation = localized["remediation"]
 
             lines.append(f"\n{idx}. *{title}*")
             lines.append(f"   💡 _Riesgo:_ {rationale}")
