@@ -1,120 +1,155 @@
 # wazuh-waha — SOC Operations & Notification Suite
 
-Ecosistema de monitoreo, telemetría y respuesta ante incidentes para **Wazuh SIEM**, con entrega de alertas multicanal (**WhatsApp**, **Telegram**, **Email**), dashboard analítico en tiempo real, bot interactivo de administración y generador de **reportes forenses en PDF**.
+Ecosistema unificado de monitoreo, telemetría y respuesta ante incidentes para **Wazuh SIEM**, con entrega de alertas multicanal (**WhatsApp**, **Telegram**, **Email**), bot interactivo de administración SOC, auditoría automática de endpoints con recomendaciones de hardening CIS Benchmark y generador de **reportes forenses oficiales en PDF**.
 
 ```
-Wazuh Manager (Alertas de seguridad)
-  └── Regla activada (level >= 8)
-       └── Integración whatsapp_alert.py
-            └── POST http://<relay-host>:8765/alerts
-                 ├── Deduplicación concurrente con fcntl.flock
-                 ├── Enriquecimiento contextual con IA Local (Ollama LLM)
-                 ├── Despacho a WhatsApp (WAHA) + Telegram + Email SMTP
-                 ├── Journaling de tráfico y telemetría SSE
-                 └── Generación de Reportes Forenses PDF por Agente
+Wazuh Manager (Alertas de seguridad & Conexiones de Agente)
+  ├── Regla SIEM activada (level >= 8) o conexión de agente (regla 57150 / watcher)
+  └── Integración whatsapp_alert.py
+       └── POST http://<relay-host>:8765/alerts
+            ├── Deduplicación concurrente con fcntl.flock
+            ├── Enriquecimiento contextual y traducción técnica al español
+            ├── Auditoría de conexión y recomendaciones de hardening CIS Benchmark
+            ├── Despacho a WhatsApp (WAHA) + Telegram + Email SMTP
+            ├── Journaling de tráfico y telemetría SSE en vivo
+            └── Generación de Reportes Forenses PDF SOC v2.0 por Agente
 ```
 
 ---
 
-## 🌟 Capacidades del Sistema
+## 🌟 Capacidades Principales
 
-- 📱 **Alertas Multicanal**: Despacho instantáneo a WhatsApp (WAHA), Telegram Bot y Email corporativo con plantillas por severidad.
-- 🤖 **Bot Administrativo de Telegram**: Control total del SOC desde el móvil (`/reporte`, `/servicios`, `/silenciar`, `/reiniciar`, `/scan`, `/agentes`).
-- 📊 **Dashboard Web en Tiempo Real**: Panel React 18 + Vite con stream de eventos SSE, métricas en vivo y editor de entorno `.env`.
-- 📄 **Generador de Reportes Forenses PDF**: Informes de seguridad ejecutivos y técnicos por agente (Hardware, SO, Red, Sockets, Procesos, Software, SCA CIS, FIM y Alertas).
-- 🧠 **Diagnóstico con IA Local (Ollama)**: Análisis inteligente de causa raíz sin enviar telemetría a nubes externas.
-- 🛡️ **Seguridad BFF & RBAC**: Autenticación estricta con API keys, cookies seguras HTTP-only y rate limiting preventivo.
-
----
-
-## 🚀 Quickstart
-
-1. **Clonar repositorio**:
-   ```bash
-   git clone <repo-url> wazuh-waha && cd wazuh-waha
-   ```
-2. **Configurar entorno**:
-   ```bash
-   cp .env.example .env
-   # Generar API keys seguras
-   openssl rand -hex 24
-   ```
-3. **Instalar el Relay**:
-   ```bash
-   bash scripts/install-wazuh-waha.sh
-   ```
-4. **Instalar en la VM de Wazuh Manager**:
-   Seguir instrucciones en [`docs/deployment.md`](docs/deployment.md#2-instalar-en-la-vm-del-manager).
-5. **Diagnóstico general**:
-   ```bash
-   bash scripts/diagnose.sh
-   ```
+- 📱 **Alertas Multicanal en Español**: Despacho instantáneo a WhatsApp (WAHA), Telegram Bot y Email corporativo con plantillas formateadas y clasificación de severidad (Crítico, Alto, Medio, Bajo).
+- 🔍 **Auditoría Automática de Conexión & Hardening CIS**: Al conectarse o reconectarse un endpoint, Wazuh dispara escaneos de integridad (Syscheck/FIM) y genera una tarjeta de auditoría con barra de progreso, controles CIS Benchmark fallados, análisis de riesgo y **comandos directos de remediación** en español.
+- 🤖 **Bot Administrativo de Telegram (39 Comandos)**: Control total del SOC desde el chat móvil (`/comandos`, `/reporte`, `/agentes`, `/sca`, `/analizar_agente`, `/red`, `/sitios`, `/servicios`, `/silenciar`, `/reiniciar`).
+- 📄 **Reportes Forenses PDF SOC v2.0**: Expedientes forenses completos con 10 apartados técnicos explicados (Hardware, Sistema Operativo, Interfaces de Red, Destinos Web, Procesos Activos, Inventario SBOM, Seguridad CIS SCA, Integridad FIM y Detecciones SIEM).
+- 📊 **Dashboard Web en Tiempo Real**: Panel de control React 18 + Vite con stream de eventos SSE, métricas en vivo y configuración dinámica.
+- 🛡️ **Seguridad BFF & RBAC**: Autenticación estricta mediante API keys, cookies seguras HTTP-only y rate limiting preventivo.
 
 ---
 
-## 📄 Reportes Forenses de Agentes (PDF)
+## 🚀 Despliegue e Instalación
 
-El sistema genera informes detallados de actividad y postura de seguridad por agente:
+### 1. Requisitos Previos
+- Servidor Linux (Ubuntu, Debian, CentOS o Arch Linux).
+- Python 3.11+ con soporte para `venv`.
+- Docker y Docker Compose (para contenedor WAHA y Dashboard).
+- Instancia activa de Wazuh Manager (v4.x).
 
-- **Desde el Dashboard**: Acceder a la tarjeta "Reportes de Actividad por Agente", seleccionar el endpoint y descargar el PDF.
-- **Desde Telegram**: Enviar `/reporte <agent_id>` (ej. `/reporte 001`) al bot para recibir el documento directamente en el chat.
-- **Vía API REST**:
-  ```bash
-  curl -H "X-Api-Key: $RELAY_API_KEY" http://localhost:8765/api/v1/reports/agent/001 -o reporte_001.pdf
-  ```
+### 2. Configuración del Relay
+```bash
+# 1. Clonar repositorio
+git clone https://github.com/TadeoDDV1/wazuh-waha.git && cd wazuh-waha
+
+# 2. Configurar variables de entorno
+cp .env.example .env
+# Generar claves de seguridad
+openssl rand -hex 24
+
+# 3. Instalar entorno e iniciar servicios del Relay
+bash scripts/install-wazuh-waha.sh
+
+# 4. Iniciar contenedores WAHA y Dashboard
+docker compose up -d
+```
+
+### 3. Configuración en la VM del Wazuh Manager
+1. Copiar las reglas locales a la máquina del Wazuh Manager:
+   ```bash
+   sudo cp manager-side/rules/local_rules.xml /var/ossec/etc/rules/local_rules.xml
+   sudo chown root:wazuh /var/ossec/etc/rules/local_rules.xml
+   sudo chmod 0640 /var/ossec/etc/rules/local_rules.xml
+   ```
+2. Instalar el script de integración `whatsapp_alert.py`:
+   ```bash
+   sudo cp manager-side/integrations/custom/whatsapp_alert.py /var/ossec/integrations/custom/whatsapp_alert.py
+   sudo chown root:wazuh /var/ossec/integrations/custom/whatsapp_alert.py
+   sudo chmod 0750 /var/ossec/integrations/custom/whatsapp_alert.py
+   ```
+3. Insertar el bloque de integración en `/var/ossec/etc/ossec.conf`:
+   ```xml
+   <integration>
+     <name>custom-whatsapp</name>
+     <hook_url>http://127.0.0.1:8765/alerts</hook_url>
+     <api_key>TU_RELAY_API_KEY</api_key>
+     <alert_format>json</alert_format>
+   </integration>
+   ```
+4. Reiniciar Wazuh Manager:
+   ```bash
+   sudo systemctl restart wazuh-manager.service
+   ```
 
 ---
 
-## 🛠️ Comandos Frecuentes de Operación
+## 🤖 Catálogo de Comandos del Bot de Telegram
+
+El bot incluye un catálogo categorizado que puedes consultar escribiendo `/comandos` o explorando por área funcional:
+
+| Categoría | Comando de Acceso | Funcionalidades Clave |
+|---|---|---|
+| **👥 Agentes y Endpoints** | `/comandos agentes` | `/agentes`, `/agente <id>`, `/analizar_agente <id>`, `/sca <id>`, `/fim <id>`, `/procesos <id>`, `/paquetes <id>`, `/puertos_agente <id>`, `/sitios_agente <id>`, `/reiniciar_agente <id>`, `/agregar_agente`, `/eliminar_agente`, `/comando_agente <so>` |
+| **📄 Reportes Ejecutivos** | `/comandos reportes` | `/reporte <agent_id>` (Genera y envía el informe PDF oficial SOC v2.0) |
+| **🌐 Red y Telemetría** | `/comandos red` | `/red` (sockets activos y puertos), `/sitios` (auditoría web externa), `/escanear_red` (sondeo inmediato) |
+| **🚨 Alertas y Reglas** | `/comandos alertas` | `/alertas [n]`, `/buscar_alerta <termino>`, `/silenciar <rule_id>`, `/reactivar <rule_id>`, `/reglas_silenciadas`, `/limpiar_cache`, `/reglas` |
+| **📱 Pasarela WhatsApp** | `/comandos waha` | `/waha_status`, `/waha_restart`, `/waha_qr` (código QR interactivo en el chat), `/enviar_wa <numero> <msg>` |
+| **⚙️ Configuración SOC** | `/comandos config` | `/config`, `/set_nivel <8-15>`, `/set_canal <whatsapp\|telegram\|email> <on\|off>`, `/set_phone`, `/set_email`, `/set_dedup`, `/set_wazuh_ip`, `/sync_comandos` |
+| **🖥️ Servidor y Host** | `/comandos sistema` | `/status` (CPU, RAM, Disco, Uptime), `/servicios` (salud de Wazuh, Relay, WAHA, Dashboard), `/reiniciar <servicio>`, `/logs [n]`, `/audit [n]`, `/ip`, `/kpis`, `/ping` |
+
+---
+
+## 📄 Informes Forenses PDF SOC v2.0
+
+Cada reporte oficial generado incluye un encabezado institucional, foliado dinámico (`Página X de Y`), tarjetas ejecutivas KPI y 10 apartados de auditoría:
+
+1. **Identificación y Registro**: Hostname, ID, IP de enlace, versión de agente y último keep-alive.
+2. **Capacidad y Hardware**: CPU, núcleos, MHz, memoria RAM detallada y número de serie de placa.
+3. **Sistema Operativo**: Distribución, release, kernel exacto y arquitectura.
+4. **Interfaces de Red**: Adaptadores físicos/virtuales, IPv4, MAC, MTU y volumen RX/TX.
+5. **Destinos de Red & Sockets**: Conexiones activas en tiempo real, puertos, procesos y categorización.
+6. **Procesos en Ejecución**: Binarios activos, PIDs, usuarios ejecutores y estado.
+7. **Software Instalado (SBOM)**: Inventario de paquetes, versiones y proveedores homologados.
+8. **Seguridad CIS Benchmark (SCA)**: Score porcentual, controles fallados y remediaciones directas.
+9. **Integridad de Archivos (FIM)**: Archivos modificados o añadidos, tamaño, permisos y hashes MD5.
+10. **Detecciones SIEM**: Historial de alertas correlacionadas por severidad (L1 a L15).
+
+---
+
+## 🛠️ Comandos de Operación y Diagnóstico
 
 ```bash
-# Estado del relay y healthcheck
+# Estado y salud de los servicios
 systemctl status wazuh-waha
 curl http://localhost:8765/health
 
-# Contenedores Docker (WAHA y Dashboard)
+# Verificación de contenedores
 docker ps --filter "name=wazuh-waha"
 
-# Diagnóstico integral de la stack
+# Diagnóstico integral del sistema
 bash scripts/diagnose.sh
 
-# Logs en tiempo real del relay
+# Logs en vivo del Relay
 journalctl -u wazuh-waha -f
 
-# Recuperación de sesión WAHA si se traba
-bash scripts/recover-waha.sh
+# Ejecución de pruebas unitarias
+PYTHONPATH=. relay/.venv/bin/pytest tests/ -v
 ```
 
 ---
 
-## 📂 Estructura del Repositorio
+## 📂 Estructura del Proyecto
 
 ```
 wazuh-waha/
-├── README.md                     # Documento central
-├── ARCHITECTURE.md               # Arquitectura técnica detallada
-├── CHANGELOG.md                  # Historial de versiones y cambios
-├── .env.example                  # Plantilla de variables de configuración
-├── docker-compose.yml            # Orquestación de WAHA y Dashboard
-├── docs/                         # Documentación operativa y técnica
-│   └── archive/                  # Planes históricos archivados
-├── dashboard/                    # Interfaz web React + Vite + TypeScript
-├── relay/                        # Servicio central FastAPI + Uvicorn
-│   ├── pyproject.toml            # Dependencias Python
-│   ├── systemd/                  # Units systemd del servicio y watchdog
-│   └── wazuh_waha/               # Módulo Python (API, Notifiers, Telemetría)
-├── manager-side/                 # Configuraciones para la VM Wazuh Manager
-├── scripts/                      # Utilidades y scripts de mantenimiento
-├── backups/                      # Copias de seguridad de alertas y entorno
-└── tests/                        # Suite de pruebas automatizadas
+├── README.md                     # Documentación maestra y guía de arquitectura
+├── GEMINI.md                     # Reglas de operación del asistente
+├── docker-compose.yml            # Orquestación de contenedores WAHA y Dashboard
+├── dashboard/                    # Panel Web React 18 + Vite + TypeScript
+├── relay/                        # Núcleo del servicio FastAPI + Uvicorn
+│   ├── pyproject.toml            # Dependencias y configuración de empaquetado
+│   ├── systemd/                  # Archivos de servicio systemd y watchdog
+│   └── wazuh_waha/               # Módulos Python (API, Notifiers, Telemetría, SCA)
+├── manager-side/                 # Reglas SIEM, snippets y scripts para Wazuh Manager
+├── scripts/                      # Scripts de despliegue, recuperación y diagnóstico
+└── tests/                        # Suite automatizada de pruebas unitarias
 ```
-
----
-
-## 📚 Documentación
-
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — Decisiones de diseño y flujo de datos.
-- [`docs/README.md`](docs/README.md) — Índice completo de documentación técnica.
-- [`docs/deployment.md`](docs/deployment.md) — Instalación paso a paso.
-- [`docs/troubleshooting.md`](docs/troubleshooting.md) — Matriz de errores comunes.
-- [`dashboard/README.md`](dashboard/README.md) — Documentación del Dashboard Web.
