@@ -193,10 +193,10 @@ async def analyze_and_notify_agent(agent_id: str, reason: str = "conexión") -> 
 
     # 5. Despachar a WhatsApp si está activo
     try:
-        from .waha_client import waha_client
-        if getattr(settings, "whatsapp_enabled", True) and settings.admin_phone:
-            chat_id = f"{settings.admin_phone}@c.us"
-            await waha_client.send_text(chat_id, report_text)
+        from . import waha_client
+        if getattr(settings, "whatsapp_enabled", True):
+            target_chat = f"{settings.admin_phone}@c.us" if settings.admin_phone else None
+            await waha_client.send_text(report_text, chat_id=target_chat)
     except Exception as e:
         log.warning("whatsapp_notify_analyzer_failed aid=%s err=%s", aid, e)
 
