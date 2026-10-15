@@ -1612,6 +1612,72 @@ async def telegram_test(request: Request):
     }
 
 
+@router.post("/api/v1/dashboard/telegram/sync_commands")
+async def telegram_sync_commands(request: Request):
+    """Fuerza el registro oficial de comandos nativos en Telegram Bot API."""
+    await verify_write(request)
+    from ..infrastructure.telegram_bot import register_bot_commands, BOT_COMMANDS_SPEC
+    ok = await register_bot_commands()
+    return {
+        "ok": ok,
+        "count": len(BOT_COMMANDS_SPEC),
+        "detail": f"Se sincronizaron {len(BOT_COMMANDS_SPEC)} comandos con Telegram" if ok else "No se pudo sincronizar comandos con Telegram",
+    }
+
+
+@router.post("/api/v1/dashboard/reports/audit/{agent_id}")
+async def reports_audit_agent(agent_id: str, request: Request):
+    """Dispara escaneos de integridad y recolecta telemetría fresca antes de descargar el reporte."""
+    await verify_write(request)
+    from ..infrastructure.agent_analyzer import trigger_wazuh_scans
+    res = await trigger_wazuh_scans(agent_id)
+    return {
+        "ok": res.get("ok", False),
+        "agent_id": agent_id,
+        "detail": "Escaneo de integridad Wazuh (Syscheck/FIM) disparado exitosamente" if res.get("ok") else res.get("error", "Error al disparar escaneo"),
+    }
+
+
+@router.get("/api/v1/dashboard/reports/preview/{agent_id}")
+async def reports_preview_agent(agent_id: str, request: Request):
+    """Obtiene un resumen ejecutivo rápido para vista previa antes de generar el PDF."""
+    await verify_api_key(request)
+    from .telemetry import _fetch_agent_full_profile
+    profile = await _fetch_agent_full_profile(agent_id)
+    if not profile or not profile.get("ok"):
+        return {"ok": False, "agent_id": agent_id, "detail": "No se pudo obtener el perfil del agente"}
+
+    sca = profile.get("sca", {}) or {}
+    hw = profile.get("hardware", {}) or {}
+    os_info = profile.get("os", {}) or {}
+    net = profile.get("network", {}) or {}
+    sockets = net.get("sockets", []) or []
+    detections = profile.get("recent_detections", []) or []
+    software = profile.get("software", {}) or {}
+
+    return {
+        "ok": True,
+        "agent_id": agent_id,
+        "name": profile.get("name", f"agente-{agent_id}"),
+        "ip": profile.get("ip", "N/D"),
+        "status": profile.get("status", "active"),
+        "os_desc": f"{os_info.get('name', 'Linux')} {os_info.get('version', '')}".strip(),
+        "arch": os_info.get("architecture", hw.get("cpu_name", "x86_64")),
+        "kernel": os_info.get("kernel", "-"),
+        "ram_total_mb": hw.get("ram_total_mb", 0),
+        "ram_used_mb": hw.get("ram_used_mb", 0),
+        "ram_usage_pct": hw.get("ram_usage_percent", 0.0),
+        "sca_score": float(sca.get("score", 0.0)),
+        "sca_pass": sca.get("pass", 0),
+        "sca_fail": sca.get("fail", 0),
+        "sca_total": sca.get("total_checks", 0),
+        "sockets_count": len(sockets),
+        "recent_alerts_count": len(detections),
+        "critical_alerts_count": len([d for d in detections if int(d.get("level", 0)) >= 10]),
+        "total_packages": software.get("total_packages", 0),
+    }
+
+
 @router.post("/api/v1/dashboard/notifications/channels")
 async def update_notification_channels(request: Request):
     """Actualiza la selección activa de canales de notificación (WhatsApp, Telegram, Correo)."""

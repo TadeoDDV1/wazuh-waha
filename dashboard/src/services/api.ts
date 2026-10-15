@@ -242,6 +242,21 @@ export const dashboardService = {
     });
     return response.data as Blob;
   },
+
+  syncTelegramCommands: async (): Promise<{ ok: boolean; count?: number; detail?: string }> => {
+    const response = await api.post('/telegram/sync_commands');
+    return response.data;
+  },
+
+  getAgentReportPreview: async (agentId: string): Promise<any> => {
+    const response = await api.get(`/reports/preview/${encodeURIComponent(agentId)}`);
+    return response.data;
+  },
+
+  auditAgentBeforeReport: async (agentId: string): Promise<{ ok: boolean; detail?: string }> => {
+    const response = await api.post(`/reports/audit/${encodeURIComponent(agentId)}`);
+    return response.data;
+  },
 };
 
 export function buildNetworkStreamUrl(): string {
