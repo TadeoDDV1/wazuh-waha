@@ -225,7 +225,13 @@ async def _auto_recover_session() -> None:
         _recovery_in_progress = False
 
 
-async def send_text(text: str, chat_id: str | None = None, session: str | None = None) -> dict:
+async def send_text(
+    text: str,
+    chat_id: str | None = None,
+    session: str | None = None,
+    max_retries: int = 2,
+    base_backoff_sec: float = 1.0,
+) -> dict:
     final_chat = chat_id or settings.admin_chat_id
     final_session = session or settings.waha_session
     payload = {
@@ -243,72 +249,93 @@ async def send_text(text: str, chat_id: str | None = None, session: str | None =
         final_chat, final_session, len(text), text[:80],
     )
 
-    t0 = time.time()
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.post(
-                f"{settings.waha_host}/api/sendText",
-                json=payload,
-                headers=headers,
-            )
-        elapsed_ms = int((time.time() - t0) * 1000)
+    last_error: Exception | None = None
+    for attempt in range(max_retries + 1):
+        t0 = time.time()
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.post(
+                    f"{settings.waha_host}/api/sendText",
+                    json=payload,
+                    headers=headers,
+                )
+            elapsed_ms = int((time.time() - t0) * 1000)
 
-        if r.is_success:
-            log.info(
-                "waha_request_done status=%d elapsed_ms=%d endpoint=%s",
-                r.status_code, elapsed_ms, "/api/sendText",
-            )
-            try:
-                body = r.json()
-            except Exception:
-                body = {"_raw": r.text[:300]}
-            _reset_failures()
-            return body
-        else:
+            if r.is_success:
+                log.info(
+                    "waha_request_done status=%d elapsed_ms=%d endpoint=%s attempt=%d",
+                    r.status_code, elapsed_ms, "/api/sendText", attempt + 1,
+                )
+                try:
+                    body = r.json()
+                except Exception:
+                    body = {"_raw": r.text[:300]}
+                _reset_failures()
+                return body
+
             body_txt = r.text[:500] if r.text else ""
-            fails = _record_failure()
-            log.error(
-                "waha_request_failed status=%d elapsed_ms=%d body=%r failures_in_window=%d",
-                r.status_code, elapsed_ms, body_txt, fails,
-            )
-            _check_failure_threshold(fails)
 
+            # Detectar sesión detenida
             if r.status_code == 422 and _is_session_stopped_error(body_txt):
+                fails = _record_failure()
                 log.critical(
                     "waha_session_stopped_detected session=%s triggering_auto_recovery",
                     final_session,
                 )
                 asyncio.create_task(_auto_recover_session())
+                _check_failure_threshold(fails)
+                raise WAHAError(f"WAHA HTTP {r.status_code}: {body_txt}")
 
+            # Reintentar en caso de errores transitorios de servidor (500, 502, 503, 504)
+            if r.status_code in (500, 502, 503, 504) and attempt < max_retries:
+                backoff = base_backoff_sec * (2 ** attempt)
+                log.warning(
+                    "waha_request_retryable_server_error status=%d attempt=%d/%d retrying_in=%.1fs",
+                    r.status_code, attempt + 1, max_retries, backoff,
+                )
+                await asyncio.sleep(backoff)
+                continue
+
+            fails = _record_failure()
+            log.error(
+                "waha_request_failed status=%d elapsed_ms=%d body=%r failures_in_window=%d attempt=%d",
+                r.status_code, elapsed_ms, body_txt, fails, attempt + 1,
+            )
+            _check_failure_threshold(fails)
             raise WAHAError(f"WAHA HTTP {r.status_code}: {body_txt}")
-    except httpx.TimeoutException as e:
-        fails = _record_failure()
-        elapsed_ms = int((time.time() - t0) * 1000)
-        log.error(
-            "waha_request_timeout elapsed_ms=%d err=%s failures_in_window=%d",
-            elapsed_ms, e, fails,
-        )
-        _check_failure_threshold(fails)
-        raise WAHAError(f"WAHA timeout after {elapsed_ms}ms: {e}") from e
-    except httpx.HTTPStatusError as e:
-        body = ""
-        try:
-            body = e.response.text[:300]
-        except Exception:
-            pass
-        fails = _record_failure()
-        log.error(
-            "waha_request_http_error status=%d body=%r failures_in_window=%d",
-            e.response.status_code, body, fails,
-        )
-        _check_failure_threshold(fails)
-        raise WAHAError(f"WAHA HTTP {e.response.status_code}: {body}") from e
-    except Exception as e:
-        fails = _record_failure()
-        elapsed_ms = int((time.time() - t0) * 1000)
-        log.exception(
-            "waha_request_exception elapsed_ms=%d err=%s failures_in_window=%d",
-            elapsed_ms, e, fails,
-        )
-        _check_failure_threshold(fails)
-        raise WAHAError(f"WAHA request failed: {e}") from e
+
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            last_error = e
+            elapsed_ms = int((time.time() - t0) * 1000)
+            if attempt < max_retries:
+                backoff = base_backoff_sec * (2 ** attempt)
+                log.warning(
+                    "waha_request_transient_network_error err=%s attempt=%d/%d retrying_in=%.1fs",
+                    e, attempt + 1, max_retries, backoff,
+                )
+                await asyncio.sleep(backoff)
+                continue
+
+            fails = _record_failure()
+            log.error(
+                "waha_request_timeout_exhausted elapsed_ms=%d err=%s failures_in_window=%d",
+                elapsed_ms, e, fails,
+            )
+            _check_failure_threshold(fails)
+            raise WAHAError(f"WAHA connection/timeout error after {attempt + 1} attempts: {e}") from e
+        except WAHAError:
+            raise
+        except Exception as e:
+            fails = _record_failure()
+            elapsed_ms = int((time.time() - t0) * 1000)
+            log.exception(
+                "waha_request_exception elapsed_ms=%d err=%s failures_in_window=%d",
+                elapsed_ms, e, fails,
+            )
+            _check_failure_threshold(fails)
+            raise WAHAError(f"WAHA request failed: {e}") from e
+
+    if last_error:
+        raise WAHAError(f"WAHA request failed after {max_retries + 1} attempts: {last_error}") from last_error
+    raise WAHAError("WAHA request failed")
+

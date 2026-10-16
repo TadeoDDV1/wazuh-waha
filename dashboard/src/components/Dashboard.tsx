@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import './Dashboard.css';
 import { useDashboardContext } from '../context/DashboardContext';
 import { WazuhServicesCard } from './WazuhServicesCard';
@@ -8,11 +8,12 @@ import { WhatsappCard } from './WhatsappCard';
 import { TelegramCard } from './TelegramCard';
 import { NotificationChannelsCard } from './NotificationChannelsCard';
 import { TelemetryGlobalCard } from './TelemetryGlobalCard';
-import { ReportsCard } from './ReportsCard';
 import {
   Loader2,
   AlertCircle,
 } from 'lucide-react';
+
+const ReportsCard = React.lazy(() => import('./ReportsCard'));
 
 export const Dashboard: React.FC = () => {
   const {
@@ -103,7 +104,16 @@ export const Dashboard: React.FC = () => {
             Generá reportes PDF descargables con la ficha forense completa de cada agente Wazuh: hardware, sistema operativo, red, seguridad (SCA/FIM), software, procesos y detecciones.
           </p>
         </div>
-        <ReportsCard />
+        <Suspense
+          fallback={
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px', gap: '10px', color: 'var(--text-secondary)' }}>
+              <Loader2 size={22} className="animate-spin" style={{ color: 'var(--cyan-accent)' }} />
+              <span style={{ fontSize: '13px' }}>Cargando módulo de reportes forenses...</span>
+            </div>
+          }
+        >
+          <ReportsCard />
+        </Suspense>
       </div>
     </div>
   );

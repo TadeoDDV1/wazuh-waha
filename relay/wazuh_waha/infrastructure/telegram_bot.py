@@ -308,23 +308,44 @@ async def send_message(
         payload["parse_mode"] = parse_mode
 
     url = _bot_url("sendMessage", tk)
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json=payload)
-            if resp.is_success:
-                return True
-
-            if parse_mode and resp.status_code == 400:
-                payload.pop("parse_mode", None)
-                retry_resp = await client.post(url, json=payload)
-                if retry_resp.is_success:
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(url, json=payload)
+                if resp.is_success:
                     return True
 
-            log.warning("telegram_send_fail status=%d body=%r", resp.status_code, resp.text[:200])
+                if parse_mode and resp.status_code == 400:
+                    payload.pop("parse_mode", None)
+                    retry_resp = await client.post(url, json=payload)
+                    if retry_resp.is_success:
+                        return True
+
+                if resp.status_code == 429 and attempt == 0:
+                    try:
+                        retry_after = min(int(resp.json().get("parameters", {}).get("retry_after", 1)), 3)
+                    except Exception:
+                        retry_after = 1
+                    log.warning("telegram_send_rate_limited retry_after=%ds", retry_after)
+                    await asyncio.sleep(retry_after)
+                    continue
+
+                if resp.status_code in (500, 502, 503, 504) and attempt == 0:
+                    await asyncio.sleep(1.0)
+                    continue
+
+                log.warning("telegram_send_fail status=%d body=%r", resp.status_code, resp.text[:200])
+                return False
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            if attempt == 0:
+                await asyncio.sleep(1.0)
+                continue
+            log.warning("telegram_send_err err=%s", e)
             return False
-    except Exception as e:
-        log.warning("telegram_send_err err=%s", e)
-        return False
+        except Exception as e:
+            log.warning("telegram_send_err err=%s", e)
+            return False
+    return False
 
 
 async def send_document(
@@ -356,6 +377,14 @@ async def send_document(
             resp = await client.post(url, data=data, files=files)
             if resp.is_success:
                 return True
+
+            # Si falla por markdown en el caption, reintentar sin parse_mode
+            if resp.status_code == 400 and "parse_mode" in data:
+                data.pop("parse_mode", None)
+                retry_resp = await client.post(url, data=data, files=files)
+                if retry_resp.is_success:
+                    return True
+
             log.warning("telegram_send_document_fail status=%d body=%r", resp.status_code, resp.text[:200])
             return False
     except Exception as e:

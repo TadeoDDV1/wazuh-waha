@@ -101,6 +101,28 @@ export const Navbar: React.FC = () => {
                 <span>Uptime:</span>
                 <strong>{formatUptime(status.uptime_sec)}</strong>
               </div>
+              <div
+                className="meta-chip"
+                title={telConnected ? 'Stream SSE de Telemetría y Tráfico activo en tiempo real' : 'Stream SSE reconectando con el Relay...'}
+                style={{
+                  borderColor: telConnected ? 'rgba(16, 185, 129, 0.4)' : 'rgba(234, 179, 8, 0.4)',
+                  background: telConnected ? 'rgba(16, 185, 129, 0.08)' : 'rgba(234, 179, 8, 0.08)',
+                }}
+              >
+                <span
+                  style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    background: telConnected ? 'var(--green-healthy)' : 'var(--yellow-warning)',
+                    boxShadow: telConnected ? '0 0 8px var(--green-healthy)' : 'none',
+                    display: 'inline-block',
+                  }}
+                />
+                <span style={{ color: telConnected ? '#34d399' : 'var(--yellow-warning)', fontWeight: 600 }}>
+                  {telConnected ? 'SSE Live' : 'Reconectando'}
+                </span>
+              </div>
             </div>
           )}
 

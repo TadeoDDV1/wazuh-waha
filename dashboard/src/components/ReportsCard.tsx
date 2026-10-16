@@ -677,3 +677,5 @@ export const ReportsCard: React.FC = () => {
     </div>
   );
 };
+
+export default ReportsCard;
