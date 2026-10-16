@@ -39,6 +39,129 @@ def _fmt_bytes_mb(value: Any) -> str:
         return "-"
 
 
+def _build_sca_donut_drawing(
+    score: float,
+    pass_c: int,
+    fail_c: int,
+    total_c: int,
+    width_pt: float = 249.0,
+    height_pt: float = 85.0,
+) -> Any:
+    """Genera un gráfico vectorial de anillo (Donut Chart) para cumplimiento CIS SCA."""
+    from reportlab.graphics.shapes import Drawing, Rect, Circle, Wedge, String
+    from reportlab.lib import colors
+
+    d = Drawing(width_pt, height_pt)
+    d.add(Rect(0, 0, width_pt, height_pt, rx=5, ry=5, fillColor=colors.HexColor("#f8fafc"), strokeColor=colors.HexColor("#e2e8f0"), strokeWidth=0.5))
+
+    cx = 45.0
+    cy = height_pt / 2.0
+    r_outer = 32.0
+    r_inner = 20.0
+
+    total = max(total_c, pass_c + fail_c)
+    if total <= 0:
+        d.add(Circle(cx, cy, r_outer, fillColor=colors.HexColor("#e2e8f0"), strokeColor=None))
+        d.add(Circle(cx, cy, r_inner, fillColor=colors.HexColor("#f8fafc"), strokeColor=None))
+        d.add(String(cx, cy - 3.5, "N/A", textAnchor="middle", fontName="Helvetica-Bold", fontSize=9, fillColor=colors.HexColor("#64748b")))
+    elif pass_c <= 0:
+        d.add(Circle(cx, cy, r_outer, fillColor=colors.HexColor("#ef4444"), strokeColor=None))
+        d.add(Circle(cx, cy, r_inner, fillColor=colors.HexColor("#f8fafc"), strokeColor=None))
+        d.add(String(cx, cy - 3.5, f"{score:.0f}%", textAnchor="middle", fontName="Helvetica-Bold", fontSize=11, fillColor=colors.HexColor("#ef4444")))
+    elif fail_c <= 0:
+        d.add(Circle(cx, cy, r_outer, fillColor=colors.HexColor("#10b981"), strokeColor=None))
+        d.add(Circle(cx, cy, r_inner, fillColor=colors.HexColor("#f8fafc"), strokeColor=None))
+        d.add(String(cx, cy - 3.5, f"{score:.0f}%", textAnchor="middle", fontName="Helvetica-Bold", fontSize=11, fillColor=colors.HexColor("#10b981")))
+    else:
+        pass_ratio = min(max(pass_c / total, 0.0), 1.0)
+        pass_deg = pass_ratio * 360.0
+        d.add(Wedge(cx, cy, r_outer, 90, 90 + pass_deg, fillColor=colors.HexColor("#10b981"), strokeColor=None))
+        d.add(Wedge(cx, cy, r_outer, 90 + pass_deg, 450, fillColor=colors.HexColor("#ef4444"), strokeColor=None))
+        d.add(Circle(cx, cy, r_inner, fillColor=colors.HexColor("#f8fafc"), strokeColor=None))
+        score_val = score if score is not None else (pass_ratio * 100.0)
+        score_color = colors.HexColor("#10b981") if score_val >= 80 else (colors.HexColor("#f59e0b") if score_val >= 60 else colors.HexColor("#ef4444"))
+        d.add(String(cx, cy - 3.5, f"{score_val:.0f}%", textAnchor="middle", fontName="Helvetica-Bold", fontSize=11, fillColor=score_color))
+
+    tx = 95.0
+    d.add(String(tx, height_pt - 18, "POSTURA CIS BENCHMARK (SCA)", fontName="Helvetica-Bold", fontSize=8, fillColor=colors.HexColor("#0f172a")))
+
+    pass_pct = (pass_c / total * 100) if total > 0 else 0
+    d.add(Rect(tx, height_pt - 36, 8, 8, rx=2, ry=2, fillColor=colors.HexColor("#10b981"), strokeColor=None))
+    d.add(String(tx + 13, height_pt - 34, f"Aprobadas: {pass_c} ({pass_pct:.0f}%)", fontName="Helvetica", fontSize=7.5, fillColor=colors.HexColor("#334155")))
+
+    fail_pct = (fail_c / total * 100) if total > 0 else 0
+    d.add(Rect(tx, height_pt - 52, 8, 8, rx=2, ry=2, fillColor=colors.HexColor("#ef4444"), strokeColor=None))
+    d.add(String(tx + 13, height_pt - 50, f"Falladas: {fail_c} ({fail_pct:.0f}%)", fontName="Helvetica", fontSize=7.5, fillColor=colors.HexColor("#334155")))
+
+    d.add(String(tx, height_pt - 70, f"Evaluaciones: {total} reglas CIS", fontName="Helvetica-Oblique", fontSize=6.5, fillColor=colors.HexColor("#64748b")))
+
+    return d
+
+
+def _build_alerts_bar_drawing(
+    detections: list[dict[str, Any]],
+    width_pt: float = 249.0,
+    height_pt: float = 85.0,
+) -> Any:
+    """Genera una gráfica vectorial apilada de distribución de alertas SIEM por severidad."""
+    from reportlab.graphics.shapes import Drawing, Rect, String
+    from reportlab.lib import colors
+
+    d = Drawing(width_pt, height_pt)
+    d.add(Rect(0, 0, width_pt, height_pt, rx=5, ry=5, fillColor=colors.HexColor("#f8fafc"), strokeColor=colors.HexColor("#e2e8f0"), strokeWidth=0.5))
+
+    crit = sum(1 for det in detections if int(det.get("level") or 0) >= 12)
+    high = sum(1 for det in detections if 8 <= int(det.get("level") or 0) < 12)
+    med = sum(1 for det in detections if 5 <= int(det.get("level") or 0) < 8)
+    low = sum(1 for det in detections if int(det.get("level") or 0) < 5)
+    tot = len(detections)
+
+    d.add(String(12, height_pt - 18, "DISTRIBUCIÓN DE ALERTAS SIEM", fontName="Helvetica-Bold", fontSize=8, fillColor=colors.HexColor("#0f172a")))
+    tot_text = f"Total: {tot} evento{'s' if tot != 1 else ''}"
+    d.add(String(width_pt - 12, height_pt - 18, tot_text, textAnchor="end", fontName="Helvetica", fontSize=7.5, fillColor=colors.HexColor("#64748b")))
+
+    bar_x = 12.0
+    bar_y = height_pt - 38.0
+    bar_w = width_pt - 24.0
+    bar_h = 13.0
+
+    d.add(Rect(bar_x, bar_y, bar_w, bar_h, rx=3, ry=3, fillColor=colors.HexColor("#e2e8f0"), strokeColor=None))
+
+    if tot == 0:
+        d.add(Rect(bar_x, bar_y, bar_w, bar_h, rx=3, ry=3, fillColor=colors.HexColor("#10b981"), strokeColor=None))
+        d.add(String(width_pt / 2.0, bar_y + 3.5, "Sin alertas registradas (Host Limpio)", textAnchor="middle", fontName="Helvetica-Bold", fontSize=7, fillColor=colors.white))
+    else:
+        curr_x = bar_x
+        segments = [
+            (crit, colors.HexColor("#dc2626")),
+            (high, colors.HexColor("#ea580c")),
+            (med, colors.HexColor("#d97706")),
+            (low, colors.HexColor("#0284c7")),
+        ]
+        for count, color in segments:
+            if count > 0:
+                seg_w = (count / tot) * bar_w
+                d.add(Rect(curr_x, bar_y, seg_w, bar_h, fillColor=color, strokeColor=None))
+                curr_x += seg_w
+
+    leg_y = height_pt - 57.0
+    items = [
+        (f"Crítica: {crit}", colors.HexColor("#dc2626")),
+        (f"Alta: {high}", colors.HexColor("#ea580c")),
+        (f"Media: {med}", colors.HexColor("#d97706")),
+        (f"Baja: {low}", colors.HexColor("#0284c7")),
+    ]
+    col_w = (width_pt - 24.0) / 4.0
+    for i, (txt, clr) in enumerate(items):
+        lx = bar_x + i * col_w
+        d.add(Rect(lx, leg_y, 6, 6, rx=1.5, ry=1.5, fillColor=clr, strokeColor=None))
+        d.add(String(lx + 8, leg_y + 0.5, txt, fontName="Helvetica", fontSize=6.5, fillColor=colors.HexColor("#334155")))
+
+    d.add(String(12, height_pt - 73, "Basado en la escala de severidad de reglas Wazuh (L1 a L16)", fontName="Helvetica-Oblique", fontSize=6.5, fillColor=colors.HexColor("#64748b")))
+
+    return d
+
+
 def _build_pdf(profile: dict[str, Any]) -> bytes:
     """
     Genera un PDF con diseño forense profesional y explicaciones detalladas
@@ -374,6 +497,32 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
     story.append(kpi_table)
+    story.append(Spacer(1, 4 * mm))
+
+    # ── Panel Gráfico Ejecutivo (Donut CIS SCA + Distribución de Alertas SIEM) ──
+    chart_sca = _build_sca_donut_drawing(
+        score=sca_score if isinstance(sca_score, (int, float)) else 0.0,
+        pass_c=int(sca.get("pass") or 0),
+        fail_c=int(sca.get("fail") or 0),
+        total_c=int(sca.get("total_checks") or 0),
+        width_pt=88.0 * 2.8346,
+        height_pt=82.0,
+    )
+    chart_alerts = _build_alerts_bar_drawing(
+        detections=detections,
+        width_pt=88.0 * 2.8346,
+        height_pt=82.0,
+    )
+    charts_table = Table([[chart_sca, chart_alerts]], colWidths=[88.0 * mm, 88.0 * mm])
+    charts_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(charts_table)
     story.append(Spacer(1, 5 * mm))
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -719,6 +868,15 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
         f"<b>Total Evaluados:</b> <b>{_fmt(sca.get('total_checks'))}</b>"
     )
     story.append(Paragraph(sca_summary, body_style))
+    story.append(Spacer(1, 2.5 * mm))
+    story.append(_build_sca_donut_drawing(
+        score=sca_score if isinstance(sca_score, (int, float)) else 0.0,
+        pass_c=int(sca.get("pass") or 0),
+        fail_c=int(sca.get("fail") or 0),
+        total_c=int(sca.get("total_checks") or 0),
+        width_pt=178.0 * 2.8346,
+        height_pt=78.0,
+    ))
 
     failed_checks = sca.get("failed_checks") or []
     if failed_checks:
@@ -859,6 +1017,12 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
         )
         story.append(Paragraph(summary_html, body_style))
         story.append(Spacer(1, 2.5 * mm))
+        story.append(_build_alerts_bar_drawing(
+            detections=detections,
+            width_pt=178.0 * 2.8346,
+            height_pt=75.0,
+        ))
+        story.append(Spacer(1, 3 * mm))
 
         # Agrupar / desduplicar eventos repetitivos para dar visibilidad a toda la variedad de alertas
         grouped_detections: list[dict[str, Any]] = []

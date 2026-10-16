@@ -22,6 +22,8 @@ import {
   Cpu,
   Globe,
   Lock,
+  BarChart3,
+  PieChart,
 } from 'lucide-react';
 
 interface Agent {
@@ -50,6 +52,50 @@ interface AgentPreview {
   critical_alerts_count: number;
   total_packages: number;
 }
+
+const ScaDonutChart: React.FC<{ score: number; passCount: number; failCount: number; total: number; size?: number }> = ({
+  score,
+  size = 80,
+}) => {
+  const radius = size / 2;
+  const stroke = 7;
+  const normalizedRadius = radius - stroke;
+  const circumference = normalizedRadius * 2 * Math.PI;
+  const scoreClamped = Math.min(Math.max(score, 0), 100);
+  const strokeDashoffset = circumference - (scoreClamped / 100) * circumference;
+  const scoreColor = score >= 80 ? '#10b981' : score >= 60 ? '#f59e0b' : '#ef4444';
+
+  return (
+    <div style={{ position: 'relative', width: `${size}px`, height: `${size}px`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+      <svg height={size} width={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle
+          stroke="rgba(255,255,255,0.08)"
+          fill="transparent"
+          strokeWidth={stroke}
+          r={normalizedRadius}
+          cx={radius}
+          cy={radius}
+        />
+        <circle
+          stroke={scoreColor}
+          fill="transparent"
+          strokeWidth={stroke}
+          strokeDasharray={`${circumference} ${circumference}`}
+          style={{ strokeDashoffset, transition: 'stroke-dashoffset 0.6s ease' }}
+          strokeLinecap="round"
+          r={normalizedRadius}
+          cx={radius}
+          cy={radius}
+        />
+      </svg>
+      <div style={{ position: 'absolute', textAlign: 'center' }}>
+        <span style={{ fontSize: size >= 100 ? '18px' : '13px', fontWeight: 800, color: scoreColor, fontFamily: 'var(--font-mono)' }}>
+          {score.toFixed(0)}%
+        </span>
+      </div>
+    </div>
+  );
+};
 
 interface ReportSectionInfo {
   num: string;
@@ -160,7 +206,7 @@ export const ReportsCard: React.FC = () => {
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [auditing, setAuditing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'secciones' | 'guia' | 'telegram'>('secciones');
+  const [activeTab, setActiveTab] = useState<'secciones' | 'graficas' | 'guia' | 'telegram'>('secciones');
   const [activeGuideCategory, setActiveGuideCategory] = useState<'todos' | 'general' | 'red' | 'cumplimiento' | 'siem'>('todos');
   const [preview, setPreview] = useState<AgentPreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -474,6 +520,14 @@ export const ReportsCard: React.FC = () => {
           </button>
           <button
             type="button"
+            className={`soc-tab-btn ${activeTab === 'graficas' ? 'active' : ''}`}
+            onClick={() => setActiveTab('graficas')}
+          >
+            <BarChart3 size={14} />
+            <span>📊 Gráficas & Telemetría Forense</span>
+          </button>
+          <button
+            type="button"
             className={`soc-tab-btn ${activeTab === 'guia' ? 'active' : ''}`}
             onClick={() => setActiveTab('guia')}
           >
@@ -489,6 +543,169 @@ export const ReportsCard: React.FC = () => {
             <span>Comandos Móviles Telegram</span>
           </button>
         </div>
+
+        {/* Pestaña Gráficas & Telemetría Forense */}
+        {activeTab === 'graficas' && (
+          <div className="reports-charts-grid">
+            {/* Card 1: Donut CIS SCA */}
+            <div className="reports-chart-card">
+              <div className="reports-chart-header">
+                <div className="reports-chart-title">
+                  <PieChart size={15} style={{ color: '#10b981' }} />
+                  <span>Postura CIS Benchmark (SCA)</span>
+                </div>
+                <span
+                  className="reports-chart-badge"
+                  style={{
+                    background: (preview?.sca_score ?? 0) >= 80 ? 'rgba(16, 185, 129, 0.2)' : (preview?.sca_score ?? 0) >= 60 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                    color: (preview?.sca_score ?? 0) >= 80 ? '#34d399' : (preview?.sca_score ?? 0) >= 60 ? '#fbbf24' : '#f87171',
+                  }}
+                >
+                  {(preview?.sca_score ?? 0) >= 80 ? 'FORTIFICADO' : (preview?.sca_score ?? 0) >= 60 ? 'MODERADO' : 'CRÍTICO'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '20px', padding: '10px 4px' }}>
+                <ScaDonutChart
+                  score={preview?.sca_score ?? 0}
+                  passCount={preview?.sca_pass ?? 0}
+                  failCount={preview?.sca_fail ?? 0}
+                  total={preview?.sca_total ?? 0}
+                  size={95}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, fontSize: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#10b981', fontWeight: 600 }}>
+                    <span>✓ Superadas:</span>
+                    <strong style={{ fontFamily: 'var(--font-mono)' }}>{preview?.sca_pass ?? 0}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#ef4444', fontWeight: 600 }}>
+                    <span>✗ Reprobadas:</span>
+                    <strong style={{ fontFamily: 'var(--font-mono)' }}>{preview?.sca_fail ?? 0}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                    <span>Controles Evaluados:</span>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>{preview?.sca_total ?? 0}</span>
+                  </div>
+                </div>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.4, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '8px' }}>
+                {(preview?.sca_fail ?? 0) > 0
+                  ? `Se detectaron ${preview?.sca_fail} directivas CIS reprobadas que requieren remediación de permisos o parámetros de kernel.`
+                  : 'Todas las directivas evaluadas cumplen con las pautas de hardening CIS.'}
+              </div>
+            </div>
+
+            {/* Card 2: Espectro de Alertas SIEM */}
+            <div className="reports-chart-card">
+              <div className="reports-chart-header">
+                <div className="reports-chart-title">
+                  <AlertTriangle size={15} style={{ color: '#ef4444' }} />
+                  <span>Espectro de Severidad SIEM</span>
+                </div>
+                <span
+                  className="reports-chart-badge"
+                  style={{
+                    background: (preview?.critical_alerts_count ?? 0) > 0 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(168, 85, 247, 0.2)',
+                    color: (preview?.critical_alerts_count ?? 0) > 0 ? '#f87171' : '#c084fc',
+                  }}
+                >
+                  {preview?.recent_alerts_count ?? 0} EVENTOS
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '10px 4px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                    <span>Críticas (L12-16):</span>
+                    <strong style={{ color: (preview?.critical_alerts_count ?? 0) > 0 ? '#ef4444' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                      {preview?.critical_alerts_count ?? 0}
+                    </strong>
+                  </div>
+                  <div style={{ height: '7px', background: 'rgba(255,255,255,0.06)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        width: `${(preview?.recent_alerts_count ?? 0) > 0 ? ((preview?.critical_alerts_count ?? 0) / (preview?.recent_alerts_count ?? 1)) * 100 : 0}%`,
+                        height: '100%',
+                        background: '#dc2626',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                    <span>Medias y Bajas (L1-11):</span>
+                    <strong style={{ color: '#38bdf8', fontFamily: 'var(--font-mono)' }}>
+                      {Math.max((preview?.recent_alerts_count ?? 0) - (preview?.critical_alerts_count ?? 0), 0)}
+                    </strong>
+                  </div>
+                  <div style={{ height: '7px', background: 'rgba(255,255,255,0.06)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        width: `${(preview?.recent_alerts_count ?? 0) > 0 ? (Math.max((preview?.recent_alerts_count ?? 0) - (preview?.critical_alerts_count ?? 0), 0) / (preview?.recent_alerts_count ?? 1)) * 100 : 0}%`,
+                        height: '100%',
+                        background: 'linear-gradient(90deg, #f59e0b, #38bdf8)',
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.4, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '8px' }}>
+                Correlación en tiempo real por el motor de reglas de Wazuh para el host [{selectedAgentId || '000'}].
+              </div>
+            </div>
+
+            {/* Card 3: Recursos y Superficie de Red */}
+            <div className="reports-chart-card">
+              <div className="reports-chart-header">
+                <div className="reports-chart-title">
+                  <Server size={15} style={{ color: '#38bdf8' }} />
+                  <span>Capacidad & Superficie de Red</span>
+                </div>
+                <span
+                  className="reports-chart-badge"
+                  style={{
+                    background: 'rgba(56, 189, 248, 0.2)',
+                    color: '#38bdf8',
+                  }}
+                >
+                  SYSCOLLECTOR
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '10px 4px' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '5px' }}>
+                    <span>Memoria RAM Utilizada:</span>
+                    <strong style={{ color: '#f59e0b', fontFamily: 'var(--font-mono)' }}>
+                      {Math.round(preview?.ram_used_mb ?? 0)} / {Math.round(preview?.ram_total_mb ?? 0)} MB ({preview?.ram_usage_pct ?? 0}%)
+                    </strong>
+                  </div>
+                  <div style={{ height: '7px', background: 'rgba(255,255,255,0.06)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        width: `${Math.min(preview?.ram_usage_pct ?? 0, 100)}%`,
+                        height: '100%',
+                        background: (preview?.ram_usage_pct ?? 0) > 80 ? '#ef4444' : '#f59e0b',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
+                  <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Sockets Activos</div>
+                    <div style={{ fontSize: '15px', fontWeight: 800, color: '#34d399', fontFamily: 'var(--font-mono)' }}>{preview?.sockets_count ?? 0}</div>
+                  </div>
+                  <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Software SBOM</div>
+                    <div style={{ fontSize: '15px', fontWeight: 800, color: '#38bdf8', fontFamily: 'var(--font-mono)' }}>{preview?.total_packages ?? 0}</div>
+                  </div>
+                </div>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.4, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '8px' }}>
+                Telemetría de puertos en escucha (LISTEN) e inventario SBOM supervisado contra CVEs.
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Pestaña 1: Estructura de las 10 Secciones Forenses */}
         {activeTab === 'secciones' && (
