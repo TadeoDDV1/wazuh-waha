@@ -895,19 +895,24 @@ def _get_agent_wazuh_alerts(agent_id: str = "all", max_items: int = 40) -> list[
                             lvl = int(rule.get("level", 0))
                             desc = rule.get("description", "Evento de seguridad")
                             raw_log = al.get("full_log") or ""
-                            data = al.get("data", {}) or {}
+                            rule_id_str = str(rule.get("id", "0"))
+                            src_ip_str = data.get("srcip") or data.get("src_ip", "")
+                            user_str = data.get("dstuser") or data.get("dst_user", "")
+                            if rule_id_str in ("57100", "57101") and src_ip_str in ("192.168.122.1", "127.0.0.1") and user_str in ("tadeou7", "wazuh", "soc"):
+                                continue
+
                             alerts.append({
                                 "id": str(al.get("id", "")),
                                 "timestamp": al.get("timestamp", ""),
-                                "rule_id": str(rule.get("id", "0")),
+                                "rule_id": rule_id_str,
                                 "level": lvl,
                                 "level_es": _format_level_es(lvl),
                                 "description": _translate_description_es(desc),
                                 "agent_id": ag_id_str,
                                 "agent_name": ag.get("name", "host"),
-                                "srcip": data.get("srcip") or data.get("src_ip", ""),
+                                "srcip": src_ip_str,
                                 "srcport": str(data.get("srcport", "")),
-                                "dstuser": data.get("dstuser") or data.get("dst_user", ""),
+                                "dstuser": user_str,
                                 "full_log": raw_log[:240],
                                 "full_log_es": translate_full_log_es(raw_log)[:240],
                             })
@@ -920,7 +925,7 @@ def _get_agent_wazuh_alerts(agent_id: str = "all", max_items: int = 40) -> list[
 
     # Complementar con journal y memoria de tráfico en vivo
     if len(alerts) < max_items:
-        recent = traffic_watcher.get_recent(limit=max_items * 2)
+        recent = traffic_watcher.get_recent(limit=max_items * 3)
         for al in reversed(recent):
             ag_id_str = str(al.get("agent_id") or (al.get("agent", {}) or {}).get("id", ""))
             if agent_id == "all" or ag_id_str == str(agent_id):
@@ -937,6 +942,12 @@ def _get_agent_wazuh_alerts(agent_id: str = "all", max_items: int = 40) -> list[
                 src_ip = al.get("src_ip") or (al.get("data", {}) or {}).get("srcip", "")
                 if not src_ip and raw_log:
                     src_ip = extract_clean_ip(al)
+                dst_user = al.get("dst_user") or (al.get("data", {}) or {}).get("dstuser", "")
+
+                # Omitir logins de monitoreo del relay para no distorsionar el reporte
+                if rule_id in ("57100", "57101") and src_ip in ("192.168.122.1", "127.0.0.1") and dst_user in ("tadeou7", "wazuh", "soc"):
+                    continue
+
                 alerts.append({
                     "id": al_id or f"mem-{len(alerts)}",
                     "timestamp": al.get("timestamp", ""),
@@ -948,7 +959,7 @@ def _get_agent_wazuh_alerts(agent_id: str = "all", max_items: int = 40) -> list[
                     "agent_name": al.get("agent_name") or (al.get("agent", {}) or {}).get("name", "host"),
                     "srcip": src_ip if not src_ip.startswith("No identificada") else "",
                     "srcport": str(al.get("src_port") or (al.get("data", {}) or {}).get("srcport", "")),
-                    "dstuser": al.get("dst_user") or (al.get("data", {}) or {}).get("dstuser", ""),
+                    "dstuser": dst_user,
                     "full_log": raw_log[:240],
                     "full_log_es": translate_full_log_es(raw_log)[:240],
                 })

@@ -105,6 +105,14 @@ async def format_alert(alert: dict) -> tuple[str, dict]:
         return ("", meta)
 
     src_ip = templates.extract_clean_ip(alert)
+    user = templates.extract_clean_user(alert)
+
+    # Silenciar logins rutinarios del host de monitoreo local (192.168.122.1 o localhost)
+    if rule_id in ("57100", "57101", "5501", "5502") and src_ip in ("192.168.122.1", "127.0.0.1", "127.0.0.1 (Local)", "🏠 Local / Consola"):
+        if user in ("tadeou7", "wazuh", "soc", "No especificado"):
+            meta["decision"] = "internal_telemetry_login"
+            return ("", meta)
+
     if deduper.is_duplicate(rule_id, agent_id, key_extra=src_ip):
         meta["decision"] = "duplicate"
         return ("", meta)

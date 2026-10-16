@@ -502,6 +502,11 @@ class TrafficStreamWatcher:
             "-o", "ConnectTimeout=5",
             "-o", "BatchMode=yes",
             "-o", "LogLevel=ERROR",
+            "-o", "ServerAliveInterval=15",
+            "-o", "ServerAliveCountMax=3",
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPath=/tmp/ssh-wazuh-%r@%h:%p",
+            "-o", "ControlPersist=600s",
         ]
         if settings.wazuh_vm_ssh_key_path:
             cmd += ["-i", settings.wazuh_vm_ssh_key_path, "-o", "IdentitiesOnly=yes"]
@@ -509,66 +514,56 @@ class TrafficStreamWatcher:
         return cmd
 
     async def _ssh_poll_loop(self) -> None:
+        """Stream persistente de archives.json vía SSH (conexión continua única, sin polling repetitivo)."""
         interval = max(1.0, float(settings.traffic_poll_interval_sec))
-        # Priorizar archives.json (100% del tráfico y eventos del SIEM) si existe, con fallback a alerts.json
-        remote_path = f'"$(test -f /var/ossec/logs/archives/archives.json && echo /var/ossec/logs/archives/archives.json || echo {settings.wazuh_alerts_json_path})"'
-        # Estado: última línea ya vista (id) y cantidad de líneas leídas
-        last_count = 0
-        _log.info("ssh_traffic_source_start host=%s path=%s",
-                  settings.wazuh_server_ip, remote_path)
+        # tail -n 100 -F mantiene el socket abierto y transmite nuevas líneas en tiempo real
+        remote_cmd = (
+            "test -f /var/ossec/logs/archives/archives.json && "
+            "tail -n 100 -F /var/ossec/logs/archives/archives.json || "
+            f"tail -n 100 -F {settings.wazuh_alerts_json_path}"
+        )
+        _log.info("ssh_traffic_source_start host=%s stream=tail-F", settings.wazuh_server_ip)
+
         while self._running and self._is_leader:
+            proc = None
             try:
-                count_cmd = self._ssh_base_cmd() + [
-                    f"wc -l < {remote_path} 2>/dev/null || echo 0"
-                ]
+                cmd = self._ssh_base_cmd() + [remote_cmd]
                 proc = await asyncio.create_subprocess_exec(
-                    *count_cmd,
+                    *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                out, err = await asyncio.wait_for(proc.communicate(), timeout=15)
-                if proc.returncode != 0:
-                    _log.warning("ssh_wc_failed rc=%s err=%s",
-                                 proc.returncode, (err or b"").decode()[:200])
-                    await asyncio.sleep(interval * 2)
-                    continue
-                try:
-                    count = int((out or b"").decode().strip() or "0")
-                except ValueError:
-                    count = 0
-
-                if count > last_count:
-                    n_new = min(count - last_count, 100)
-                    start = count - n_new + 1
-                    tail_cmd = self._ssh_base_cmd() + [
-                        f"tail -n +{start} {remote_path} 2>/dev/null"
-                    ]
-                    proc2 = await asyncio.create_subprocess_exec(
-                        *tail_cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    out2, err2 = await asyncio.wait_for(proc2.communicate(), timeout=20)
-                    if proc2.returncode == 0 and out2:
-                        for line in out2.decode("utf-8", errors="ignore").splitlines():
-                            s = line.strip()
-                            if not (s.startswith("{") and s.endswith("}")):
-                                continue
-                            try:
-                                raw = json.loads(s)
-                            except json.JSONDecodeError:
-                                continue
-                            raw["_source"] = "ssh"
-                            self._ingest(normalize_wazuh_event(raw))
-                    last_count = count
-                elif count < last_count:
-                    # rotación remota
-                    last_count = count
-                await asyncio.sleep(interval)
+                while self._running and self._is_leader:
+                    if proc.stdout is None:
+                        break
+                    line_bytes = await proc.stdout.readline()
+                    if not line_bytes:
+                        # Proceso terminado o stream cerrado
+                        break
+                    line = line_bytes.decode("utf-8", errors="ignore").strip()
+                    if not (line.startswith("{") and line.endswith("}")):
+                        continue
+                    try:
+                        raw = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    raw["_source"] = "ssh"
+                    self._ingest(normalize_wazuh_event(raw))
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                _log.warning("ssh_poll_error err=%s", e)
+                _log.warning("ssh_stream_error err=%s", e)
+            finally:
+                if proc is not None:
+                    try:
+                        proc.terminate()
+                        await asyncio.wait_for(proc.wait(), timeout=2.0)
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+            if self._running and self._is_leader:
                 await asyncio.sleep(interval * 2)
 
     # ── fuente API del manager ─────────────────────────────────────────────

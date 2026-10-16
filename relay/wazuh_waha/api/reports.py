@@ -860,6 +860,49 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
         story.append(Paragraph(summary_html, body_style))
         story.append(Spacer(1, 2.5 * mm))
 
+        # Agrupar / desduplicar eventos repetitivos para dar visibilidad a toda la variedad de alertas
+        grouped_detections: list[dict[str, Any]] = []
+        for det in detections:
+            rule_id = str(det.get("rule_id") or "0")
+            desc_raw = det.get("description") or "Alerta de seguridad"
+            desc_es = _translate_description_es(desc_raw)
+            raw_log = det.get("full_log") or ""
+            log_clean = translate_full_log_es(raw_log) if raw_log else ""
+
+            srcip = det.get("srcip") or extract_clean_ip(det)
+            if not srcip or srcip.startswith("No identificada"):
+                srcip = "Interno / Local"
+            srcport = det.get("srcport") or ""
+            port_suffix = f":{srcport}" if srcport and srcport not in ("0", "-", "None") else ""
+            user = det.get("dstuser") or extract_clean_user(det)
+
+            ts = str(det.get("timestamp") or "-")
+            if "T" in ts:
+                ts = ts.replace("T", " ").split("+")[0].split(".")[0]
+
+            key = (rule_id, desc_es, srcip, user)
+            matched = False
+            for grp in grouped_detections:
+                if grp["key"] == key:
+                    grp["count"] += 1
+                    grp["last_ts"] = ts
+                    matched = True
+                    break
+            if not matched:
+                grouped_detections.append({
+                    "key": key,
+                    "det": det,
+                    "count": 1,
+                    "rule_id": rule_id,
+                    "desc_es": desc_es,
+                    "srcip": srcip,
+                    "port_suffix": port_suffix,
+                    "user": user,
+                    "log_clean": log_clean,
+                    "first_ts": ts,
+                    "last_ts": ts,
+                })
+
         det_header = [
             Paragraph("Severidad", cell_header_style),
             Paragraph("Regla ID", cell_header_style),
@@ -868,7 +911,8 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
             Paragraph("Fecha / Hora", cell_header_style),
         ]
         det_rows = [det_header]
-        for det in detections[:25]:
+        for grp in grouped_detections[:25]:
+            det = grp["det"]
             try:
                 lvl = int(det.get("level") or 0)
             except (ValueError, TypeError):
@@ -887,37 +931,27 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
                 badge_color = "#0284c7"
                 lvl_label = f"BAJO (L{lvl})"
 
-            desc_raw = det.get("description") or "Alerta de seguridad"
-            desc_es = _translate_description_es(desc_raw)
-            raw_log = det.get("full_log") or ""
-            log_clean = translate_full_log_es(raw_log) if raw_log else ""
-
-            srcip = det.get("srcip") or extract_clean_ip(det)
-            if not srcip or srcip.startswith("No identificada"):
-                srcip = "Interno / Local"
-            srcport = det.get("srcport") or ""
-            port_suffix = f":{srcport}" if srcport and srcport not in ("0", "-", "None") else ""
-            user = det.get("dstuser") or extract_clean_user(det)
-
-            actor_info = f"<b>{srcip}{port_suffix}</b>"
-            if user and user != "No especificado":
-                actor_info += f"<br/><font size='7' color='#64748b'>Usuario: {user}</font>"
-
-            detail_p = f"<b>{desc_es}</b>"
-            if log_clean and log_clean != desc_es:
-                clean_snippet = log_clean[:110] + ("..." if len(log_clean) > 110 else "")
+            detail_p = f"<b>{grp['desc_es']}</b>"
+            if grp["count"] > 1:
+                detail_p += f" <font color='#6366f1'><b>(x{grp['count']} eventos)</b></font>"
+            if grp["log_clean"] and grp["log_clean"] != grp["desc_es"]:
+                clean_snippet = grp["log_clean"][:100] + ("..." if len(grp["log_clean"]) > 100 else "")
                 detail_p += f"<br/><font size='6.5' color='#475569'><i>{clean_snippet}</i></font>"
 
-            ts = str(det.get("timestamp") or "-")
-            if "T" in ts:
-                ts = ts.replace("T", " ").split("+")[0].split(".")[0]
+            actor_info = f"<b>{grp['srcip']}{grp['port_suffix']}</b>"
+            if grp["user"] and grp["user"] != "No especificado":
+                actor_info += f"<br/><font size='7' color='#64748b'>Usuario: {grp['user']}</font>"
+
+            ts_text = grp["last_ts"]
+            if grp["count"] > 1 and grp["first_ts"] != grp["last_ts"]:
+                ts_text = f"<b>{grp['last_ts']}</b><br/><font size='6.5' color='#64748b'>Desde: {grp['first_ts']}</font>"
 
             det_rows.append([
                 Paragraph(f"<font color='{badge_color}'><b>{lvl_label}</b></font>", cell_style),
-                Paragraph(f"<b>#{_fmt(det.get('rule_id'))}</b>", cell_style),
+                Paragraph(f"<b>#{_fmt(grp['rule_id'])}</b>", cell_style),
                 Paragraph(detail_p, cell_style),
                 Paragraph(actor_info, cell_style),
-                Paragraph(ts, cell_style),
+                Paragraph(ts_text, cell_style),
             ])
         t_det = Table(det_rows, colWidths=[24 * mm, 18 * mm, 74 * mm, 32 * mm, 30 * mm])
         t_det.setStyle(TableStyle([
@@ -932,6 +966,106 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
         story.append(t_det)
     else:
         _add_empty_state("No se registran alertas de seguridad en el periodo analizado para este agente.")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 11. DICTAMEN EJECUTIVO Y RECOMENDACIONES DEL SOC
+    # ══════════════════════════════════════════════════════════════════════════
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph("11. Dictamen Ejecutivo y Recomendaciones del SOC", section_style))
+    _add_section_callout(
+        objective="Sintetizar la postura de seguridad global del agente analizado y prescribir las acciones técnicas de remediación inmediata recomendadas por el Centro de Operaciones de Seguridad.",
+        relevance="Permite a los administradores de sistemas y oficiales de seguridad priorizar tareas de mitigación basadas en evidencias concretas recolectadas por Wazuh.",
+        interpretation="Un endpoint con riesgo 'ALTO' o 'CRÍTICO' requiere intervención inmediata (aislamiento de red, mitigación de vulnerabilidades o rotación de credenciales).",
+    )
+
+    # Determinar nivel de riesgo global
+    if crit_count > 0:
+        global_risk = "CRÍTICO"
+        risk_color = "#dc2626"
+        risk_summary = "Se registran alertas de severidad crítica activas en el endpoint. Existe riesgo inminente de compromiso o actividad anómala que requiere respuesta forense."
+    elif high_count > 0 or (isinstance(sca_score, (int, float)) and sca_score < 60):
+        global_risk = "ALTO"
+        risk_color = "#ea580c"
+        risk_summary = "El endpoint presenta eventos de alta severidad o bajo cumplimiento en directivas CIS. Se recomienda aplicar remediaciones en el corto plazo."
+    elif isinstance(sca_score, (int, float)) and sca_score < 80:
+        global_risk = "MEDIO"
+        risk_color = "#d97706"
+        risk_summary = "Nivel de seguridad aceptable con oportunidades de mejora en políticas de hardening de configuración y superficie de red."
+    else:
+        global_risk = "BAJO"
+        risk_color = "#16a34a"
+        risk_summary = "El host mantiene un nivel de cumplimiento satisfactorio y no se observan vectores de ataque críticos abiertos."
+
+    # Tarjeta de dictamen
+    opinion_card = [
+        [Paragraph(f"<font color='{risk_color}' size='10'><b>DICTAMEN SOC: NIVEL DE RIESGO {global_risk}</b></font>", cell_bold_style)],
+        [Paragraph(f"<b>Diagnóstico Ejecutivo:</b> {risk_summary}", cell_style)],
+    ]
+    t_opinion = Table(opinion_card, colWidths=[178 * mm])
+    t_opinion.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
+        ("BOX", (0, 0), (-1, -1), 1.2, colors.HexColor(risk_color)),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(t_opinion)
+    story.append(Spacer(1, 3 * mm))
+
+    # Matriz priorizada de recomendaciones
+    recs: list[list[Any]] = [
+        [
+            Paragraph("Prioridad", cell_header_style),
+            Paragraph("Dominio de Seguridad", cell_header_style),
+            Paragraph("Hallazgo Forense", cell_header_style),
+            Paragraph("Acción Recomendada (Playbook SOC)", cell_header_style),
+        ]
+    ]
+
+    recs.append([
+        Paragraph("<font color='#ea580c'><b>ALTA</b></font>", cell_style),
+        Paragraph("<b>Gestión de Identidades (IAM)</b>", cell_style),
+        Paragraph("Auditoría de accesos interactivos y sesiones SSH.", cell_style),
+        Paragraph("Deshabilitar login por contraseña en SSH, reforzar llaves autorizadas en <code>~/.ssh/authorized_keys</code> y verificar MFA.", cell_style),
+    ])
+
+    if isinstance(sca_score, (int, float)) and sca_score < 90:
+        sca_prio = "<font color='#dc2626'><b>CRÍTICA</b></font>" if sca_score < 70 else "<font color='#d97706'><b>MEDIA</b></font>"
+        recs.append([
+            Paragraph(sca_prio, cell_style),
+            Paragraph("<b>Hardening CIS Benchmark (SCA)</b>", cell_style),
+            Paragraph(f"Puntaje de cumplimiento del {sca_score}%. {sca.get('fail', 0)} directivas no superadas.", cell_style),
+            Paragraph("Revisar la Sección 8 y ejecutar las directivas de remediación para permisos de archivos y parámetros sysctl.", cell_style),
+        ])
+
+    if len(sites) > 0:
+        recs.append([
+            Paragraph("<font color='#d97706'><b>MEDIA</b></font>", cell_style),
+            Paragraph("<b>Superficie de Red y Conexiones</b>", cell_style),
+            Paragraph(f"{len(sites)} destinos remotos identificados en sockets activos.", cell_style),
+            Paragraph("Auditar conexiones activas hacia IPs públicas y restringir puertos de entrada con firewall local (UFW/iptables).", cell_style),
+        ])
+
+    recs.append([
+        Paragraph("<font color='#0284c7'><b>INFO</b></font>", cell_style),
+        Paragraph("<b>Integridad y Parches (FIM)</b>", cell_style),
+        Paragraph("Supervisión continua de integridad de binarios del sistema.", cell_style),
+        Paragraph("Mantener el agente Wazuh actualizado y programar ventanas de mantenimiento para parches de seguridad del Kernel/SO.", cell_style),
+    ])
+
+    t_recs = Table(recs, colWidths=[20 * mm, 46 * mm, 48 * mm, 64 * mm])
+    t_recs.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t_recs)
 
     # ── Cierre del documento ──
     story.append(Spacer(1, 6 * mm))
