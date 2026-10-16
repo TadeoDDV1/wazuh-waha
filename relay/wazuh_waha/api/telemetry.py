@@ -22,7 +22,12 @@ from pydantic import BaseModel, Field
 from .deps import verify_api_key, verify_write
 from ..common.telemetry import telemetry_store
 from ..common.traffic_stream import traffic_watcher
-from ..domain.templates import _translate_description_es, _format_level_es, translate_full_log_es
+from ..domain.templates import (
+    _translate_description_es,
+    _format_level_es,
+    translate_full_log_es,
+    extract_clean_ip,
+)
 
 router = APIRouter(tags=["telemetry"])
 
@@ -913,37 +918,42 @@ def _get_agent_wazuh_alerts(agent_id: str = "all", max_items: int = 40) -> list[
         except Exception:
             pass
 
-    # Complementar con memoria si es necesario
+    # Complementar con journal y memoria de tráfico en vivo
     if len(alerts) < max_items:
-        recent = traffic_watcher.get_recent(limit=50)
-        for al in recent:
-            ag = al.get("agent", {}) or {}
-            ag_id_str = str(ag.get("id", ""))
+        recent = traffic_watcher.get_recent(limit=max_items * 2)
+        for al in reversed(recent):
+            ag_id_str = str(al.get("agent_id") or (al.get("agent", {}) or {}).get("id", ""))
             if agent_id == "all" or ag_id_str == str(agent_id):
-                rule = al.get("rule", {}) or {}
-                lvl = int(rule.get("level", 0))
-                desc = rule.get("description", "Evento de seguridad")
-                data = al.get("data", {}) or {}
                 al_id = str(al.get("id", ""))
+                if any(x.get("id") == al_id for x in alerts if al_id):
+                    continue
+                rule_id = str(al.get("rule_id") or (al.get("rule", {}) or {}).get("id", "0"))
+                try:
+                    lvl = int(al.get("level") or (al.get("rule", {}) or {}).get("level", 0))
+                except (ValueError, TypeError):
+                    lvl = 0
+                desc = al.get("description") or (al.get("rule", {}) or {}).get("description", "Evento de seguridad")
                 raw_log = al.get("full_log") or ""
-                if not any(x.get("id") == al_id for x in alerts if al_id):
-                    alerts.append({
-                        "id": al_id or f"mem-{len(alerts)}",
-                        "timestamp": al.get("timestamp", ""),
-                        "rule_id": str(rule.get("id", "0")),
-                        "level": lvl,
-                        "level_es": _format_level_es(lvl),
-                        "description": _translate_description_es(desc),
-                        "agent_id": ag_id_str,
-                        "agent_name": ag.get("name", "host"),
-                        "srcip": data.get("srcip") or data.get("src_ip", ""),
-                        "srcport": str(data.get("srcport", "")),
-                        "dstuser": data.get("dstuser") or data.get("dst_user", ""),
-                        "full_log": raw_log[:240],
-                        "full_log_es": translate_full_log_es(raw_log)[:240],
-                    })
-                    if len(alerts) >= max_items:
-                        break
+                src_ip = al.get("src_ip") or (al.get("data", {}) or {}).get("srcip", "")
+                if not src_ip and raw_log:
+                    src_ip = extract_clean_ip(al)
+                alerts.append({
+                    "id": al_id or f"mem-{len(alerts)}",
+                    "timestamp": al.get("timestamp", ""),
+                    "rule_id": rule_id,
+                    "level": lvl,
+                    "level_es": _format_level_es(lvl),
+                    "description": _translate_description_es(desc),
+                    "agent_id": ag_id_str,
+                    "agent_name": al.get("agent_name") or (al.get("agent", {}) or {}).get("name", "host"),
+                    "srcip": src_ip if not src_ip.startswith("No identificada") else "",
+                    "srcport": str(al.get("src_port") or (al.get("data", {}) or {}).get("srcport", "")),
+                    "dstuser": al.get("dst_user") or (al.get("data", {}) or {}).get("dstuser", ""),
+                    "full_log": raw_log[:240],
+                    "full_log_es": translate_full_log_es(raw_log)[:240],
+                })
+                if len(alerts) >= max_items:
+                    break
 
     return alerts
 
@@ -1497,6 +1507,14 @@ async def _fetch_agent_full_profile(agent_id: str) -> dict[str, Any]:
             "total_packages": 0,
             "sample_packages": [],
         },
+        "rootcheck": {
+            "total_items": 0,
+            "items": [],
+        },
+        "ports": {
+            "total_count": len(traffic_data.get("ports", [])),
+            "items": traffic_data.get("ports", []),
+        },
         "processes": {
             "total_count": len(traffic_data.get("processes", [])),
             "top_processes": traffic_data.get("processes", [])[:25],
@@ -1508,19 +1526,42 @@ async def _fetch_agent_full_profile(agent_id: str) -> dict[str, Any]:
 
     if mgr_host and settings.wazuh_manager_api_pass:
         try:
-            async with httpx.AsyncClient(timeout=12.0, verify=verify) as client:
+            async with httpx.AsyncClient(timeout=15.0, verify=verify) as client:
                 token = await _get_token(client)
                 if token:
                     headers = {"Authorization": f"Bearer {token}"}
 
                     t_hw = client.get(f"{base}/syscollector/{aid}/hardware", headers=headers)
                     t_os = client.get(f"{base}/syscollector/{aid}/os", headers=headers)
-                    t_pkg = client.get(f"{base}/syscollector/{aid}/packages?limit=15", headers=headers)
+                    t_pkg = client.get(f"{base}/syscollector/{aid}/packages?limit=25", headers=headers)
                     t_sca = client.get(f"{base}/sca/{aid}", headers=headers)
-                    t_fim = client.get(f"{base}/syscheck/{aid}?limit=15", headers=headers)
+                    t_fim = client.get(f"{base}/syscheck/{aid}?limit=25", headers=headers)
+                    t_root = client.get(f"{base}/rootcheck/{aid}?limit=25", headers=headers)
+                    t_ports = client.get(f"{base}/syscollector/{aid}/ports?limit=50", headers=headers)
+                    t_proc = client.get(f"{base}/syscollector/{aid}/processes?limit=50", headers=headers)
+                    t_net = client.get(f"{base}/syscollector/{aid}/netiface", headers=headers)
 
-                    r_hw, r_os, r_pkg, r_sca, r_fim = await asyncio.gather(
-                        t_hw, t_os, t_pkg, t_sca, t_fim, return_exceptions=True
+                    (
+                        r_hw,
+                        r_os,
+                        r_pkg,
+                        r_sca,
+                        r_fim,
+                        r_root,
+                        r_ports,
+                        r_proc,
+                        r_net,
+                    ) = await asyncio.gather(
+                        t_hw,
+                        t_os,
+                        t_pkg,
+                        t_sca,
+                        t_fim,
+                        t_root,
+                        t_ports,
+                        t_proc,
+                        t_net,
+                        return_exceptions=True,
                     )
 
                     # 1. Hardware
@@ -1564,8 +1605,19 @@ async def _fetch_agent_full_profile(agent_id: str) -> dict[str, Any]:
                                 "architecture": osi.get("architecture", "x86_64"),
                                 "hostname": osi.get("hostname", ag_name),
                             }
+                    elif isinstance(agent_info.get("os"), dict) and agent_info.get("os", {}).get("name"):
+                        # Fallback robusto desde metadatos del agente
+                        ag_os = agent_info["os"]
+                        profile["os"] = {
+                            "name": ag_os.get("name", "Linux"),
+                            "platform": ag_os.get("platform", "linux"),
+                            "version": ag_os.get("version", "-"),
+                            "kernel": ag_os.get("uname", "-"),
+                            "architecture": ag_os.get("arch", "x86_64"),
+                            "hostname": ag_name,
+                        }
 
-                    # 3. Paquetes instalados
+                    # 3. Paquetes instalados (SBOM)
                     if isinstance(r_pkg, httpx.Response) and r_pkg.is_success:
                         d_pkg = r_pkg.json().get("data", {})
                         profile["software"] = {
@@ -1633,6 +1685,78 @@ async def _fetch_agent_full_profile(agent_id: str) -> dict[str, Any]:
                                 for f in d_fim.get("affected_items", [])
                             ],
                         }
+
+                    # 6. Rootcheck (Detección de malware / rootkits)
+                    if isinstance(r_root, httpx.Response) and r_root.is_success:
+                        d_root = r_root.json().get("data", {})
+                        root_items = d_root.get("affected_items", [])
+                        profile["rootcheck"] = {
+                            "total_items": d_root.get("total_affected_items", len(root_items)),
+                            "items": [
+                                {
+                                    "event": rt.get("event", ""),
+                                    "file": rt.get("file", ""),
+                                    "status": rt.get("status", "outstanding"),
+                                }
+                                for rt in root_items
+                            ],
+                        }
+
+                    # 7. Puertos de red y sockets activos (Syscollector)
+                    if isinstance(r_ports, httpx.Response) and r_ports.is_success:
+                        d_ports = r_ports.json().get("data", {})
+                        p_items = d_ports.get("affected_items", [])
+                        if p_items:
+                            profile["ports"] = {
+                                "total_count": d_ports.get("total_affected_items", len(p_items)),
+                                "items": [
+                                    {
+                                        "protocol": p.get("protocol", "tcp"),
+                                        "local_ip": p.get("local", {}).get("ip", "") if isinstance(p.get("local"), dict) else "",
+                                        "local_port": p.get("local", {}).get("port", 0) if isinstance(p.get("local"), dict) else 0,
+                                        "process": p.get("process", ""),
+                                        "pid": p.get("pid", 0),
+                                        "state": p.get("state", "listening"),
+                                    }
+                                    for p in p_items
+                                ],
+                            }
+
+                    # 8. Procesos activos (Syscollector)
+                    if isinstance(r_proc, httpx.Response) and r_proc.is_success:
+                        d_proc = r_proc.json().get("data", {})
+                        proc_items = d_proc.get("affected_items", [])
+                        if proc_items:
+                            profile["processes"] = {
+                                "total_count": d_proc.get("total_affected_items", len(proc_items)),
+                                "top_processes": [
+                                    {
+                                        "pid": pr.get("pid", 0),
+                                        "name": pr.get("name", "proceso"),
+                                        "cmd": pr.get("cmd", ""),
+                                        "euser": pr.get("euser", "root"),
+                                        "state": pr.get("state", "running"),
+                                    }
+                                    for pr in proc_items[:30]
+                                ],
+                            }
+
+                    # 9. Interfaces de red (Syscollector)
+                    if isinstance(r_net, httpx.Response) and r_net.is_success:
+                        d_net = r_net.json().get("data", {})
+                        net_items = d_net.get("affected_items", [])
+                        if net_items:
+                            profile["network"]["interfaces"] = [
+                                {
+                                    "name": i.get("name", ""),
+                                    "type": i.get("type", "ethernet"),
+                                    "state": i.get("state", "up"),
+                                    "mac": i.get("mac", ""),
+                                    "ipv4": i.get("ipv4", {}).get("address", "") if isinstance(i.get("ipv4"), dict) else "",
+                                    "mtu": i.get("mtu", 1500),
+                                }
+                                for i in net_items
+                            ]
         except Exception:
             pass
 
@@ -1781,33 +1905,39 @@ async def network_stream(
                 step += 1
                 now = time.time()
 
-                # 1. Eventos de alerta del pipeline de seguridad
+                # 1. Eventos de alerta y tráfico del pipeline de seguridad
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=1.8)
-                    data = event.get("data") or {}
-                    rule = event.get("rule") or {}
-                    agent = event.get("agent") or {}
-                    src_ip = data.get("srcip") or data.get("src_ip")
-                    proc = data.get("program_name") or data.get("srcuser") or "wazuh-agentd"
-                    desc_raw = rule.get("description", "Tráfico de red capturado")
+                    # El evento ya viene normalizado desde traffic_watcher
+                    rule_id = str(event.get("rule_id", "0"))
+                    level = int(event.get("level", 0))
+                    agent_id = str(event.get("agent_id", "000"))
+                    agent_name = str(event.get("agent_name", "host"))
+                    src_ip = event.get("src_ip") or "127.0.0.1"
+                    src_port = str(event.get("src_port") or "N/D")
+                    proc = event.get("command") or event.get("src_user") or "wazuh-agentd"
+                    desc_raw = event.get("description", "Tráfico de red capturado")
                     desc_es = _translate_description_es(desc_raw)
+
+                    dst_ip = settings.wazuh_server_ip or "127.0.0.1"
+                    dst_port = "1514" if level <= 3 else "443"
 
                     net_evt = {
                         "type": "network_traffic",
                         "subtype": "security_packet",
                         "id": f"net-{int(now * 1000)}-{step}",
                         "timestamp": event.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                        "agent_id": str(agent.get("id", "000")),
-                        "agent_name": agent.get("name", "host"),
-                        "src_ip": src_ip or "127.0.0.1",
-                        "src_port": str(data.get("srcport", "N/D")),
-                        "dst_ip": data.get("dstip", "192.168.122.142"),
-                        "dst_port": str(data.get("dstport", "1514")),
+                        "agent_id": agent_id,
+                        "agent_name": agent_name,
+                        "src_ip": src_ip,
+                        "src_port": src_port,
+                        "dst_ip": dst_ip,
+                        "dst_port": dst_port,
                         "protocol": "TCP",
-                        "rule_id": str(rule.get("id", "0")),
-                        "level": int(rule.get("level", 0)),
+                        "rule_id": rule_id,
+                        "level": level,
                         "description": f"[{proc}] {desc_es}",
-                        "status": "DETECTED",
+                        "status": "DETECTED" if level >= 5 else "TRAFFIC",
                         "bytes": len(json.dumps(event)),
                         "process": proc,
                     }

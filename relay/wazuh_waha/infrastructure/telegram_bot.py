@@ -1049,13 +1049,15 @@ async def _get_agent_detail_summary(agent_id: str, subcmd: str = "", extra_arg: 
 
 
 def _get_recent_alerts_summary(limit: int = 5) -> str:
-    """Devuelve un resumen de las alertas recientes en español."""
+    """Devuelve un resumen de las alertas recientes en español enriquecido con IPs limpias y diagnósticos."""
+    from ..domain.templates import extract_clean_ip, extract_clean_user
+
     items = traffic_watcher.get_recent(limit=limit)
     if not items:
         return "ℹ️ *No hay alertas recientes en el buffer del relay.*"
 
     lines = [
-        f"🚨 *ÚLTIMAS {len(items)} ALERTAS DE SEGURIDAD:*",
+        f"🚨 *ÚLTIMAS {len(items)} ALERTAS DE SEGURIDAD SOC:*",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━",
     ]
     for a in reversed(items):
@@ -1068,10 +1070,16 @@ def _get_recent_alerts_summary(limit: int = 5) -> str:
             ts = ts.split("T")[-1][:8]
 
         emoji = "🔴" if lvl >= 12 else "🟠" if lvl >= 8 else "🟡"
-        raw_log = a.get("full_log", "")
-        log_snippet = f"\n  _{translate_full_log_es(raw_log)[:90]}_" if raw_log else ""
+        src_ip = a.get("src_ip")
+        if not src_ip or src_ip.startswith("No identificada"):
+            src_ip = extract_clean_ip(a)
+        user = a.get("dst_user") or a.get("src_user") or extract_clean_user(a)
 
-        lines.append(f"{emoji} `[L{lvl}]` *#{rule_id}* ({agent}) {ts}\n*{desc}*{log_snippet}")
+        ip_part = f" • 🌐 `{src_ip}`" if src_ip and not src_ip.startswith("No identificada") else ""
+        user_part = f" • 👤 `{user}`" if user and user != "No especificado" else ""
+
+        card = f"{emoji} `[L{lvl}]` *#{rule_id}* (`{agent}`){ip_part}{user_part} — _{ts}_\n*{desc}*"
+        lines.append(card)
 
     return "\n\n".join(lines)
 
@@ -1463,6 +1471,7 @@ async def _generate_and_send_agent_report(agent_id: str, chat_id: str | None = N
     try:
         from ..api.telemetry import _fetch_agent_full_profile
         from ..api.reports import _build_pdf
+        from .agent_analyzer import format_hardening_report
 
         profile = await _fetch_agent_full_profile(aid)
         ag_name = profile.get("agent_name", aid)
@@ -1470,20 +1479,24 @@ async def _generate_and_send_agent_report(agent_id: str, chat_id: str | None = N
         now_str = time.strftime("%Y%m%d_%H%M%S")
         filename = f"reporte_agente_{aid}_{now_str}.pdf"
 
+        # 1. Enviar el resumen condensado de todos los apartados SIEM al chat
+        summary_msg = format_hardening_report(profile, aid, trigger_reason="solicitud de reporte")
+        await send_message(summary_msg, chat_id=chat_id)
+
+        # 2. Enviar el documento PDF con los 10 apartados forenses
         sca_val = profile.get("sca", {}).get("score")
         sca_str = f"{sca_val}%" if sca_val is not None else "N/A"
         det_count = len(profile.get("recent_detections") or [])
-        sites_count = len(profile.get("active_sites") or [])
 
         caption = (
             f"📄 *Reporte Forense & Auditoría SOC (PDF v2.0)*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"• *Endpoint:* `{ag_name}` (ID: `{aid}`)\n"
             f"• *Sistema:* `{profile.get('os', {}).get('name', 'Linux')}`\n"
-            f"• *SCA CIS:* `{sca_str}` · *Alertas:* `{det_count}` · *Destinos:* `{sites_count}`\n"
-            f"• *Contenido:* 10 apartados explicados (Hardware, Red, Sockets, Procesos, Software, SCA CIS, FIM y Alertas)\n"
-            f"• *Emisión:* `{time.strftime('%d/%m/%Y %H:%M:%S')}` ({round(len(pdf_bytes)/1024, 1)} KB)\n\n"
-            f"_Wazuh-WAHA SOC Operations Suite_"
+            f"• *SCA CIS:* `{sca_str}` · *Alertas:* `{det_count}`\n"
+            f"• *Contenido:* 10 apartados forenses explicados\n"
+            f"• *Emisión:* `{time.strftime('%d/%m/%Y %H:%M:%S')}` ({round(len(pdf_bytes)/1024, 1)} KB)\n"
+            f"_Wazuh-WAHA SOC Suite_"
         )
 
         ok = await send_document(
@@ -1493,9 +1506,9 @@ async def _generate_and_send_agent_report(agent_id: str, chat_id: str | None = N
             chat_id=chat_id,
         )
         if ok:
-            return f"✅ Reporte PDF del agente [{aid}] generado y enviado con éxito a tu chat."
+            return f"✅ Reporte consolidado y documento PDF del agente [{aid}] enviados con éxito a tu chat."
         else:
-            return f"⚠️ Se generó el PDF ({round(len(pdf_bytes)/1024, 1)} KB), pero falló el envío por Telegram."
+            return f"⚠️ Se envió el resumen SIEM ({round(len(pdf_bytes)/1024, 1)} KB), pero falló la entrega del PDF en Telegram."
     except Exception as e:
         log.exception("telegram_report_generate_err aid=%s", aid)
         return f"❌ Error generando reporte PDF del agente [{aid}]: {e}"

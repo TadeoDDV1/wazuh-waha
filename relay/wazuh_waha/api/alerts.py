@@ -149,6 +149,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
                 rule_id=rule_id,
                 level=level,
                 agent_name=agent_name,
+                raw_alert=alert,
             ))
             channels_sent.append("email")
         except Exception as _em_err:

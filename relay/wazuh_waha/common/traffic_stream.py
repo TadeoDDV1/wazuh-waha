@@ -75,24 +75,37 @@ def _clip_raw(raw: dict[str, Any]) -> dict[str, Any]:
 
 def normalize_wazuh_event(raw: dict[str, Any]) -> dict[str, Any]:
     """Normaliza un evento en formato estándar para la terminal y telemetría."""
+    from ..domain.templates import (
+        extract_clean_ip,
+        extract_clean_port,
+        extract_clean_user,
+        extract_clean_process,
+        _translate_description_es,
+    )
+
     rule = raw.get("rule", {}) or {}
     data = raw.get("data", {}) or {}
     agent = raw.get("agent", {}) or {}
     mitre = rule.get("mitre", {}) or {}
-    predecoder = raw.get("predecoder", {}) or {}
 
-    src_ip = data.get("srcip") or predecoder.get("srcip") or raw.get("srcip") or ""
-    src_port = data.get("srcport") or data.get("srcport") or raw.get("srcport") or ""
-    src_user = data.get("srcuser") or data.get("user") or ""
+    src_ip = extract_clean_ip(raw)
+    if src_ip.startswith("No identificada"):
+        src_ip = ""
+    src_port = extract_clean_port(raw)
+    src_user = extract_clean_user(raw)
+    if src_user == "No especificado":
+        src_user = ""
     dst_user = data.get("dstuser") or ""
     command = data.get("command") or ""
+    proc = extract_clean_process(raw)
 
     rule_id = str(rule.get("id", "0"))
     try:
         level = int(rule.get("level", 0))
     except (TypeError, ValueError):
         level = 0
-    description = rule.get("description", "Evento desconocido")
+    desc_raw = rule.get("description") or raw.get("location") or "Evento de telemetría de red"
+    description = _translate_description_es(desc_raw)
 
     ts = raw.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%S.000+0000", time.gmtime())
     event_id = str(raw.get("id") or f"{ts}:{rule_id}:{agent.get('id', '000')}")
@@ -118,6 +131,7 @@ def normalize_wazuh_event(raw: dict[str, Any]) -> dict[str, Any]:
         "groups": rule.get("groups", []) or [],
         "source": raw.get("_source", "unknown"),
         "raw_json": _clip_raw(raw),
+        "process": proc,
     }
 
 
@@ -415,17 +429,20 @@ class TrafficStreamWatcher:
             pass
 
         host = settings.wazuh_manager_host or settings.wazuh_server_ip
-        if settings.wazuh_manager_api_pass and host:
-            return "api"
         if host and settings.wazuh_vm_ssh_user:
             return "ssh"
+        if settings.wazuh_manager_api_pass and host:
+            return "api"
         return "off"
 
     # ── fuente local ───────────────────────────────────────────────────────
 
     async def _local_file_loop(self) -> None:
-        path = Path(settings.wazuh_alerts_json_path)
+        archives_path = Path("/var/ossec/logs/archives/archives.json")
+        alerts_path = Path(settings.wazuh_alerts_json_path)
+        path = archives_path if archives_path.exists() else alerts_path
         interval = max(0.3, float(settings.traffic_poll_interval_sec))
+        _log.info("local_traffic_source_start path=%s", path)
         while self._running and self._is_leader:
             if not path.exists():
                 await asyncio.sleep(2.0)
@@ -463,7 +480,7 @@ class TrafficStreamWatcher:
                 _log.warning("local_file_loop err=%s", e)
                 await asyncio.sleep(2.0)
 
-    # ── fuente SSH (alerts.json en la VM manager) ──────────────────────────
+    # ── fuente SSH (archives.json / alerts.json en la VM manager) ──────────
 
     # WAZUH_VM_SSH_STRICT_HOST_KEY: "yes" exige known_hosts pre-provisionado
     # (recomendado en prod: "accept-new" acepta la primera key sin verificar,
@@ -487,13 +504,14 @@ class TrafficStreamWatcher:
             "-o", "LogLevel=ERROR",
         ]
         if settings.wazuh_vm_ssh_key_path:
-            cmd += ["-i", settings.wazuh_vm_ssh_key_path]
+            cmd += ["-i", settings.wazuh_vm_ssh_key_path, "-o", "IdentitiesOnly=yes"]
         cmd.append(f"{user}@{host}")
         return cmd
 
     async def _ssh_poll_loop(self) -> None:
         interval = max(1.0, float(settings.traffic_poll_interval_sec))
-        remote_path = settings.wazuh_alerts_json_path
+        # Priorizar archives.json (100% del tráfico y eventos del SIEM) si existe, con fallback a alerts.json
+        remote_path = f'"$(test -f /var/ossec/logs/archives/archives.json && echo /var/ossec/logs/archives/archives.json || echo {settings.wazuh_alerts_json_path})"'
         # Estado: última línea ya vista (id) y cantidad de líneas leídas
         last_count = 0
         _log.info("ssh_traffic_source_start host=%s path=%s",

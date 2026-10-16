@@ -1,7 +1,20 @@
+import re
 import time
 from typing import Callable
 
 TemplateFn = Callable[[dict], str]
+
+_IPV4_REGEX = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_FROM_IP_REGEX = re.compile(
+    r"(?:from|SRC=|client|rhost=)\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[a-fA-F0-9:]+)",
+    re.IGNORECASE,
+)
+_PORT_REGEX = re.compile(r"(?:port|SPT=|DPT=)\s*(\d+)", re.IGNORECASE)
+_USER_REGEX = re.compile(
+    r"(?:for(?:\s+invalid\s+user)?|user=|user\s+)\s*([a-zA-Z0-9_\-\.]+)",
+    re.IGNORECASE,
+)
+_PROC_REGEX = re.compile(r"\b([a-zA-Z0-9_\-\.]{2,32})(?:\[\d+\])?:\s")
 
 
 def _agent(alert: dict) -> str:
@@ -9,7 +22,156 @@ def _agent(alert: dict) -> str:
     return a.get("name", a.get("id", "unknown"))
 
 
+def extract_clean_ip(alert: dict) -> str:
+    """Extrae la IP de origen legítima sin arrastrar logs crudos ni texto de depuración."""
+    data = alert.get("data", {}) or {}
+    pre = alert.get("predecoder", {}) or {}
+    port_data = data.get("port", {}) if isinstance(data.get("port"), dict) else {}
+    netinfo = data.get("netinfo", {}) if isinstance(data.get("netinfo"), dict) else {}
+    candidates = [
+        data.get("srcip"),
+        data.get("src_ip"),
+        alert.get("srcip"),
+        pre.get("srcip"),
+        port_data.get("remote_ip"),
+        netinfo.get("remote_ip"),
+        data.get("remote_ip"),
+        data.get("client_ip"),
+        port_data.get("local_ip"),
+        data.get("local_ip"),
+    ]
+    for c in candidates:
+        if c and isinstance(c, str):
+            c_clean = c.strip().replace("::ffff:", "")
+            if c_clean and c_clean not in ("-", "(none)", "unknown", "?", "127.0.0.1", "::1", "0.0.0.0"):
+                return c_clean
+            elif c_clean in ("127.0.0.1", "::1"):
+                return "127.0.0.1 (Local)"
+
+    # Buscar en full_log con regex acotado
+    log = (alert.get("full_log", "") or "")[:1024]
+    if log:
+        m = _FROM_IP_REGEX.search(log)
+        if m:
+            ip_cand = m.group(1).replace("::ffff:", "").strip()
+            if ip_cand and ip_cand not in ("127.0.0.1", "::1", "0.0.0.0"):
+                return ip_cand
+        ips = _IPV4_REGEX.findall(log)
+        for ip in ips:
+            if not ip.startswith("127.") and ip not in ("0.0.0.0", "255.255.255.255"):
+                try:
+                    parts = [int(p) for p in ip.split(".")]
+                    if all(0 <= p <= 255 for p in parts):
+                        return ip
+                except ValueError:
+                    pass
+
+    # Eventos locales reconocidos
+    rule = alert.get("rule", {}) or {}
+    rule_id = str(rule.get("id", "0"))
+    loc = alert.get("location", "")
+    if rule_id in ("57103", "57104", "57105", "57106", "5401", "5402", "5407") or "pam" in loc or "sudo" in loc:
+        return "🏠 Local / Consola"
+
+    return "No identificada (Interno)"
+
+
+def extract_clean_port(alert: dict) -> str:
+    """Extrae el puerto de red limpio."""
+    data = alert.get("data", {}) or {}
+    port_data = data.get("port", {}) if isinstance(data.get("port"), dict) else {}
+    candidates = [
+        data.get("srcport"),
+        data.get("src_port"),
+        alert.get("srcport"),
+        port_data.get("remote_port"),
+        port_data.get("local_port"),
+        data.get("remote_port"),
+        data.get("local_port"),
+    ]
+    for c in candidates:
+        if c and str(c).strip() not in ("0", "-1", "?", "-", "None"):
+            return str(c).strip()
+    log = (alert.get("full_log", "") or "")[:1024]
+    if log:
+        m = _PORT_REGEX.search(log)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def extract_clean_user(alert: dict) -> str:
+    """Extrae el usuario asociado al evento de forma limpia."""
+    data = alert.get("data", {}) or {}
+    pre = alert.get("predecoder", {}) or {}
+    candidates = [
+        data.get("dstuser"),
+        data.get("srcuser"),
+        pre.get("dstuser"),
+        pre.get("srcuser"),
+        data.get("user"),
+        alert.get("dstuser"),
+        alert.get("srcuser"),
+    ]
+    for c in candidates:
+        if c and str(c).strip() and str(c) not in ("?", "None", "-", "(none)"):
+            return str(c).strip()
+    log = (alert.get("full_log", "") or "")[:1024]
+    if log:
+        m = _USER_REGEX.search(log)
+        if m:
+            u = m.group(1).strip()
+            if u not in ("from", "port", "ssh2", "invalid"):
+                return u
+    return "No especificado"
+
+
+def extract_clean_process(alert: dict) -> str:
+    """Extrae el proceso o servicio de ejecución."""
+    data = alert.get("data", {}) or {}
+    pre = alert.get("predecoder", {}) or {}
+    port_data = data.get("port", {}) if isinstance(data.get("port"), dict) else {}
+    proc_data = data.get("process", {}) if isinstance(data.get("process"), dict) else {}
+    candidates = [
+        data.get("program_name"),
+        pre.get("program_name"),
+        proc_data.get("name"),
+        proc_data.get("cmd"),
+        data.get("process") if isinstance(data.get("process"), str) else None,
+        port_data.get("process"),
+    ]
+    for c in candidates:
+        if c and isinstance(c, str) and c.strip() and c.strip() not in ("?", "None", "-", "(none)"):
+            val = c.strip()
+            # Si es un path completo, tomar el binario final
+            if "/" in val and not val.startswith("-"):
+                val = val.split("/")[-1]
+            return val
+    first_line = (alert.get("full_log", "") or "").split("\n", 1)[0][:250]
+    if first_line:
+        m = _PROC_REGEX.search(first_line)
+        if m:
+            return m.group(1)
+    loc = alert.get("location", "")
+    if loc and "/" in loc:
+        return loc.split("/")[-1]
+    return "sistema"
+
+
 def _field(alert: dict, *path: str, default: str = "?") -> str:
+    # Si se pide srcip específicamente, usar extractor limpio para nunca emitir código crudo
+    if len(path) == 1 and path[0] in ("srcip", "src_ip"):
+        ip = extract_clean_ip(alert)
+        return ip if ip and not ip.startswith("No identificada") else default
+
+    if len(path) == 1 and path[0] in ("dstuser", "srcuser", "user"):
+        u = extract_clean_user(alert)
+        return u if u and u != "No especificado" else default
+
+    if len(path) == 1 and path[0] in ("program_name", "process"):
+        p = extract_clean_process(alert)
+        return p if p and p != "sistema" else default
+
     candidates = [alert.get("data", {}) or {}, alert.get("agent", {}) or {}]
     for root in candidates:
         cur = root
@@ -18,10 +180,10 @@ def _field(alert: dict, *path: str, default: str = "?") -> str:
                 cur = None
                 break
             cur = cur.get(k)
-        if cur is not None:
-            return str(cur)
-    log = alert.get("full_log", "") or ""
-    return log[:80] + ("..." if len(log) > 80 else "")
+        if cur is not None and str(cur).strip():
+            return str(cur).strip()
+
+    return default
 
 
 def _vuln(alert: dict, *path: str, default: str = "?") -> str:
@@ -44,6 +206,7 @@ def render_soc_alert(
     fields: list[tuple[str, str]],
     recommendation: str = "",
     evidence: str = "",
+    explanation: str = "",
 ) -> str:
     """Construye una tarjeta forense SOC con diseño estructurado, nivel de severidad y atajos rápidos."""
     rule = alert.get("rule", {}) or {}
@@ -57,8 +220,10 @@ def render_soc_alert(
     if level >= 15:
         level_badge = f"🚨 *[CRÍTICO • L{level}]*"
     elif level >= 12:
-        level_badge = f"🟠 *[ALTO • L{level}]*"
+        level_badge = f"🔴 *[CRÍTICO • L{level}]*"
     elif level >= 8:
+        level_badge = f"🟠 *[ALTO • L{level}]*"
+    elif level >= 4:
         level_badge = f"🟡 *[MEDIO • L{level}]*"
     else:
         level_badge = f"🔵 *[INFO • L{level}]*"
@@ -73,12 +238,17 @@ def render_soc_alert(
     ]
 
     for label, val in fields:
-        if val and val != "?" and val != "None":
+        if val and val != "?" and val != "None" and val != "No especificado" and not val.startswith("No identificada"):
             lines.append(f"{label} `{val}`")
 
-    if evidence and evidence != "?":
+    if explanation:
+        lines.append(f"🔍 *Diagnóstico:* {explanation}")
+
+    if evidence and evidence != "?" and evidence != "None":
         cleaned_ev = translate_full_log_es(evidence)
-        lines.append(f"📝 *Evidencia:* `{cleaned_ev[:150]}`")
+        if len(cleaned_ev) > 160:
+            cleaned_ev = cleaned_ev[:157] + "..."
+        lines.append(f"📝 *Evidencia:* `{cleaned_ev}`")
 
     lines.append(f"⏰ *Hora:* `{timestamp}`")
     lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -92,6 +262,97 @@ def render_soc_alert(
     lines.append(f"• Silenciar regla: `/silenciar {rule_id}`")
 
     return "\n".join(lines)
+
+
+def render_soc_alert_html(alert: dict, title: str = "", recommendation: str = "") -> str:
+    """Genera plantilla de correo electrónico HTML con diseño ejecutivo SOC profesional."""
+    rule = alert.get("rule", {}) or {}
+    rule_id = str(rule.get("id", "0"))
+    level = int(rule.get("level", 0))
+    agent_obj = alert.get("agent", {}) or {}
+    agent_name = agent_obj.get("name") or agent_obj.get("id") or "Servidor Local"
+    agent_id = str(agent_obj.get("id", "000"))
+    timestamp = alert.get("timestamp") or time.strftime("%Y-%m-%d %H:%M:%S")
+
+    desc_raw = title or rule.get("description", "Evento de seguridad")
+    desc_es = _translate_description_es(desc_raw)
+
+    if level >= 12:
+        badge_bg = "#dc2626"
+        badge_text = f"CRÍTICO (Nivel {level})"
+    elif level >= 8:
+        badge_bg = "#ea580c"
+        badge_text = f"ALTO (Nivel {level})"
+    elif level >= 4:
+        badge_bg = "#d97706"
+        badge_text = f"MEDIO (Nivel {level})"
+    else:
+        badge_bg = "#0284c7"
+        badge_text = f"INFO (Nivel {level})"
+
+    src_ip = extract_clean_ip(alert)
+    user = extract_clean_user(alert)
+    proc = extract_clean_process(alert)
+    raw_log = alert.get("full_log", "") or ""
+    log_es = translate_full_log_es(raw_log)
+
+    rec = recommendation
+    if not rec:
+        if level >= 12:
+            rec = "Evento de criticidad máxima. Aislar endpoint preventivamente y auditar credenciales/procesos."
+        elif level >= 8:
+            rec = "Verificar origen del evento y contrastar con la bitácora de administración autorizada."
+        else:
+            rec = "Evento registrado para auditoría y correlación continua del SOC."
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }}
+    .container {{ max-width: 650px; margin: 0 auto; background: #1e293b; border-radius: 12px; overflow: hidden; border: 1px solid #334155; }}
+    .header {{ background: #0f172a; padding: 20px; border-bottom: 2px solid {badge_bg}; }}
+    .badge {{ display: inline-block; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: bold; color: #ffffff; background-color: {badge_bg}; }}
+    .title {{ margin: 10px 0 0 0; font-size: 18px; color: #f8fafc; }}
+    .content {{ padding: 20px; }}
+    .table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
+    .table td {{ padding: 8px 12px; border-bottom: 1px solid #334155; font-size: 14px; }}
+    .table td.label {{ color: #94a3b8; width: 35%; font-weight: 500; }}
+    .table td.value {{ color: #f1f5f9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
+    .action-box {{ background: #0f172a; border-left: 4px solid #3b82f6; padding: 14px 16px; border-radius: 4px; margin-bottom: 20px; }}
+    .action-title {{ font-size: 13px; font-weight: bold; color: #38bdf8; text-transform: uppercase; margin-bottom: 4px; }}
+    .action-text {{ font-size: 14px; color: #e2e8f0; margin: 0; }}
+    .footer {{ background: #0f172a; padding: 14px 20px; font-size: 12px; color: #64748b; text-align: center; border-top: 1px solid #334155; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span class="badge">{badge_text}</span>
+      <h2 class="title">🛡️ Regla #{rule_id}: {desc_es}</h2>
+    </div>
+    <div class="content">
+      <table class="table">
+        <tr><td class="label">💻 Endpoint / Agente:</td><td class="value">{agent_name} (ID: {agent_id})</td></tr>
+        <tr><td class="label">🌐 Origen / IP:</td><td class="value">{src_ip}</td></tr>
+        <tr><td class="label">👤 Usuario:</td><td class="value">{user}</td></tr>
+        <tr><td class="label">⚙️ Proceso / Servicio:</td><td class="value">{proc}</td></tr>
+        <tr><td class="label">⏰ Marca de Tiempo:</td><td class="value">{timestamp}</td></tr>
+      </table>
+      <div class="action-box">
+        <div class="action-title">💡 Acción SOC Recomendada:</div>
+        <p class="action-text">{rec}</p>
+      </div>
+      {f'<div style="font-size: 12px; color: #94a3b8; background: #0b1120; padding: 10px; border-radius: 6px; font-family: monospace;"><b>Evidencia:</b> {log_es[:200]}</div>' if log_es else ''}
+    </div>
+    <div class="footer">
+      Wazuh-WAHA SOC Suite · Notificación Automatizada Multi-Canal
+    </div>
+  </div>
+</body>
+</html>"""
+    return html
 
 
 TEMPLATES: dict[str, TemplateFn] = {
@@ -582,6 +843,36 @@ _COMMON_TRANSLATIONS = [
     ("Trojaned version of file detected", "Versión troyanizada de archivo detectada"),
     ("Rootkit detected", "Rootkit detectado en el sistema"),
 
+    # Amenazas de Red, Reconocimiento y Firewall
+    ("UFW BLOCK", "Bloqueo por cortafuegos UFW"),
+    ("iptables denied", "Conexión rechazada por IPTables"),
+    ("connection refused", "Conexión rechazada"),
+    ("Port scan detected", "Escaneo de puertos detectado por el sensor"),
+    ("Nmap scan", "Escaneo de red mediante Nmap detectado"),
+    ("SYN flood attack", "Ataque de denegación de servicio (SYN Flood)"),
+    ("Broadcast ping", "Sondeo de red broadcast (Ping ICMP)"),
+    ("Promiscuous mode", "Interfaz de red en modo promiscuo (Capturador/Sniffer)"),
+    ("Host-based anomaly detection event (rootcheck)", "Anomalía en el sistema detectada por Rootcheck"),
+
+    # Ataques Web y Servicios HTTP
+    ("SQL injection attempt", "Intento de inyección SQL (SQLi) detectado"),
+    ("Cross-site scripting", "Intento de ataque XSS (Cross-Site Scripting)"),
+    ("Directory traversal attempt", "Intento de salto de directorio (Path Traversal)"),
+    ("Shellshock attack", "Intento de explotación Shellshock"),
+    ("Apache: Attempt to access forbidden directory", "Intento de acceso a directorio prohibido en servidor Web"),
+    ("Nginx: 403 Forbidden", "Petición web bloqueada (403 Forbidden)"),
+    ("Web server 500 error code", "Error interno 500 en servidor Web"),
+
+    # Amenazas avanzadas y Persistencia
+    ("Reverse shell", "Intento de Reverse Shell interactiva detectado"),
+    ("Suspicious process execution", "Ejecución de proceso sospechoso detectada"),
+    ("Execution from temporary directory", "Ejecución de binario en directorio temporal (/tmp)"),
+    ("Crontab altered", "Modificación en tareas programadas Crontab"),
+    ("SSH key added", "Nueva llave SSH añadida a authorized_keys"),
+    ("Password changed", "Contraseña de usuario modificada en el sistema"),
+    ("User account created", "Nueva cuenta de usuario creada en el sistema"),
+    ("User account deleted", "Cuenta de usuario eliminada del sistema"),
+
     # Vulnerability Detector
     ("High severity vulnerability", "Vulnerabilidad de seguridad de nivel ALTO"),
     ("Critical severity vulnerability", "Vulnerabilidad de seguridad de nivel CRÍTICO"),
@@ -594,16 +885,15 @@ _COMMON_TRANSLATIONS = [
     ("Vulnerabilidades limpiadas", "Vulnerabilidades limpiadas"),
     ("Package database changed", "Base de datos de paquetes del sistema modificada"),
 
-    # Red y Firewall
-    ("UFW BLOCK", "Bloqueo por cortafuegos UFW"),
-    ("iptables denied", "Conexión rechazada por IPTables"),
-    ("connection refused", "Conexión rechazada"),
-
     # Infraestructura y Health
     ("Active response", "Respuesta Activa ejecutada"),
     ("WAHA session", "Evento de salud de la sesión WhatsApp (WAHA)"),
     ("wazuh-agent", "Evento de estado del Agente Wazuh"),
     ("wazuh-waha", "Evento de estado del Relay Wazuh-WAHA"),
+    ("syscollector", "Telemetría de red y sistema (Syscollector)"),
+    ("dbsync_ports", "Conexión de red activa registrada"),
+    ("dbsync_packages", "Inventario de software actualizado"),
+    ("dbsync_processes", "Inventario de procesos en ejecución"),
 ]
 
 
@@ -695,8 +985,10 @@ def render_default(alert: dict) -> str:
     agent = _agent(alert)
     agent_id = str((alert.get("agent") or {}).get("id", "000"))
     timestamp = alert.get("timestamp", "?")
-    src_ip = _field(alert, "srcip", default="")
-    user = _field(alert, "dstuser", default="")
+    src_ip = extract_clean_ip(alert)
+    src_port = extract_clean_port(alert)
+    user = extract_clean_user(alert)
+    proc = extract_clean_process(alert)
     raw_log = alert.get("full_log", "") or ""
     log_es = translate_full_log_es(raw_log)
 
@@ -706,16 +998,32 @@ def render_default(alert: dict) -> str:
         "━━━━━━━━━━━━━━━━━━━━━━━━━━",
         f"📊 *Nivel:* {level_es}",
         f"🛡️ *Regla:* `#{rule_id}` - *{desc_es}*",
-        f"🖥️ *Equipo / Agente:* `{agent}`{agent_suffix}",
+        f"💻 *Equipo / Agente:* `{agent}`{agent_suffix}",
     ]
-    if src_ip and src_ip != "?":
-        lines.append(f"🌐 *IP Origen:* `{src_ip}`")
-    if user and user != "?":
+    if src_ip and not src_ip.startswith("No identificada"):
+        port_suffix = f":{src_port}" if src_port else ""
+        lines.append(f"🌐 *IP Origen:* `{src_ip}{port_suffix}`")
+    if user and user != "No especificado":
         lines.append(f"👤 *Usuario:* `{user}`")
-    if log_es:
+    if proc and proc != "sistema":
+        lines.append(f"⚙️ *Proceso:* `{proc}`")
+    if log_es and log_es != desc_es:
         lines.append(f"📝 *Detalle:* `{log_es[:140]}`")
     lines.append(f"⏰ *Hora:* `{timestamp}`")
     lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    try:
+        lvl_int = int(level)
+    except Exception:
+        lvl_int = 0
+    if lvl_int >= 12:
+        rec = "Evento de criticidad máxima. Aislar endpoint preventivamente y auditar credenciales/procesos."
+    elif lvl_int >= 8:
+        rec = "Verificar origen del evento y contrastar con la bitácora de administración autorizada."
+    else:
+        rec = "Evento registrado para auditoría y correlación continua del SOC."
+    lines.append(f"💡 *Acción SOC:* {rec}\n")
+
     lines.append("⚡ *Acciones rápidas:*")
     lines.append(f"• Ficha forense: `/agente {agent_id}`")
     lines.append(f"• Reporte PDF: `/reporte {agent_id}`")

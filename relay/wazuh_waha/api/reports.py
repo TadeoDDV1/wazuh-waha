@@ -535,15 +535,56 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
     story.append(Spacer(1, 4 * mm))
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 5. DESTINOS DE RED ACTIVOS & SOCKETS REMOTOS
+    # 5. SUPERFICIE DE RED: PUERTOS EN ESCUCHA Y DESTINOS ACTIVOS
     # ══════════════════════════════════════════════════════════════════════════
-    story.append(Paragraph(f"5. Destinos de Red Activos & Sockets Remotos ({len(sites)} detectados)", section_style))
+    ports_data = profile.get("ports") or {}
+    ports_items = ports_data.get("items") or []
+    ports_count = ports_data.get("total_count", len(ports_items))
+
+    story.append(Paragraph(f"5. Superficie de Red: Sockets en Escucha y Destinos Activos ({ports_count} puertos, {len(sites)} remotos)", section_style))
     _add_section_callout(
-        objective="Auditar los sockets de red establecidos por procesos locales hacia servidores y servicios externos en tiempo real.",
-        relevance="Es la vía primaria para detectar actividad de Command & Control (C2), troyanos, minería de datos, balizas (beacons) o navegación indebida.",
-        interpretation="Conexiones hacia puertos no estándar (ej. 4444, 8080 no corporativo, 1337) o IPs foráneas sin resolución DNS clara requieren bloqueo y aislamiento inmediato.",
+        objective="Auditar los servicios locales a la escucha (superficie de exposición) y los sockets establecidos hacia servidores externos en tiempo real.",
+        relevance="Es la vía primaria para detectar servicios vulnerables abiertos al exterior y actividad de Command & Control (C2), troyanos o exfiltración.",
+        interpretation="Puertos en escucha no autorizados o conexiones hacia puertos sospechosos (ej. 4444, 1337, 31337) requieren mitigación o aislamiento inmediato.",
     )
+
+    if ports_items:
+        story.append(Paragraph("<b>Puertos y Sockets Locales en Escucha (Syscollector):</b>", body_style))
+        ports_header = [
+            Paragraph("Protocolo", cell_header_style),
+            Paragraph("IP Local", cell_header_style),
+            Paragraph("Puerto", cell_header_style),
+            Paragraph("Proceso / Servicio", cell_header_style),
+            Paragraph("PID", cell_header_style),
+            Paragraph("Estado", cell_header_style),
+        ]
+        ports_rows = [ports_header]
+        for p in ports_items[:15]:
+            p_num = str(p.get("local_port", ""))
+            p_alert = "#ef4444" if p_num in ("22", "23", "21", "3389", "4444", "1337") else "#0f172a"
+            ports_rows.append([
+                Paragraph(str(p.get("protocol", "tcp")).upper(), cell_bold_style),
+                Paragraph(_fmt(p.get("local_ip")), cell_style),
+                Paragraph(f"<font color='{p_alert}'><b>{_fmt(p_num)}</b></font>", cell_style),
+                Paragraph(_fmt(p.get("process")), cell_style),
+                Paragraph(_fmt(p.get("pid")), cell_style),
+                Paragraph(str(p.get("state", "listening")).upper(), cell_style),
+            ])
+        t_ports = Table(ports_rows, colWidths=[22 * mm, 34 * mm, 20 * mm, 54 * mm, 18 * mm, 30 * mm])
+        t_ports.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t_ports)
+        story.append(Spacer(1, 3 * mm))
+
     if sites:
+        story.append(Paragraph("<b>Destinos Remotos Activos y Conexiones Establecidas:</b>", body_style))
         site_header = [
             Paragraph("Servicio / Destino", cell_header_style),
             Paragraph("Dominio Web", cell_header_style),
@@ -553,7 +594,7 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
             Paragraph("Categoría", cell_header_style),
         ]
         site_rows = [site_header]
-        for site in sites[:25]:
+        for site in sites[:20]:
             port_val = str(site.get("remote_port", ""))
             port_alert = "#ef4444" if port_val in ("4444", "1337", "6667", "31337") else "#0f172a"
             site_rows.append([
@@ -575,8 +616,8 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
             ("LEFTPADDING", (0, 0), (-1, -1), 4),
         ]))
         story.append(t_sites)
-    else:
-        _add_empty_state("Sin conexiones externas o destinos de red activos registrados en la ventana de auditoría.")
+    elif not ports_items:
+        _add_empty_state("Sin conexiones externas ni sockets en escucha reportados en la ventana de auditoría.")
     story.append(Spacer(1, 4 * mm))
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -711,16 +752,17 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
     story.append(Spacer(1, 4 * mm))
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 9. MONITOREO DE INTEGRIDAD DE ARCHIVOS (FIM / SYSCHECK)
+    # 9. INTEGRIDAD DE ARCHIVOS (FIM) & AUDITORÍA ANTIMALWARE (ROOTCHECK)
     # ══════════════════════════════════════════════════════════════════════════
     fim_files = fim.get("recent_files") or []
-    story.append(Paragraph(f"9. Monitoreo de Integridad de Archivos (FIM) — {fim_count} archivos supervisados", section_style))
+    story.append(Paragraph(f"9. Integridad de Archivos (FIM) & Auditoría Antimalware ({fim_count} archivos supervisados)", section_style))
     _add_section_callout(
-        objective="Rastrear cambios, modificaciones no autorizadas, alteraciones de permisos o creación/eliminación de archivos críticos del sistema mediante huellas hash MD5/SHA256.",
-        relevance="La alteración de archivos de configuración (/etc/passwd, /etc/sudoers) o el reemplazo de binarios clave es el sello característico de intrusiones, rootkits o manipulación interna.",
-        interpretation="Cualquier cambio detectado fuera de una ventana de mantenimiento programada debe tratarse como un Indicador de Compromiso (IoC) y someterse a análisis de forensia digital.",
+        objective="Rastrear cambios, modificaciones no autorizadas, alteraciones de permisos o creación/eliminación de archivos críticos del sistema mediante huellas hash MD5/SHA256, y auditar malware, rootkits y anomalías del kernel.",
+        relevance="La alteración de archivos de configuración (/etc/passwd, /etc/sudoers), reemplazo de binarios o presencia de ganchos ocultos es el sello de intrusiones y rootkits.",
+        interpretation="Cualquier cambio detectado fuera de ventana de mantenimiento o firma rootcheck activa debe tratarse como Indicador de Compromiso (IoC) y aislarse.",
     )
     if fim_files:
+        story.append(Paragraph("<b>Archivos Críticos Supervisados (FIM / Syscheck):</b>", body_style))
         fim_header = [
             Paragraph("Ruta del Archivo", cell_header_style),
             Paragraph("Tamaño", cell_header_style),
@@ -751,6 +793,39 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
         story.append(t_fim)
     else:
         _add_empty_state("Sin eventos recientes de alteración de integridad de archivos reportados por Syscheck.")
+
+    # Subapartado Rootcheck (Detección de malware / rootkits)
+    rootcheck = profile.get("rootcheck") or {}
+    root_items = rootcheck.get("items") or []
+    root_count = rootcheck.get("total_items", len(root_items))
+    story.append(Spacer(1, 3 * mm))
+    story.append(Paragraph("<b>Auditoría Antimalware, Rootkits y Archivos Ocultos (Rootcheck):</b>", body_style))
+    if root_items:
+        root_header = [
+            Paragraph("Detección / Evento Anómalo", cell_header_style),
+            Paragraph("Componente / Archivo Involucrado", cell_header_style),
+            Paragraph("Estado", cell_header_style),
+        ]
+        root_rows = [root_header]
+        for rt in root_items[:15]:
+            root_rows.append([
+                Paragraph(f"<font color='#dc2626'><b>{_fmt(rt.get('event'))}</b></font>", cell_style),
+                Paragraph(_fmt(rt.get("file")), cell_style),
+                Paragraph(_fmt(rt.get("status")), cell_style),
+            ])
+        t_root = Table(root_rows, colWidths=[70 * mm, 75 * mm, 33 * mm])
+        t_root.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t_root)
+    else:
+        _add_empty_state(f"✅ Auditoría Rootcheck limpia: No se detectaron anomalías, rootkits, trojanos ni llamadas maliciosas al kernel ({root_count} revisiones).")
     story.append(Spacer(1, 4 * mm))
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -763,16 +838,42 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
         interpretation="Escala de criticidad: Nivel 1-4 (Bajo / Informativo), Nivel 5-7 (Medio / Advertencia), Nivel 8-11 (Alto / Riesgo Severo), Nivel 12-15 (Crítico / Respuesta Inmediata).",
     )
     if detections:
+        from ..domain.templates import (
+            _translate_description_es,
+            translate_full_log_es,
+            extract_clean_ip,
+            extract_clean_user,
+        )
+
+        crit_count = sum(1 for d in detections if int(d.get("level") or 0) >= 12)
+        alto_count = sum(1 for d in detections if 8 <= int(d.get("level") or 0) < 12)
+        med_count = sum(1 for d in detections if 5 <= int(d.get("level") or 0) < 8)
+        bajo_count = sum(1 for d in detections if int(d.get("level") or 0) < 5)
+
+        summary_html = (
+            f"<b>Desglose de Severidad:</b> "
+            f"<font color='#dc2626'><b>Críticas: {crit_count}</b></font> · "
+            f"<font color='#ea580c'><b>Altas: {alto_count}</b></font> · "
+            f"<font color='#d97706'><b>Medias: {med_count}</b></font> · "
+            f"<font color='#0284c7'><b>Bajas / Informativas: {bajo_count}</b></font>"
+        )
+        story.append(Paragraph(summary_html, body_style))
+        story.append(Spacer(1, 2.5 * mm))
+
         det_header = [
             Paragraph("Severidad", cell_header_style),
             Paragraph("Regla ID", cell_header_style),
-            Paragraph("Descripción del Evento", cell_header_style),
-            Paragraph("IP Origen", cell_header_style),
-            Paragraph("Fecha y Hora", cell_header_style),
+            Paragraph("Detección y Detalle Forense", cell_header_style),
+            Paragraph("Origen / Actor", cell_header_style),
+            Paragraph("Fecha / Hora", cell_header_style),
         ]
         det_rows = [det_header]
-        for det in detections[:20]:
-            lvl = int(det.get("level") or 0)
+        for det in detections[:25]:
+            try:
+                lvl = int(det.get("level") or 0)
+            except (ValueError, TypeError):
+                lvl = 0
+
             if lvl >= 12:
                 badge_color = "#dc2626"
                 lvl_label = f"CRÍTICO (L{lvl})"
@@ -786,19 +887,44 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
                 badge_color = "#0284c7"
                 lvl_label = f"BAJO (L{lvl})"
 
+            desc_raw = det.get("description") or "Alerta de seguridad"
+            desc_es = _translate_description_es(desc_raw)
+            raw_log = det.get("full_log") or ""
+            log_clean = translate_full_log_es(raw_log) if raw_log else ""
+
+            srcip = det.get("srcip") or extract_clean_ip(det)
+            if not srcip or srcip.startswith("No identificada"):
+                srcip = "Interno / Local"
+            srcport = det.get("srcport") or ""
+            port_suffix = f":{srcport}" if srcport and srcport not in ("0", "-", "None") else ""
+            user = det.get("dstuser") or extract_clean_user(det)
+
+            actor_info = f"<b>{srcip}{port_suffix}</b>"
+            if user and user != "No especificado":
+                actor_info += f"<br/><font size='7' color='#64748b'>Usuario: {user}</font>"
+
+            detail_p = f"<b>{desc_es}</b>"
+            if log_clean and log_clean != desc_es:
+                clean_snippet = log_clean[:110] + ("..." if len(log_clean) > 110 else "")
+                detail_p += f"<br/><font size='6.5' color='#475569'><i>{clean_snippet}</i></font>"
+
+            ts = str(det.get("timestamp") or "-")
+            if "T" in ts:
+                ts = ts.replace("T", " ").split("+")[0].split(".")[0]
+
             det_rows.append([
                 Paragraph(f"<font color='{badge_color}'><b>{lvl_label}</b></font>", cell_style),
                 Paragraph(f"<b>#{_fmt(det.get('rule_id'))}</b>", cell_style),
-                Paragraph(_fmt(det.get("description")), cell_style),
-                Paragraph(_fmt(det.get("srcip")), cell_style),
-                Paragraph(_fmt(det.get("timestamp")), cell_style),
+                Paragraph(detail_p, cell_style),
+                Paragraph(actor_info, cell_style),
+                Paragraph(ts, cell_style),
             ])
-        t_det = Table(det_rows, colWidths=[24 * mm, 20 * mm, 70 * mm, 30 * mm, 34 * mm])
+        t_det = Table(det_rows, colWidths=[24 * mm, 18 * mm, 74 * mm, 32 * mm, 30 * mm])
         t_det.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("TOPPADDING", (0, 0), (-1, -1), 3),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ("LEFTPADDING", (0, 0), (-1, -1), 4),

@@ -135,7 +135,7 @@ async def notify_wazuh_manager(description: str, level: int = 15, **fields) -> b
         return False
 
 
-def notify_email(subject: str, body: str) -> bool:
+def notify_email(subject: str, body: str, html_body: str | None = None) -> bool:
     if not settings.smtp_host or not settings.admin_email:
         log.debug("notify_email disabled (smtp_host or smtp_to empty)")
         return False
@@ -145,6 +145,8 @@ def notify_email(subject: str, body: str) -> bool:
     msg["From"] = settings.smtp_from
     msg["To"] = settings.admin_email
     msg.set_content(body)
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
 
     try:
         if settings.smtp_tls:
@@ -208,14 +210,19 @@ async def notify_alert_email(
     rule_id: str = "0",
     level: int = 0,
     agent_name: str = "?",
+    raw_alert: dict | None = None,
 ) -> bool:
-    """Envía alerta de seguridad por correo si el canal de email está activo."""
-    if not settings.admin_email or not settings.email_alerts_enabled:
+    """Envía alerta de seguridad por correo si el canal de email está activo, con soporte de plantilla HTML."""
+    if not settings.admin_email or not getattr(settings, "email_alerts_enabled", False):
         return False
+
+    from ..domain.templates import render_soc_alert_html
+    html_content = render_soc_alert_html(raw_alert) if raw_alert else None
+
     if settings.email_provider == "hyvor_relay":
         return await notify_email_hyvor(subject, message)
     elif settings.email_provider not in ("off", "none", "disabled", ""):
-        return await asyncio.to_thread(notify_email, subject, message)
+        return await asyncio.to_thread(notify_email, subject, message, html_content)
     return False
 
 
