@@ -12,7 +12,12 @@ interface ConsoleTarget {
   type: 'local' | 'ssh';
 }
 
-export const ConsoleTerminal: React.FC = () => {
+interface ConsoleTerminalProps {
+  defaultTarget?: string;
+  mode?: 'traffic' | 'console';
+}
+
+export const ConsoleTerminal: React.FC<ConsoleTerminalProps> = ({ defaultTarget, mode = 'console' }) => {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -30,7 +35,12 @@ export const ConsoleTerminal: React.FC = () => {
       .then((res) => {
         setEnabled(Boolean(res.enabled));
         setTargets(res.targets || []);
-        if (res.targets?.length) setTarget(res.targets[0].id);
+        if (res.targets?.length) {
+          const preferred = defaultTarget && res.targets.some((t: ConsoleTarget) => t.id === defaultTarget)
+            ? defaultTarget
+            : res.targets[0].id;
+          setTarget(preferred);
+        }
       })
       .catch((err) => {
         setError(err?.response?.status === 403
@@ -136,14 +146,21 @@ export const ConsoleTerminal: React.FC = () => {
     disconnect();
   }, [disconnect]);
 
+  const sendCommand = (command: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'input', data: command + '\n' }));
+    termRef.current?.focus();
+  };
+
   return (
     <div className={`console-shell ${maximized ? 'maximized' : ''}`}>
       <div className="console-toolbar">
         <div className="console-title">
           <TerminalSquare size={18} />
           <div>
-            <h2>Consola Web & SSH</h2>
-            <p>Acceso interactivo auditado al relay o al Wazuh Manager.</p>
+            <h2>{mode === 'traffic' ? 'Terminal de Tráfico & Comandos' : 'Consola Web & SSH'}</h2>
+            <p>{mode === 'traffic' ? 'Terminal interactiva para ejecutar comandos y ver el tráfico en vivo del SOC.' : 'Acceso interactivo auditado al relay o al Wazuh Manager.'}</p>
           </div>
         </div>
         <div className="console-controls">
@@ -185,6 +202,22 @@ export const ConsoleTerminal: React.FC = () => {
         </div>
       )}
       {error && <div className="console-error">{error}</div>}
+
+      <div className="console-quick">
+        <span className="console-quick-label">Comandos rápidos:</span>
+        <button className="console-quick-btn" disabled={!connected} onClick={() => sendCommand('tail -f /var/ossec/logs/alerts/alerts.json')}>
+          tail -f alertas
+        </button>
+        <button className="console-quick-btn" disabled={!connected} onClick={() => sendCommand('ss -tunap')}>
+          conexiones
+        </button>
+        <button className="console-quick-btn" disabled={!connected} onClick={() => sendCommand('df -h && free -m && uptime')}>
+          recursos
+        </button>
+        <button className="console-quick-btn" disabled={!connected} onClick={() => sendCommand('sudo -n /var/ossec/bin/wazuh-control status 2>/dev/null || systemctl status wazuh-manager --no-pager | head -30')}>
+          estado wazuh
+        </button>
+      </div>
 
       <div className="console-term-wrap">
         {!connected && !busy && (

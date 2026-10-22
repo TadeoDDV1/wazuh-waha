@@ -133,3 +133,33 @@
   font-size: 11px;
   color: #7f93a8;
 }
+
+.console-quick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid #1e2d3d;
+  border-radius: 8px;
+  background: #080f18;
+}
+.console-quick-label {
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-right: 4px;
+}
+.console-quick-btn {
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid #23364a;
+  background: #0a131d;
+  color: #a5b4c8;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  cursor: pointer;
+}
+.console-quick-btn:hover:not(:disabled) { color: #67e8f9; border-color: #0891b2; }
+.console-quick-btn:disabled { opacity: .4; cursor: not-allowed; }

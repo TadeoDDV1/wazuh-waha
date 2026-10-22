@@ -182,10 +182,10 @@ export const Navbar: React.FC = () => {
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
               }}
-              title="Abrir Terminal de Telemetría y Tráfico Wazuh en Vivo"
+              title="Abrir terminal interactiva para ejecutar comandos y ver tráfico en vivo"
             >
               <TerminalSquare size={14} style={{ color: activeView === 'traffic' ? '#00e5ff' : 'currentColor' }} />
-              <span>Terminal de Tráfico</span>
+              <span>Terminal de Tráfico / Comandos</span>
               <span
                 style={{
                   width: '7px',
@@ -259,33 +259,6 @@ export const Navbar: React.FC = () => {
             >
               <ShieldAlert size={14} style={{ color: activeView === 'detections' ? '#fbbf24' : 'currentColor' }} />
               <span>Detecciones Wazuh</span>
-            </button>
-
-            <button
-              type="button"
-              className={`nav-tab-btn ${activeView === 'console' ? 'active' : ''}`}
-              onClick={() => setActiveView('console')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 14px',
-                borderRadius: '8px',
-                fontSize: '12px',
-                fontWeight: activeView === 'console' ? 700 : 500,
-                border: activeView === 'console' ? '1px solid #22d3ee' : '1px solid transparent',
-                background: activeView === 'console'
-                  ? 'linear-gradient(135deg, rgba(34, 211, 238, 0.25), rgba(14, 116, 144, 0.35))'
-                  : 'transparent',
-                color: activeView === 'console' ? '#67e8f9' : 'var(--text-secondary)',
-                boxShadow: activeView === 'console' ? '0 0 16px rgba(34, 211, 238, 0.35)' : 'none',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-              }}
-              title="Consola web interactiva (shell local / SSH al manager)"
-            >
-              <TerminalSquare size={14} style={{ color: activeView === 'console' ? '#67e8f9' : 'currentColor' }} />
-              <span>Consola Web / SSH</span>
             </button>
 
             <button

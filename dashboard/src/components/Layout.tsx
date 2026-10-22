@@ -11,7 +11,6 @@ import { Loader2 } from 'lucide-react';
 import './Layout.css';
 
 // Lazy loading de módulos secundarios y pesados para minimizar el bundle inicial
-const LiveTrafficTerminal = React.lazy(() => import('./LiveTrafficTerminal'));
 const NetworkAgentsTerminal = React.lazy(() => import('./NetworkAgentsTerminal'));
 const ReportsCard = React.lazy(() => import('./ReportsCard'));
 const DetectionsView = React.lazy(() => import('./DetectionsView'));
@@ -30,7 +29,6 @@ const LayoutContent: React.FC = () => {
   const {
     showSettings,
     showTrafficTerminal,
-    setShowTrafficTerminal,
     showNetworkTerminal,
     setShowNetworkTerminal,
     activeView,
@@ -48,15 +46,9 @@ const LayoutContent: React.FC = () => {
               asPanel
             />
           ) : showTrafficTerminal ? (
-            <LiveTrafficTerminal
-              isOpen
-              onClose={() => setShowTrafficTerminal(false)}
-              asPanel
-            />
+            <ConsoleTerminal defaultTarget="manager" mode="traffic" />
           ) : activeView === 'detections' ? (
             <DetectionsView />
-          ) : activeView === 'console' ? (
-            <ConsoleTerminal />
           ) : activeView === 'reports' ? (
             <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px 24px 50px' }}>
               <div style={{ marginBottom: '20px' }}>
