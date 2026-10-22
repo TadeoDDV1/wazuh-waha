@@ -50,11 +50,14 @@ else
   fail "systemd wazuh-waha inactivo"
 fi
 
-if [ -d /var/ossec ] && command -v ss >/dev/null 2>&1; then
-  if ss -ltn 2>/dev/null | grep -q ':55000 '; then
-    ok "Wazuh API local :55000"
+MANAGER_HOST="$(getenv WAZUH_MANAGER_HOST || true)"
+[ -z "$MANAGER_HOST" ] && MANAGER_HOST="$(getenv WAZUH_SERVER_IP || true)"
+API_PORT="$(getenv WAZUH_MANAGER_API_PORT || true)"; API_PORT="${API_PORT:-55000}"
+if [ -n "$MANAGER_HOST" ]; then
+  if timeout 3 bash -c "exec 3<>/dev/tcp/${MANAGER_HOST}/${API_PORT}" 2>/dev/null; then
+    ok "Wazuh API ${MANAGER_HOST}:${API_PORT}"
   else
-    warn "Wazuh API local :55000 no escucha"
+    warn "Wazuh API ${MANAGER_HOST}:${API_PORT} no responde"
   fi
 fi
 
