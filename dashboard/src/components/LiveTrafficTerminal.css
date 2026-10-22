@@ -548,3 +548,27 @@
   0%, 49% { opacity: 1; }
   50%, 100% { opacity: 0; }
 }
+
+.terminal-connections-list { padding: 6px 0; }
+.terminal-conn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(30, 45, 61, 0.6);
+  font-size: 11px;
+  color: #a5b4c8;
+  font-family: ui-monospace, monospace;
+}
+.terminal-conn-row:hover { background: rgba(56, 189, 248, 0.06); }
+.terminal-conn-dir {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border: 1px solid;
+  border-radius: 4px;
+}
+.terminal-conn-arrow { color: #64748b; }
+.terminal-conn-domain { color: #38bdf8; }
+.terminal-conn-proto { color: #94a3b8; font-size: 10px; }
+.terminal-conn-proc { color: #fbbf24; font-size: 10px; }

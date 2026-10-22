@@ -17,6 +17,35 @@ Wazuh Manager (Alertas de seguridad & Conexiones de Agente)
 
 ---
 
+
+---
+
+## 🚀 Despliegue rápido en un servidor dedicado
+
+Requisitos: Ubuntu 24.04 LTS / Debian 12, Python >= 3.11, Docker + Compose.
+
+```bash
+sudo git clone https://github.com/TadeoDDV1/wazuh-waha.git /opt/wazuh-waha
+cd /opt/wazuh-waha
+sudo bash scripts/preflight.sh
+sudo bash scripts/install-production.sh
+sudo nano .env                 # claves, dominio, Wazuh API, canales
+sudo bash scripts/deploy-production.sh
+sudo bash scripts/install-manager-side.sh   # integración en Wazuh
+```
+
+Luego, configuración manual:
+1. DNS del dominio y TLS (Caddy automático).
+2. QR de WhatsApp en el dashboard.
+3. Token/chat de Telegram.
+4. SMTP/Email.
+5. Usuario API de Wazuh.
+6. Firewall y backups externos.
+
+Guía completa: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) ·
+Operación: [`docs/OPERATIONS.md`](docs/OPERATIONS.md) ·
+Seguridad: [`docs/SECURITY.md`](docs/SECURITY.md).
+
 ## 🌟 Capacidades Principales
 
 - 📱 **Alertas Multicanal en Español**: Despacho instantáneo a WhatsApp (WAHA), Telegram Bot y Email corporativo con plantillas formateadas y clasificación de severidad (Crítico, Alto, Medio, Bajo).
@@ -27,6 +56,20 @@ Wazuh Manager (Alertas de seguridad & Conexiones de Agente)
 - 🛡️ **Seguridad BFF & RBAC**: Autenticación estricta mediante API keys, cookies seguras HTTP-only y rate limiting preventivo.
 
 ---
+
+
+---
+
+## 🆕 Control Wazuh, terminales reales y consola web
+
+- **Detecciones Wazuh**: vista con alertas, FIM, SCA, Rootcheck, vulnerabilidades, Syscollector y MITRE, consultando el manager real (sin datos sintéticos).
+- **Control de apartados**: módulos de agente (FIM, SCA, rootcheck, syscollector, active-response) editados con merge seguro de `agent.conf` (backup + preservación del resto del XML) y reinicio de agentes. Los módulos del manager (`vulnerability-detection`, `ossec.conf`) son de solo lectura por defecto; la escritura requiere `WAZUH_MANAGER_CONFIG_WRITE_ENABLED=true` y `sudo -n`.
+- **Terminal de red real**: conexiones entrantes/salientes/escucha desde `ss` (manager) y syscollector (agentes), con IPs, puertos, proceso, dirección y DNS cacheado. Incluye `sys_netaddr` para IPv4/IPv6.
+- **Terminal de tráfico**: alertas Wazuh + conexiones reales en el mismo panel.
+- **Consola web/SSH**: shell local del relay y SSH al manager (y agentes opcionales) con xterm.js, auditoría, límite de sesiones y timeouts.
+- Nuevas variables: `NETWORK_*`, `CONSOLE_*`, `WAZUH_MANAGER_CONFIG_WRITE_ENABLED` (ver `.env.example`).
+
+> Seguridad: la consola requiere sesión `full`, valida `Origin`, usa allowlist de destinos y queda auditada. Se recomienda HTTPS para el dashboard.
 
 ## 🚀 Despliegue e Instalación
 

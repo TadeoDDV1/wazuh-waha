@@ -336,7 +336,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
       if (selectedAgentId !== 'all' && evt.agent_id !== selectedAgentId) {
         return false;
       }
-      if (typeFilter === 'traffic' && evt.type !== 'network_traffic') return false;
+      if (typeFilter === 'traffic' && evt.type !== 'network_traffic' && evt.type !== 'network_event') return false;
       if (typeFilter === 'heartbeat' && evt.type !== 'agent_heartbeat') return false;
       if (typeFilter === 'security' && !evt.rule_id) return false;
       if (typeFilter === 'site' && evt.type !== 'site_activity') return false;
@@ -1232,13 +1232,14 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                 filteredEvents.map((evt, idx) => {
                   const isTraffic = evt.type === 'network_traffic';
                   const isSite = evt.type === 'site_activity' || Boolean((evt as any).site_name);
+                  const isConnection = evt.type === 'network_event' || (evt as any).subtype === 'connection';
                   const isExpanded = expandedEventId === evt.id;
                   const procName = evt.process || 'wazuh-agentd';
 
                   return (
                     <div
                       key={evt.id || idx}
-                      className={`terminal-log-row ${isSite ? 'level-medium' : isTraffic ? 'level-medium' : 'level-low'}`}
+                      className={`terminal-log-row ${isSite ? 'level-medium' : isTraffic ? 'level-medium' : isConnection ? 'level-low' : 'level-low'}`}
                       onClick={() => setExpandedEventId(isExpanded ? null : (evt.id || String(idx)))}
                       style={{ cursor: 'pointer' }}
                     >
@@ -1268,7 +1269,19 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                         </span>
 
                         {/* Dirección de Red / Destino Web */}
-                        {isSite ? (
+                        {isConnection ? (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#93c5fd', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: (evt as any).direction === 'inbound' ? 'rgba(16,185,129,.2)' : (evt as any).direction === 'outbound' ? 'rgba(56,189,248,.2)' : 'rgba(148,163,184,.2)', color: (evt as any).direction === 'inbound' ? '#34d399' : (evt as any).direction === 'outbound' ? '#38bdf8' : '#cbd5e1' }}>
+                              {String((evt as any).direction || 'conn').toUpperCase()}
+                            </span>
+                            <code>{(evt as any).local_ip}:{(evt as any).local_port}</code>
+                            <ArrowRight size={10} style={{ color: 'var(--text-secondary)' }} />
+                            <code>{(evt as any).remote_ip}:{(evt as any).remote_port}</code>
+                            {(evt as any).domain && <span style={{ color: '#38bdf8' }}>({String((evt as any).domain)})</span>}
+                            <span style={{ fontSize: '9px', padding: '1px 4px', background: 'rgba(148,163,184,.15)', borderRadius: '3px' }}>{evt.protocol || 'TCP'}</span>
+                            {evt.process && <span style={{ fontSize: '10px', color: '#94a3b8' }}>[{evt.process}]</span>}
+                          </div>
+                        ) : isSite ? (
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#38bdf8' }}>
                             <Globe size={11} />
                             <strong>{(evt as any).site_name || evt.dst_ip}</strong>
@@ -1543,7 +1556,8 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                       </div>
 
                       <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                        {iface.ipv4 && <div>IP: <code style={{ color: '#fff' }}>{iface.ipv4}</code></div>}
+                        {iface.ipv4 && <div>IPv4: <code style={{ color: '#fff' }}>{iface.ipv4}</code></div>}
+                        {iface.ipv6 && <div>IPv6: <code style={{ color: '#fff' }}>{iface.ipv6}</code></div>}
                         <div>MAC: <code>{iface.mac}</code></div>
                         <div>MTU: <code>{iface.mtu}</code> bytes</div>
                       </div>
@@ -1758,6 +1772,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                         <strong style={{ color: '#fff' }}>{iface.name}</strong>
                         <span style={{ color: iface.state === 'up' ? 'var(--green-healthy)' : 'var(--red-error)', fontSize: '10px', fontWeight: 700 }}>{iface.state?.toUpperCase()}</span>
                         {iface.ipv4 && <code style={{ color: '#38bdf8' }}>{iface.ipv4}</code>}
+                        {iface.ipv6 && <code style={{ color: '#a78bfa', marginLeft: 6 }}>{iface.ipv6}</code>}
                         <code style={{ color: 'var(--text-secondary)' }}>{iface.mac}</code>
                         <span style={{ color: 'var(--text-secondary)' }}>MTU {iface.mtu}</span>
                         <span style={{ color: 'var(--text-secondary)' }}>↓{Math.round((iface.rx_bytes || 0) / 1048576)} MB ↑{Math.round((iface.tx_bytes || 0) / 1048576)} MB</span>

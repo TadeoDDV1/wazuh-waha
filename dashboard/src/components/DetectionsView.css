@@ -1,0 +1,131 @@
+.detections-view {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 20px 24px 50px;
+  color: var(--text-primary);
+}
+
+.detections-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.detections-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 20px;
+}
+
+.detections-head p { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); }
+
+.det-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid #23364a;
+  border-radius: 8px;
+  background: #0c1722;
+  color: #d8e2f0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.det-overview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 14px;
+  border: 1px solid #1e2d3d;
+  border-radius: 10px;
+  background: #0a121b;
+}
+
+.det-overview-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #0e1925;
+  color: #7dd3fc;
+}
+
+.det-overview-card div { display: flex; flex-direction: column; }
+.det-overview-card strong { font-size: 12px; color: #e2e8f0; }
+.det-overview-card span { font-size: 11px; color: #7f93a8; }
+
+.det-daemons { display: flex; flex-wrap: wrap; gap: 6px; }
+.det-daemons span {
+  font-size: 10px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  font-family: ui-monospace, monospace;
+}
+.det-daemons .up { background: rgba(16, 185, 129, 0.12); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+.det-daemons .down { background: rgba(239, 68, 68, 0.12); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+
+.det-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.det-tabs button {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid #23364a;
+  background: #0a131d;
+  color: #93a7bb;
+  font-size: 12px;
+  cursor: pointer;
+}
+.det-tabs button.active { border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1); }
+
+.det-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.det-filters select, .det-search input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #23364a;
+  background: #0a131d;
+  color: #d8e2f0;
+  font-size: 12px;
+}
+.det-search { display: flex; align-items: center; gap: 6px; border: 1px solid #23364a; border-radius: 8px; padding: 0 8px; background: #0a131d; }
+.det-search input { border: none; outline: none; background: transparent; min-width: 260px; }
+.det-count { margin-left: auto; font-size: 11px; color: #7f93a8; }
+
+.det-error { padding: 10px 12px; border: 1px solid #ef4444; border-radius: 8px; color: #fca5a5; background: rgba(239, 68, 68, 0.08); font-size: 12px; margin-bottom: 12px; }
+
+.det-table-wrap { border: 1px solid #1e2d3d; border-radius: 10px; overflow: auto; background: #070b12; }
+.det-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.det-table th {
+  text-align: left;
+  padding: 10px 12px;
+  color: #7f93a8;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid #1e2d3d;
+  background: #0a121b;
+  position: sticky;
+  top: 0;
+}
+.det-table td { padding: 9px 12px; border-bottom: 1px solid #101b27; vertical-align: top; }
+.det-table tbody tr { cursor: pointer; }
+.det-table tbody tr:hover { background: rgba(56, 189, 248, 0.05); }
+.det-table .mono { font-family: ui-monospace, monospace; font-size: 11px; color: #9fb3c8; }
+
+.det-level { display: inline-block; padding: 2px 6px; border-radius: 5px; font-family: ui-monospace, monospace; font-size: 10px; white-space: nowrap; }
+.det-level.crit { background: rgba(239, 68, 68, 0.18); color: #f87171; }
+.det-level.high { background: rgba(245, 158, 11, 0.18); color: #fbbf24; }
+.det-level.med { background: rgba(234, 179, 8, 0.15); color: #facc15; }
+.det-level.low { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+
+.det-raw-row td { background: #05080e; }
+.det-raw-row pre { margin: 0; max-height: 360px; overflow: auto; color: #a5b4c8; font-size: 11px; }
+
+.det-empty { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 50px; color: #64748b; font-size: 13px; }

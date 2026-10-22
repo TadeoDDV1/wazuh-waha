@@ -20,8 +20,12 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .deps import verify_api_key, verify_write
+from ..common.logging import log
+from ..common.network_bus import network_bus
 from ..common.telemetry import telemetry_store
 from ..common.traffic_stream import traffic_watcher
+from ..config import settings
+from ..infrastructure.wazuh_api import wazuh_api
 from ..domain.templates import (
     _translate_description_es,
     _format_level_es,
@@ -235,47 +239,11 @@ async def traffic_simulate(
 # Terminal de Red y Agentes Conectados (Captura de Tráfico y Telemetría de Red)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_DNS_CACHE: dict[str, tuple[str, float]] = {}
-_DNS_CACHE_TTL = 3600.0  # 1 hora
-
-
 async def _resolve_ip_hostname(ip: str) -> str:
-    """Resuelve el hostname o dominio de una IP con cache y timeout estricto."""
-    if not ip or ip in ("-", "0.0.0.0", "::", "127.0.0.1", "::1", "localhost"):
-        return ""
+    """Resuelve el hostname/dominio usando la caché DNS compartida."""
+    from ..common.dns_cache import resolve
 
-    now = time.time()
-    if ip in _DNS_CACHE:
-        val, exp = _DNS_CACHE[ip]
-        if exp > now:
-            return val
-
-    # Mapeo de subredes e IPs locales conocidas
-    if ip.startswith("192.168.122.142"):
-        val = "wazuh-manager.local"
-        _DNS_CACHE[ip] = (val, now + _DNS_CACHE_TTL)
-        return val
-    elif ip.startswith("192.168.122.1"):
-        val = "gateway-host.local"
-        _DNS_CACHE[ip] = (val, now + _DNS_CACHE_TTL)
-        return val
-    elif ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172.16."):
-        val = f"lan-{ip.replace('.', '-')}.local"
-        _DNS_CACHE[ip] = (val, now + _DNS_CACHE_TTL)
-        return val
-
-    loop = asyncio.get_running_loop()
-    try:
-        result = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: socket.getnameinfo((ip, 0), socket.NI_NAMEREQD)[0]),
-            timeout=0.35,
-        )
-        val = str(result).lower()
-    except Exception:
-        val = ""
-
-    _DNS_CACHE[ip] = (val, now + _DNS_CACHE_TTL)
-    return val
+    return await resolve(ip)
 
 
 # Buffer en memoria de sitios visitados recientemente (ventana de retención: 30 min)
@@ -973,6 +941,126 @@ _AGENT_TRAFFIC_CACHE: dict[str, tuple[dict[str, Any], float]] = {}
 _AGENT_TRAFFIC_CACHE_TTL = 6.0  # 6 segundos de caché para deduplicar llamadas del dashboard
 
 
+async def _read_agent_queue_db_remote(
+    aid: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Lee la DB de syscollector del manager por SSH (cuando el relay no es el manager)."""
+    from ..infrastructure.ssh_pool import ssh_pool, SSHError
+
+    if not ssh_pool.configured:
+        return [], [], []
+    db_path = f"/var/ossec/queue/db/{aid}.db"
+    try:
+        raw_ports = await ssh_pool.read_sqlite_json(
+            db_path,
+            "SELECT protocol, local_ip, local_port, remote_ip, remote_port, process, PID as pid, state, tx_queue, rx_queue FROM sys_ports",
+        )
+        raw_ifaces = await ssh_pool.read_sqlite_json(
+            db_path,
+            "SELECT name, adapter, type, state, mtu, mac, tx_packets, rx_packets, tx_bytes, rx_bytes, tx_errors, rx_errors, tx_dropped, rx_dropped FROM sys_netiface",
+        )
+        raw_procs = await ssh_pool.read_sqlite_json(
+            db_path,
+            "SELECT PID as pid, name, cmd, euser, state FROM sys_processes LIMIT 200",
+        )
+    except (SSHError, Exception) as exc:
+        log.debug("read_agent_queue_db_remote_failed aid=%s err=%s", aid, exc)
+        return [], [], []
+
+    ports = []
+    for r in raw_ports:
+        ports.append({
+            "protocol": (r.get("protocol") or "tcp").upper(),
+            "local": {"ip": r.get("local_ip"), "port": r.get("local_port")},
+            "remote": {"ip": r.get("remote_ip"), "port": r.get("remote_port")},
+            "local_ip": r.get("local_ip"),
+            "local_port": r.get("local_port"),
+            "remote_ip": r.get("remote_ip"),
+            "remote_port": r.get("remote_port"),
+            "process": r.get("process") or "sistema",
+            "pid": r.get("pid"),
+            "state": r.get("state") or "listening",
+            "tx": {"packets": r.get("tx_queue") or 0},
+            "rx": {"packets": r.get("rx_queue") or 0},
+            "_agent_id": aid,
+        })
+    ifaces = []
+    for r in raw_ifaces:
+        ifaces.append({
+            "name": r.get("name") or "eth0",
+            "state": str(r.get("state") or "down").lower(),
+            "mac": r.get("mac") or "-",
+            "mtu": r.get("mtu") or 1500,
+            "type": r.get("type") or "ethernet",
+            "tx": {
+                "bytes": r.get("tx_bytes") or 0,
+                "packets": r.get("tx_packets") or 0,
+                "errors": r.get("tx_errors") or 0,
+                "drops": r.get("tx_dropped") or 0,
+            },
+            "rx": {
+                "bytes": r.get("rx_bytes") or 0,
+                "packets": r.get("rx_packets") or 0,
+                "errors": r.get("rx_errors") or 0,
+                "drops": r.get("rx_dropped") or 0,
+            },
+            "tx_bytes": r.get("tx_bytes") or 0,
+            "rx_bytes": r.get("rx_bytes") or 0,
+            "_agent_id": aid,
+        })
+    procs = []
+    for r in raw_procs:
+        procs.append({
+            "pid": r.get("pid") or 0,
+            "name": r.get("name") or "proceso",
+            "cmd": r.get("cmd") or "",
+            "euser": r.get("euser") or "root",
+            "state": r.get("state") or "running",
+            "_agent_id": aid,
+        })
+    return ports, ifaces, procs
+
+
+async def _fetch_netaddr_map(agents: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Devuelve IPv4/IPv6 por agente desde syscollector netaddr (API) o DB remota."""
+    from ..infrastructure.ssh_pool import ssh_pool
+
+    out: dict[str, list[dict[str, Any]]] = {}
+    for ag in agents:
+        aid = str(ag.get("id", ""))
+        if not aid:
+            continue
+        rows: list[dict[str, Any]] = []
+        try:
+            data = await wazuh_api.affected_items(
+                f"/syscollector/{aid}/netaddr?limit=200", timeout=10
+            )
+            for r in data:
+                rows.append({
+                    "iface": r.get("iface") or r.get("interface") or "",
+                    "address": r.get("address") or "",
+                    "proto": r.get("proto") or "",
+                    "netmask": r.get("netmask") or "",
+                })
+        except Exception:
+            pass
+        if not rows and ssh_pool.configured:
+            try:
+                raw = await ssh_pool.read_sqlite_json(
+                    f"/var/ossec/queue/db/{aid}.db",
+                    "SELECT iface, proto, address, netmask FROM sys_netaddr",
+                )
+                rows = [
+                    {"iface": r.get("iface"), "address": r.get("address"),
+                     "proto": r.get("proto"), "netmask": r.get("netmask")}
+                    for r in raw
+                ]
+            except Exception:
+                pass
+        out[aid] = rows
+    return out
+
+
 def _read_agent_queue_db(aid: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Lee syscollector (sockets, interfaces y procesos) directamente de /var/ossec/queue/db/{aid}.db.
     Es de ultra-baja latencia (<2ms), en modo solo lectura (mode=ro) y evita completamente bloqueos
@@ -1103,14 +1191,17 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
     all_raw_ifaces: list[dict[str, Any]] = []
     all_raw_procs: list[dict[str, Any]] = []
 
-    # 1. Intentar primero lectura directa ultra-rápida de /var/ossec/queue/db/{aid}.db
+    # 1. DB local (si el relay corre en el manager) o DB remota por SSH.
     remaining_agents_to_api: list[dict[str, Any]] = []
+    netaddr_map = await _fetch_netaddr_map(target_agents)
     for ag in target_agents:
         aid = str(ag.get("id", "000"))
         ag_name = ag.get("name", "host")
         ag_ip = ag.get("ip", "127.0.0.1")
 
         p_list, i_list, pr_list = _read_agent_queue_db(aid)
+        if not (p_list or i_list or pr_list):
+            p_list, i_list, pr_list = await _read_agent_queue_db_remote(aid)
         if p_list or i_list or pr_list:
             for p in p_list:
                 p["_agent_name"] = ag_name
@@ -1118,6 +1209,7 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
             for i in i_list:
                 i["_agent_name"] = ag_name
                 i["_agent_ip"] = ag_ip
+                i["_netaddr"] = netaddr_map.get(aid, [])
             for pr in pr_list:
                 pr["_agent_name"] = ag_name
 
@@ -1167,23 +1259,6 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
                         all_raw_procs.extend(raw_pr)
         except Exception:
             pass
-
-    # Si se consulta el host local (agente 000) o "all", incorporar sockets en vivo del host
-    if agent_id_str in ("000", "all"):
-        local_live = await _get_local_host_sockets()
-        for s in local_live:
-            s["_agent_id"] = "000"
-            s["_agent_name"] = settings.wazuh_vm_ssh_user or "manager-host"
-            s["_agent_ip"] = mgr_host or "127.0.0.1"
-            # Evitar duplicados exactos si ya vinieron de Wazuh API
-            if not any(
-                p.get("protocol") == s["protocol"]
-                and (p.get("local", {}).get("port") == s["local_port"] or p.get("local_port") == s["local_port"])
-                and (p.get("remote", {}).get("port") == s["remote_port"] or p.get("remote_port") == s["remote_port"])
-                and (p.get("remote", {}).get("ip") == s["remote_ip"] or p.get("remote_ip") == s["remote_ip"])
-                for p in all_raw_ports
-            ):
-                all_raw_ports.append(s)
 
     # Normalizar sockets y clasificar sitios/destinos
     normalized_ports: list[dict[str, Any]] = []
@@ -1334,6 +1409,19 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
         tx_b = i.get("tx", {}).get("bytes", 0) if isinstance(i.get("tx"), dict) else 0
         total_rx_b += rx_b
         total_tx_b += tx_b
+        iface_name = i.get("name") or "eth0"
+        netaddrs = i.get("_netaddr") or []
+        ipv4_addrs = [
+            a.get("address") for a in netaddrs
+            if str(a.get("proto", "")).lower() == "ipv4" and a.get("address")
+            and (not a.get("iface") or a.get("iface") == iface_name)
+        ]
+        ipv6_addrs = [
+            a.get("address") for a in netaddrs
+            if str(a.get("proto", "")).lower() == "ipv6" and a.get("address")
+            and (not a.get("iface") or a.get("iface") == iface_name)
+        ]
+        legacy_ipv4 = i.get("ipv4", {}).get("address", "") if isinstance(i.get("ipv4"), dict) else ""
         normalized_ifaces.append({
             "name": i.get("name") or "eth0",
             "state": str(i.get("state") or "down").lower(),
@@ -1348,7 +1436,10 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
             "rx_errors": i.get("rx", {}).get("errors", 0) if isinstance(i.get("rx"), dict) else 0,
             "tx_drops": i.get("tx", {}).get("drops", 0) if isinstance(i.get("tx"), dict) else 0,
             "rx_drops": i.get("rx", {}).get("drops", 0) if isinstance(i.get("rx"), dict) else 0,
-            "ipv4": i.get("ipv4", {}).get("address", "") if isinstance(i.get("ipv4"), dict) else "",
+            "ipv4": ipv4_addrs[0] if ipv4_addrs else legacy_ipv4,
+            "ipv4_addresses": ipv4_addrs,
+            "ipv6": ipv6_addrs[0] if ipv6_addrs else "",
+            "ipv6_addresses": ipv6_addrs,
             "agent_id": i.get("_agent_id", "000"),
             "agent_name": i.get("_agent_name", "host"),
         })
@@ -1857,7 +1948,7 @@ async def network_stream(
     request: Request,
     _: None = Depends(verify_api_key),
 ) -> StreamingResponse:
-    """Stream SSE en tiempo real de tráfico de red, conexiones activas, sitios visitados y telemetría."""
+    """Stream SSE con conexiones de red reales y alertas Wazuh (sin datos sintéticos)."""
     global _network_sse_count
     if _network_sse_count >= _NETWORK_SSE_MAX:
         return JSONResponse(
@@ -1866,163 +1957,78 @@ async def network_stream(
         )
     _network_sse_count += 1
 
-    queue = traffic_watcher.subscribe()
+    queue = network_bus.subscribe()
+    traffic_q = traffic_watcher.subscribe()
+    step = 0
 
     async def network_event_generator():
+        nonlocal step
         global _network_sse_count
-        step = 0
         try:
-            yield f"data: {json.dumps({'type': 'connected', 'msg': 'Terminal de Red, Sitios & Agentes Conectada', 'ts': time.time()})}\n\n"
+            yield f"data: {json.dumps({'type':'connected','msg':'Terminal de Red real conectada','ts':time.time()})}\n\n"
 
-            # Si la caché está vacía, refrescar de inmediato
-            if not _SITES_HISTORY_CACHE:
-                try:
-                    await _fetch_agent_traffic_details("all")
-                except Exception:
-                    pass
-
-            # Emitir de inmediato sitios conocidos al conectar
-            init_now = time.time()
-            for s_init in list(_SITES_HISTORY_CACHE.values())[:15]:
-                site_init_evt = {
-                    "type": "site_activity",
-                    "subtype": "web_connection",
-                    "id": f"site-init-{s_init['agent_id']}-{int(init_now * 1000)}-{s_init.get('remote_ip')}",
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                    "agent_id": s_init["agent_id"],
-                    "agent_name": s_init["agent_name"],
-                    "agent_ip": s_init.get("agent_ip", ""),
-                    "src_ip": s_init.get("agent_ip", "127.0.0.1"),
-                    "dst_ip": s_init["remote_ip"],
-                    "dst_port": str(s_init["remote_port"]),
-                    "remote_ip": s_init["remote_ip"],
-                    "remote_port": s_init["remote_port"],
-                    "site_name": s_init["site_name"],
-                    "domain": s_init["domain"],
-                    "protocol": s_init["protocol"],
-                    "process": s_init["process"],
-                    "category": s_init["category"],
-                    "category_label": s_init["category_label"],
-                    "is_web": s_init["is_web"],
-                    "status": "ACTIVA" if ("estab" in s_init["state"].lower() or "activa" in s_init.get("state_label", "").lower()) else "REGISTRADA",
-                    "description": f"[{s_init['process']}] Destino: {s_init['site_name']} ({s_init['domain']}:{s_init['remote_port']})",
-                }
-                yield f"data: {json.dumps({'type': 'network_event', 'data': site_init_evt})}\n\n"
+            snap = network_bus.snapshot()
+            for conn in snap.get("connections", [])[:250]:
+                evt = dict(conn)
+                evt["type"] = "network_event"
+                evt["subtype"] = "connection"
+                yield f"data: {json.dumps({'type':'network_event','data':evt}, default=str)}\n\n"
+            yield f"data: {json.dumps({'type':'network_stats','data':snap.get('stats',{}),'ts':time.time()})}\n\n"
 
             while True:
                 if await request.is_disconnected():
                     break
-
                 step += 1
-                now = time.time()
 
-                # 1. Eventos de alerta y tráfico del pipeline de seguridad
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=1.8)
-                    # El evento ya viene normalizado desde traffic_watcher
-                    rule_id = str(event.get("rule_id", "0"))
-                    level = int(event.get("level", 0))
-                    agent_id = str(event.get("agent_id", "000"))
-                    agent_name = str(event.get("agent_name", "host"))
-                    src_ip = event.get("src_ip") or "127.0.0.1"
-                    src_port = str(event.get("src_port") or "N/D")
-                    proc = event.get("command") or event.get("src_user") or "wazuh-agentd"
-                    desc_raw = event.get("description", "Tráfico de red capturado")
-                    desc_es = _translate_description_es(desc_raw)
-
-                    dst_ip = settings.wazuh_server_ip or "127.0.0.1"
-                    dst_port = "1514" if level <= 3 else "443"
-
-                    net_evt = {
-                        "type": "network_traffic",
-                        "subtype": "security_packet",
-                        "id": f"net-{int(now * 1000)}-{step}",
-                        "timestamp": event.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                        "agent_id": agent_id,
-                        "agent_name": agent_name,
-                        "src_ip": src_ip,
-                        "src_port": src_port,
-                        "dst_ip": dst_ip,
-                        "dst_port": dst_port,
-                        "protocol": "TCP",
-                        "rule_id": rule_id,
-                        "level": level,
-                        "description": f"[{proc}] {desc_es}",
-                        "status": "DETECTED" if level >= 5 else "TRAFFIC",
-                        "bytes": len(json.dumps(event)),
-                        "process": proc,
-                    }
-                    yield f"data: {json.dumps({'type': 'network_event', 'data': net_evt})}\n\n"
+                    conn = await asyncio.wait_for(queue.get(), timeout=1.4)
+                    evt = dict(conn)
+                    evt["type"] = "network_event"
+                    evt["subtype"] = "connection"
+                    yield f"data: {json.dumps({'type':'network_event','data':evt}, default=str)}\n\n"
                 except asyncio.TimeoutError:
-                    yield f"data: {json.dumps({'type': 'heartbeat', 'ts': now})}\n\n"
+                    pass
 
-                # 2. Periódicamente emitir actividad de sitios y conexiones de los agentes desde caché
-                if step % 2 == 0:
+                # Alertas/eventos Wazuh reales (sin inventar destino).
+                drained = 0
+                while drained < 20:
                     try:
-                        active_sites = list(_SITES_HISTORY_CACHE.values())
-                        for site in active_sites[:15]:
-                            site_evt = {
-                                "type": "site_activity",
-                                "subtype": "web_connection",
-                                "id": f"site-{site['agent_id']}-{int(now * 1000)}-{step}",
-                                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                                "agent_id": site["agent_id"],
-                                "agent_name": site["agent_name"],
-                                "agent_ip": site.get("agent_ip", ""),
-                                "src_ip": site.get("agent_ip", "127.0.0.1"),
-                                "dst_ip": site["remote_ip"],
-                                "dst_port": str(site["remote_port"]),
-                                "remote_ip": site["remote_ip"],
-                                "remote_port": site["remote_port"],
-                                "site_name": site["site_name"],
-                                "domain": site["domain"],
-                                "protocol": site["protocol"],
-                                "process": site["process"],
-                                "category": site["category"],
-                                "category_label": site["category_label"],
-                                "is_web": site["is_web"],
-                                "status": "ACTIVA" if ("estab" in site["state"].lower() or "activa" in site.get("state_label", "").lower()) else "REGISTRADA",
-                                "description": f"[{site['process']}] Destino: {site['site_name']} ({site['domain']}:{site['remote_port']})",
-                            }
-                            yield f"data: {json.dumps({'type': 'network_event', 'data': site_evt})}\n\n"
-                    except Exception:
-                        pass
+                        ev = traffic_q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    drained += 1
+                    alert_evt = {
+                        "type": "network_traffic",
+                        "subtype": "wazuh_alert",
+                        "id": ev.get("id") or f"alert-{int(time.time()*1000)}-{drained}",
+                        "timestamp": ev.get("timestamp"),
+                        "agent_id": ev.get("agent_id", "000"),
+                        "agent_name": ev.get("agent_name", "host"),
+                        "src_ip": ev.get("src_ip") or "",
+                        "src_port": ev.get("src_port") or "",
+                        "dst_ip": "",
+                        "dst_port": "",
+                        "protocol": "",
+                        "process": ev.get("command") or ev.get("process") or "",
+                        "rule_id": ev.get("rule_id", "0"),
+                        "level": ev.get("level", 0),
+                        "description": ev.get("description", ""),
+                        "status": "DETECTED" if int(ev.get("level", 0)) >= 5 else "EVENT",
+                        "full_log": ev.get("full_log", ""),
+                    }
+                    yield f"data: {json.dumps({'type':'network_event','data':alert_evt}, default=str)}\n\n"
 
-                # Refresco asíncrono no bloqueante del inventario de red cada 4 pasos
-                if step % 4 == 0:
-                    asyncio.create_task(_fetch_agent_traffic_details("all"))
-
-                # 3. Pulso de heartbeat de agentes
                 if step % 3 == 0:
-                    agents = await _fetch_network_agents_data()
-                    for ag in agents:
-                        ag_id = ag.get("id", "000")
-                        pulse_evt = {
-                            "type": "agent_heartbeat",
-                            "subtype": "keepalive",
-                            "id": f"hb-{ag_id}-{int(now * 1000)}",
-                            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                            "agent_id": ag_id,
-                            "agent_name": ag.get("name", "agente"),
-                            "agent_ip": ag.get("ip", "192.168.122.142"),
-                            "status": ag.get("status", "active"),
-                            "os": ag.get("os", {}).get("name", "Linux") if isinstance(ag.get("os"), dict) else "Linux",
-                            "version": ag.get("version", "Wazuh v4.14.7"),
-                            "latency_ms": round(0.5 + (hash(ag_id + str(step)) % 25) / 10.0, 1),
-                            "rx_packets": 120 + (step * 3) % 500,
-                            "tx_packets": 115 + (step * 3) % 490,
-                            "connection_socket": f"{ag.get('ip', '127.0.0.1')} -> 192.168.122.142:1514 (TCP: ESTABLISHED)",
-                            "process": "wazuh-agentd",
-                        }
-                        yield f"data: {json.dumps({'type': 'agent_heartbeat', 'data': pulse_evt})}\n\n"
-
-                yield f"data: {json.dumps({'type': 'stream_tick', 'ts': now})}\n\n"
+                    snap = network_bus.snapshot()
+                    yield f"data: {json.dumps({'type':'network_stats','data':snap.get('stats',{}),'ts':time.time()})}\n\n"
+                yield f"data: {json.dumps({'type':'stream_tick','ts':time.time()})}\n\n"
 
         except asyncio.CancelledError:
             pass
         finally:
             _network_sse_count -= 1
-            traffic_watcher.unsubscribe(queue)
+            network_bus.unsubscribe(queue)
+            traffic_watcher.unsubscribe(traffic_q)
 
     return StreamingResponse(
         network_event_generator(),
@@ -2039,20 +2045,57 @@ async def network_stream(
 async def network_probe(
     _: None = Depends(verify_write),
 ) -> JSONResponse:
-    """Envía un paquete sonda de prueba a la red y a los agentes."""
+    """Sonda real por TCP (SYN/connect) a los agentes y puertos del stack."""
     agents = await _fetch_network_agents_data()
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    mgr_host = settings.wazuh_manager_host or settings.wazuh_server_ip
+
+    async def probe(host: str, port: int, timeout: float = 1.5) -> tuple[bool, float]:
+        t0 = time.perf_counter()
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=timeout
+            )
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return True, round((time.perf_counter() - t0) * 1000, 2)
+        except Exception:
+            return False, round((time.perf_counter() - t0) * 1000, 2)
+
     probe_results = []
     for ag in agents:
-        ag_id = ag.get("id", "000")
+        ag_id = str(ag.get("id", "000"))
+        ag_ip = ag.get("ip") or ("127.0.0.1" if ag_id == "000" else "")
+        if not ag_ip:
+            continue
+        # Los agentes no escuchan 1514; se sondea SSH (22) para medir alcance real.
+        ok, rtt = await probe(ag_ip, 22)
         probe_results.append({
             "agent_id": ag_id,
             "agent_name": ag.get("name", "host"),
-            "ip": ag.get("ip", "127.0.0.1"),
-            "status": ag.get("status", "active"),
-            "rtt_ms": round(0.4 + (hash(ag_id) % 15) / 10.0, 2),
+            "ip": ag_ip,
+            "status": ag.get("status", "unknown"),
+            "port": 22,
+            "rtt_ms": rtt if ok else None,
             "timestamp": now,
-            "success": True,
+            "success": ok,
+            "detail": "TCP 22 accesible" if ok else "TCP 22 no responde / filtrado",
+        })
+
+    services = []
+    for port in (1514, 1515, settings.wazuh_manager_api_port, settings.relay_port):
+        ok, rtt = await probe(mgr_host, port)
+        services.append({
+            "service": {1514: "wazuh-remoted", 1515: "wazuh-authd",
+                        settings.wazuh_manager_api_port: "wazuh-api",
+                        settings.relay_port: "relay"}.get(port, str(port)),
+            "host": mgr_host,
+            "port": port,
+            "rtt_ms": rtt if ok else None,
+            "success": ok,
         })
 
     return JSONResponse(
@@ -2060,6 +2103,7 @@ async def network_probe(
             "ok": True,
             "probed_count": len(probe_results),
             "results": probe_results,
+            "services": services,
             "timestamp": time.time(),
         }
     )

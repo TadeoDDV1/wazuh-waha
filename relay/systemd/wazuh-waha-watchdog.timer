@@ -1,6 +1,6 @@
 [Unit]
 Description=Cada 5 min chequea sesion WAHA y la recupera si esta caida
-Documentation=file:///home/tadeo/Desktop/wazuh-waha/README.md
+Documentation=file:///opt/wazuh-waha/README.md
 
 [Timer]
 OnBootSec=2min

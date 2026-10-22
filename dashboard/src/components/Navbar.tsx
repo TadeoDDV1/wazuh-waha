@@ -236,6 +236,60 @@ export const Navbar: React.FC = () => {
 
             <button
               type="button"
+              className={`nav-tab-btn ${activeView === 'detections' ? 'active' : ''}`}
+              onClick={() => setActiveView('detections')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: activeView === 'detections' ? 700 : 500,
+                border: activeView === 'detections' ? '1px solid #f59e0b' : '1px solid transparent',
+                background: activeView === 'detections'
+                  ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.3), rgba(234, 88, 12, 0.25))'
+                  : 'transparent',
+                color: activeView === 'detections' ? '#fbbf24' : 'var(--text-secondary)',
+                boxShadow: activeView === 'detections' ? '0 0 16px rgba(245, 158, 11, 0.35)' : 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              title="Explorar detecciones reales de Wazuh por módulo y agente"
+            >
+              <ShieldAlert size={14} style={{ color: activeView === 'detections' ? '#fbbf24' : 'currentColor' }} />
+              <span>Detecciones Wazuh</span>
+            </button>
+
+            <button
+              type="button"
+              className={`nav-tab-btn ${activeView === 'console' ? 'active' : ''}`}
+              onClick={() => setActiveView('console')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: activeView === 'console' ? 700 : 500,
+                border: activeView === 'console' ? '1px solid #22d3ee' : '1px solid transparent',
+                background: activeView === 'console'
+                  ? 'linear-gradient(135deg, rgba(34, 211, 238, 0.25), rgba(14, 116, 144, 0.35))'
+                  : 'transparent',
+                color: activeView === 'console' ? '#67e8f9' : 'var(--text-secondary)',
+                boxShadow: activeView === 'console' ? '0 0 16px rgba(34, 211, 238, 0.35)' : 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              title="Consola web interactiva (shell local / SSH al manager)"
+            >
+              <TerminalSquare size={14} style={{ color: activeView === 'console' ? '#67e8f9' : 'currentColor' }} />
+              <span>Consola Web / SSH</span>
+            </button>
+
+            <button
+              type="button"
               className={`nav-tab-btn ${activeView === 'reports' ? 'active' : ''}`}
               onClick={() => setActiveView('reports')}
               style={{

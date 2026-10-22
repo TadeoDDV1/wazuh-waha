@@ -27,7 +27,7 @@
 
 set +e
 
-PROJECT_ROOT="${PROJECT_ROOT:-/home/tadeo/Desktop/wazuh-waha}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ENV_FILE="${ENV_FILE:-/etc/wazuh-waha/relay.env}"
 AGENT_CONF="${AGENT_CONF:-/var/ossec/etc/ossec.conf}"
 STATE_FILE="/var/lib/wazuh-waha/manager_ip_state"

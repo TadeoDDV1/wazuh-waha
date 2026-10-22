@@ -115,6 +115,29 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     telegram_min_level: int = 8
 
+    # --- Red / telemetría real ---
+    network_poll_interval_sec: float = 3.0
+    network_dns_cache_ttl: int = 3600
+    network_ssh_targets: str = "manager"  # manager | manager,agents
+    network_enable_packet_capture: bool = False
+    network_packet_capture_filter: str = "ip"
+    network_packet_capture_max_events: int = 50
+    network_max_connections: int = 1500
+
+    # --- Consola web / SSH ---
+    console_enabled: bool = False
+    console_targets: str = "local,manager"
+    console_max_sessions: int = 3
+    console_idle_timeout_sec: int = 900
+    console_absolute_timeout_sec: int = 3600
+    console_record_transcript: bool = False
+    console_allow_local_shell: bool = True
+    console_agent_targets: str = ""  # ej: 001=tadeou7@192.168.122.1,002=...
+
+    # --- Control de configuración del manager (ossec.conf) ---
+    # Por seguridad, deshabilitado: editar ossec.conf requiere sudo interactivo.
+    wazuh_manager_config_write_enabled: bool = False
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
@@ -143,6 +166,24 @@ class Settings(BaseSettings):
     @property
     def trusted_proxies_list(self) -> list[str]:
         return [p.strip() for p in self.trusted_proxies.split(",") if p.strip()]
+
+    @property
+    def console_targets_list(self) -> list[str]:
+        return [t.strip() for t in self.console_targets.split(",") if t.strip()]
+
+    @property
+    def console_agent_targets_map(self) -> dict[str, str]:
+        """Mapea agent_id -> user@host para consola SSH a agentes."""
+        result: dict[str, str] = {}
+        for item in self.console_agent_targets.split(","):
+            item = item.strip()
+            if not item or "=" not in item:
+                continue
+            aid, dest = item.split("=", 1)
+            aid, dest = aid.strip(), dest.strip()
+            if aid and dest:
+                result[aid] = dest
+        return result
 
 
 settings = Settings()

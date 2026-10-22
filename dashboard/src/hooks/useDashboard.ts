@@ -19,7 +19,7 @@ export const useDashboard = () => {
   const [showRecentAlerts, setShowRecentAlerts] = useState<boolean>(false);
 
   // Vistas principales: Dashboard SOC, Terminal de Tráfico (Alertas), Terminal de Red & Agentes, Reportes Forenses, Despliegue de Agentes
-  type ActiveView = 'dashboard' | 'traffic' | 'network_agents' | 'reports' | 'deploy';
+  type ActiveView = 'dashboard' | 'traffic' | 'network_agents' | 'reports' | 'deploy' | 'detections' | 'console';
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
 
   const showTrafficTerminal = activeView === 'traffic';

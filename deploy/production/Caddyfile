@@ -1,0 +1,49 @@
+# =============================================================================
+# Caddy — TLS automático y reverse proxy para wazuh-waha
+#
+# __DOMAIN__ se reemplaza por scripts/install-production.sh.
+# Si no hay dominio, se usa ":80" y se recomienda acceso por túnel SSH/VPN.
+# =============================================================================
+
+__DOMAIN__ {
+    encode gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+
+    # WebSocket de consola (Caddy soporta Upgrade automáticamente).
+    @console path /api/v1/console/*
+    handle @console {
+        reverse_proxy 127.0.0.1:8765
+    }
+
+    # API, telemetría SSE y debug del relay.
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8765
+    }
+    handle /debug/* {
+        reverse_proxy 127.0.0.1:8765
+    }
+    handle /health {
+        reverse_proxy 127.0.0.1:8765
+    }
+
+    # Dashboard React servido por nginx en el contenedor.
+    handle {
+        reverse_proxy 127.0.0.1:8001
+    }
+
+    log {
+        output file /var/log/caddy/wazuh-waha-access.log {
+            roll_size 20mb
+            roll_keep 5
+        }
+        format json
+    }
+}

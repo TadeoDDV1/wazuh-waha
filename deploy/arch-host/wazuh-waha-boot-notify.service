@@ -15,7 +15,7 @@
 
 [Unit]
 Description=wazuh-waha: heartbeat de boot (email + WhatsApp)
-Documentation=file:///home/tadeo/Desktop/wazuh-waha/docs/boot-notify.md
+Documentation=file:///opt/wazuh-waha/docs/boot-notify.md
 After=network-online.target docker.service wazuh-waha.service
 Wants=docker.service wazuh-waha.service
 
@@ -24,7 +24,7 @@ Type=oneshot
 EnvironmentFile=/etc/wazuh-waha/relay.env
 
 # Ejecutar bajo el python del venv del relay para que tenga las deps (httpx, fastapi, etc)
-ExecStart=/home/tadeo/Desktop/wazuh-waha/relay/.venv/bin/python /home/tadeo/Desktop/wazuh-waha/scripts/boot-notify.py
+ExecStart=/opt/wazuh-waha/relay/.venv/bin/python /opt/wazuh-waha/scripts/boot-notify.py
 
 # Timeouts: el SMTP puede tardar (TLS handshake + auth). 2 min alcanza.
 TimeoutStartSec=120

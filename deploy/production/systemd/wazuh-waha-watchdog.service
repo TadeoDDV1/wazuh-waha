@@ -1,0 +1,15 @@
+[Unit]
+Description=wazuh-waha watchdog (chequea sesion WAHA y recupera si cayo)
+Documentation=file://__APP_DIR__/README.md
+After=network-online.target docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=__APP_USER__
+Group=__APP_USER__
+EnvironmentFile=/etc/wazuh-waha/relay.env
+ExecStart=__APP_DIR__/scripts/waha-watchdog.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=120

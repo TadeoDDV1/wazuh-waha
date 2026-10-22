@@ -1,0 +1,33 @@
+[Unit]
+Description=wazuh-waha (Wazuh -> WAHA bridge)
+Documentation=file://__APP_DIR__/README.md
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=__APP_DIR__/relay
+EnvironmentFile=/etc/wazuh-waha/relay.env
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=__APP_DIR__/relay/.venv/bin/uvicorn wazuh_waha.main:app --host 127.0.0.1 --port __RELAY_PORT__ --workers ${RELAY_WORKERS}
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+# Endurecimiento
+UMask=0027
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/var/log/wazuh-waha /var/lib/wazuh-waha /var/backups/wazuh-waha /etc/wazuh-waha
+# Necesario para que el dashboard pueda reiniciar servicios vía sudoers.
+NoNewPrivileges=false
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wazuh-waha
+
+[Install]
+WantedBy=multi-user.target

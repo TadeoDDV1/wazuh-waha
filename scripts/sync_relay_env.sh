@@ -62,87 +62,18 @@ rm -f "$TMP_NEW"
 } > "$TMP_NEW"
 
 # Claves a sincronizar, en orden estable para diffs predecibles
-KEYS=(
-  WAZUH_SERVER_IP
-  WAZUH_SERVER_IP_FALLBACK
-  AUTO_RECONCILE
-  WAZUH_MANAGER_API_USER
-  WAZUH_MANAGER_API_PASS
-  WAZUH_MANAGER_API_PORT
-  WAZUH_MANAGER_API_VERIFY_TLS
-  ADMIN_PHONE
-  WAHA_HOST
-  WAHA_API_KEY
-  WAHA_SESSION
-  WAHA_LOG_LEVEL
-  WAHA_HOOK_URL
-  WAHA_RECOVERY_COOLDOWN_SEC
-  WAHA_RECOVERY_MAX_WAIT_SEC
-  WAHA_WATCHDOG_INTERVAL_SEC
-  RELAY_PORT
-  RELAY_BIND
-  RELAY_API_KEY
-  RELAY_READONLY_API_KEY
-  RELAY_DEDUP_TTL
-  RELAY_MIN_LEVEL_UNKNOWN
-  RELAY_LOG_DIR
-  RELAY_LIB_DIR
-  RELAY_WORKERS
-  RELAY_LIFESPAN_TIMEOUT
-  SESSION_TTL_HOURS
-  SESSION_COOKIE_SECURE
-  MAX_BODY_BYTES
-  TRUSTED_PROXIES
-  ENABLE_DOCS
-  TRAFFIC_SOURCE
-  TRAFFIC_POLL_INTERVAL_SEC
-  TRAFFIC_JOURNAL_PATH
-  WAZUH_VM_SSH_USER
-  WAZUH_VM_SSH_PORT
-  WAZUH_VM_SSH_KEY_PATH
-  WAZUH_VM_SSH_STRICT_HOST_KEY
-  ALLOWED_ORIGINS
-  EMAIL_PROVIDER
-  SMTP_HOST
-  SMTP_PORT
-  SMTP_USER
-  SMTP_PASS
-  SMTP_FROM
-  SMTP_TLS
-  ADMIN_EMAIL
-  HYVOR_BASE_URL
-  HYVOR_API_KEY
-  HYVOR_FROM
-  TELEGRAM_ENABLED
-  TELEGRAM_BOT_TOKEN
-  TELEGRAM_CHAT_ID
-  TELEGRAM_MIN_LEVEL
-  WHATSAPP_ENABLED
-  EMAIL_ALERTS_ENABLED
-)
-
-# Parsear .env (ignorar comentarios / líneas vacías)
-declare -A VALUES
+# Sincronizar TODAS las claves del .env (evita olvidar variables nuevas).
+# Se ignoran comentarios y líneas vacías. El orden es el del archivo.
 while IFS='=' read -r key value; do
-  # Saltar comentarios / blanks
   [[ -z "$key" || "$key" =~ ^# ]] && continue
-  # Trim
+  [[ "$key" =~ ^[A-Z0-9_]+$ ]] || continue
   key="${key%% }"; key="${key## }"
   value="${value## }"; value="${value%% }"
-  VALUES["$key"]="$value"
-done < <(grep -v '^[[:space:]]*#' "$SOURCE_ENV" | grep -v '^[[:space:]]*$')
-
-# Escribir al archivo temporal. Quote SIEMPRE los valores con comillas dobles
-# para sobrevivir espacios, caracteres especiales y Gmail App Passwords.
-for k in "${KEYS[@]}"; do
-  v="${VALUES[$k]:-}"
-  if [ -n "$v" ]; then
-    # Escapar backslash y doble comilla dentro del valor
-    escaped="${v//\\/\\\\}"
-    escaped="${escaped//\"/\\\"}"
-    echo "${k}=\"${escaped}\""
-  fi
-done >> "$TMP_NEW"
+  [ -z "$value" ] && continue
+  escaped="${value//\\/\\\\}"
+  escaped="${escaped//\"/\\\"}"
+  echo "${key}=\"${escaped}\""
+done < <(grep -v '^[[:space:]]*#' "$SOURCE_ENV" | grep -v '^[[:space:]]*$') >> "$TMP_NEW"
 
 echo ""
 echo "=== Preview (sin secrets): ==="

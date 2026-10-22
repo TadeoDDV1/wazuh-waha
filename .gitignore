@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 deploy/**/relay.env
 deploy/**/*.env.local
 
@@ -59,3 +60,7 @@ node_modules/
 # Cache local de Wazuh (no es parte del repo)
 .sixth/
 *.deb
+
+# Producción
+releases/
+*.tar.gz

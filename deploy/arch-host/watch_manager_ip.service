@@ -1,13 +1,13 @@
 [Unit]
 Description=wazuh-waha: detectar drift de IP del manager Wazuh
-Documentation=file:///home/tadeo/Desktop/wazuh-waha/README.md
+Documentation=file:///opt/wazuh-waha/README.md
 After=network-online.target wazuh-waha.service
 Wants=wazuh-waha.service
 
 [Service]
 Type=oneshot
 EnvironmentFile=/etc/wazuh-waha/relay.env
-ExecStart=/home/tadeo/Desktop/wazuh-waha/scripts/watch_manager_ip.sh
+ExecStart=/opt/wazuh-waha/scripts/watch_manager_ip.sh
 StandardOutput=journal
 StandardError=journal
 TimeoutStartSec=60

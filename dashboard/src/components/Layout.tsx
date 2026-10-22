@@ -14,6 +14,8 @@ import './Layout.css';
 const LiveTrafficTerminal = React.lazy(() => import('./LiveTrafficTerminal'));
 const NetworkAgentsTerminal = React.lazy(() => import('./NetworkAgentsTerminal'));
 const ReportsCard = React.lazy(() => import('./ReportsCard'));
+const DetectionsView = React.lazy(() => import('./DetectionsView'));
+const ConsoleTerminal = React.lazy(() => import('./ConsoleTerminal'));
 const SettingsSection = React.lazy(() => import('./SettingsSection'));
 const RecentAlertsDrawer = React.lazy(() => import('./RecentAlertsDrawer'));
 
@@ -51,6 +53,10 @@ const LayoutContent: React.FC = () => {
               onClose={() => setShowTrafficTerminal(false)}
               asPanel
             />
+          ) : activeView === 'detections' ? (
+            <DetectionsView />
+          ) : activeView === 'console' ? (
+            <ConsoleTerminal />
           ) : activeView === 'reports' ? (
             <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px 24px 50px' }}>
               <div style={{ marginBottom: '20px' }}>

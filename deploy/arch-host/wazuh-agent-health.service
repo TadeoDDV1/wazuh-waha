@@ -11,14 +11,14 @@
 
 [Unit]
 Description=wazuh-waha: chequea que wazuh-agent este conectado al manager
-Documentation=file:///home/tadeo/Desktop/wazuh-waha/docs/agent-restart-notifications.md
+Documentation=file:///opt/wazuh-waha/docs/agent-restart-notifications.md
 After=network-online.target
 
 [Service]
 Type=oneshot
 EnvironmentFile=/etc/wazuh-waha/relay.env
 
-ExecStart=/home/tadeo/Desktop/wazuh-waha/scripts/check-agent-connected.sh
+ExecStart=/opt/wazuh-waha/scripts/check-agent-connected.sh
 
 # 30s alcanzan: ss + (si aplica) waha-notify.py con SMTP TLS.
 TimeoutStartSec=30

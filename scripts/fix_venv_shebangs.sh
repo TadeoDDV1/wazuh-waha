@@ -11,12 +11,12 @@
 # de wazuh-integration/ a relay/, o se clono en otro lado).
 #
 # Antes (roto):
-#   #!/home/tadeo/Desktop/wazuh-waha/wazuh-waha/.venv/bin/python3.11
+#   #!/opt/wazuh-waha/wazuh-waha/.venv/bin/python3.11
 #                                                       ^^^^^^^^^^
 #                                                       path duplicado
 #
 # Despues (correcto):
-#   #!/home/tadeo/Desktop/wazuh-waha/relay/.venv/bin/python3.11
+#   #!/opt/wazuh-waha/relay/.venv/bin/python3.11
 #
 # Uso:
 #   bash scripts/fix_venv_shebangs.sh                # dry-run (muestra)

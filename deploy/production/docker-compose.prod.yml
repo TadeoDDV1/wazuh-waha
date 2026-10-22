@@ -1,0 +1,66 @@
+# =============================================================================
+# wazuh-waha — Docker Compose de producción
+#
+# Se ejecuta desde la raíz del proyecto:
+#   docker compose -f deploy/production/docker-compose.prod.yml up -d --build
+#
+# Expone WAHA y Dashboard SOLO en localhost. El TLS y el acceso público los
+# maneja Caddy (o el reverse proxy que elijas) en el host.
+# =============================================================================
+
+services:
+  waha:
+    image: ${WAHA_IMAGE:-devlikeapro/waha:latest}
+    container_name: wazuh-waha
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WAHA_PUBLIC_PORT:-3001}:3000"
+    env_file:
+      - ../../.env
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: ${WHATSAPP_DEFAULT_ENGINE:-WEBJS}
+      WHATSAPP_HOOK_URL: ${WAHA_HOOK_URL:-}
+      NODE_OPTIONS: ${WAHA_NODE_OPTIONS:---max-old-space-size=2048}
+      PUPPETEER_ARGS: ${WAHA_PUPPETEER_ARGS:---no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu}
+      LOG_LEVEL: ${WAHA_LOG_LEVEL:-info}
+      WAHA_PRINT_QR: "true"
+    volumes:
+      - waha_sessions:/app/.sessions
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "--header=X-Api-Key: ${WAHA_API_KEY}", "http://localhost:3000/api/server/version"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    mem_limit: ${WAHA_MEM_LIMIT:-3g}
+    cpus: "${WAHA_CPUS:-2.0}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  dashboard:
+    build:
+      context: ../../dashboard
+    container_name: wazuh-waha-dashboard
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DASHBOARD_PUBLIC_PORT:-8001}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/healthz >/dev/null 2>&1 || wget -qO- http://localhost/ >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  waha_sessions:
+    name: wazuh_waha_sessions

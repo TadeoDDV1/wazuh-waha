@@ -15,7 +15,7 @@
 # mediante un wrapper (waha-notify.py en este mismo directorio).
 
 set +e
-PROJECT_ROOT="${PROJECT_ROOT:-/home/tadeo/Desktop/wazuh-waha}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ENV_FILE="${ENV_FILE:-/etc/wazuh-waha/relay.env}"
 
 if [ -f "$ENV_FILE" ]; then

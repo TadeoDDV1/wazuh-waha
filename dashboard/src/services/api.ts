@@ -159,8 +159,15 @@ export const dashboardService = {
     return response.data;
   },
 
-  applyWazuhModulesConfig: async (scope: string, modules: Record<string, boolean>): Promise<any> => {
-    const response = await api.post('/wazuh/modules/apply', { scope, modules });
+  applyWazuhModulesConfig: async (
+    scopeOrGroup: string,
+    scopeOrModules: any,
+    modulesMaybe?: Record<string, boolean>,
+  ): Promise<any> => {
+    const group = modulesMaybe ? scopeOrGroup : 'default';
+    const scope = modulesMaybe ? scopeOrModules : scopeOrGroup;
+    const modules = modulesMaybe ? modulesMaybe : scopeOrModules;
+    const response = await api.post('/wazuh/modules/apply', { group, scope, modules });
     return response.data;
   },
 
@@ -257,9 +264,70 @@ export const dashboardService = {
     const response = await api.post(`/reports/audit/${encodeURIComponent(agentId)}`);
     return response.data;
   },
+
+  getWazuhControlOverview: async (): Promise<any> => {
+    const response = await axios.get('/api/v1/wazuh/overview', { withCredentials: true });
+    return response.data;
+  },
+
+  getWazuhControlModules: async (): Promise<any> => {
+    const response = await axios.get('/api/v1/wazuh/modules', { withCredentials: true });
+    return response.data;
+  },
+
+  toggleWazuhControlModule: async (
+    group: string,
+    scope: string,
+    module: string,
+    enabled: boolean,
+  ): Promise<any> => {
+    const response = await axios.post('/api/v1/wazuh/modules/toggle', {
+      group, scope, module, enabled,
+    }, { withCredentials: true });
+    return response.data;
+  },
+
+  getWazuhManagerConfig: async (): Promise<any> => {
+    const response = await axios.get('/api/v1/wazuh/manager/config', { withCredentials: true });
+    return response.data;
+  },
+
+  toggleWazuhManagerModule: async (module: string, enabled: boolean): Promise<any> => {
+    const response = await axios.post('/api/v1/wazuh/manager/toggle', {
+      module, enabled,
+    }, { withCredentials: true });
+    return response.data;
+  },
+
+  getWazuhDetections: async (params: {
+    agent_id?: string; module?: string; level_min?: number; q?: string; limit?: number;
+  } = {}): Promise<any> => {
+    const response = await axios.get('/api/v1/wazuh/detections', {
+      params, withCredentials: true,
+    });
+    return response.data;
+  },
+
+  getWazuhDetectionsModule: async (module: string, agentId: string, limit = 100): Promise<any> => {
+    const response = await axios.get(
+      `/api/v1/wazuh/detections/${encodeURIComponent(module)}/${encodeURIComponent(agentId)}`,
+      { params: { limit }, withCredentials: true },
+    );
+    return response.data;
+  },
+
+  getConsoleTargets: async (): Promise<any> => {
+    const response = await axios.get('/api/v1/console/targets', { withCredentials: true });
+    return response.data;
+  },
 };
 
 export function buildNetworkStreamUrl(): string {
   return '/api/v1/telemetry/network/stream';
+}
+
+export function buildConsoleWsUrl(target: string): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}/api/v1/console/ws?target=${encodeURIComponent(target)}`;
 }
 

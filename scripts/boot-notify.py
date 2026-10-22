@@ -179,7 +179,7 @@ def format_email(status: dict) -> tuple[str, str]:
         lines.append("")
         lines.append("!! NOTA: El manager no responde en la IP esperada.")
         lines.append("   Si la red cambio, actualiza WAZUH_SERVER_IP en:")
-        lines.append("     - /home/tadeo/Desktop/wazuh-waha/.env")
+        lines.append("     - /opt/wazuh-waha/.env")
         lines.append("     - /etc/wazuh-waha/relay.env (via sync_relay_env.sh apply)")
         lines.append("   o espera al watch_manager_ip.timer que lo detecte.")
 

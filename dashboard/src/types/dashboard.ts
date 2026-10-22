@@ -178,7 +178,7 @@ export interface NetworkSummary {
 }
 
 export interface AgentNetworkEvent {
-  type: 'network_traffic' | 'agent_heartbeat' | 'stream_tick' | 'connected' | 'site_activity';
+  type: 'network_traffic' | 'network_event' | 'agent_heartbeat' | 'stream_tick' | 'connected' | 'site_activity';
   subtype?: string;
   site_name?: string;
   domain?: string;
@@ -294,6 +294,9 @@ export interface AgentNetInterface {
   tx_drops?: number;
   rx_drops?: number;
   ipv4?: string;
+  ipv4_addresses?: string[];
+  ipv6?: string;
+  ipv6_addresses?: string[];
   agent_id?: string;
   agent_name?: string;
 }

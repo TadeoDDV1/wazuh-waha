@@ -1,6 +1,6 @@
 [Unit]
 Description=Cada 5 min detecta drift de IP del manager Wazuh y notifica
-Documentation=file:///home/tadeo/Desktop/wazuh-waha/README.md
+Documentation=file:///opt/wazuh-waha/README.md
 
 [Timer]
 # Despues del boot, esperar 2 minutos para que la red y el manager esten listos

@@ -13,15 +13,18 @@ from fastapi.responses import JSONResponse
 from . import __version__
 from .api.alerts import router as alerts_router
 from .api.auth import router as auth_router
+from .api.console import router as console_router
 from .api.dashboard import router as dashboard_router
 from .api.debug import router as debug_router
 from .api.reports import router as reports_router
 from .api.telemetry import router as telemetry_router
+from .api.wazuh_control import router as wazuh_control_router
 from .api.waha_webhook import router as waha_webhook_router
 from .common.audit import get_audit_log
 from .common.body_limit import BodySizeLimitMiddleware
 from .common.context import WORKER_ID
 from .common.logging import log
+from .common.network_bus import network_bus
 from .common.session import COOKIE_NAME, verify_session
 from .common.traffic_stream import traffic_watcher
 from .config import settings
@@ -112,11 +115,13 @@ async def lifespan(app: FastAPI):
         settings.relay_log_dir,
     )
     traffic_watcher.start()
+    network_bus.start()
     telegram_bot.start()
     agent_watcher.start()
     yield
     await agent_watcher.stop()
     await telegram_bot.stop()
+    await network_bus.stop()
     await traffic_watcher.stop()
     log.info("relay_stopping worker_id=%s", WORKER_ID)
 
@@ -195,7 +200,7 @@ app.add_middleware(
 # Todas las escrituras autenticadas quedan en <relay_lib_dir>/audit.jsonl
 # (quién, cuándo, desde dónde, qué endpoint, resultado). /alerts se excluye:
 # es ingesta de Wazuh, no una decisión administrativa.
-_AUDIT_PREFIXES = ("/api/v1/dashboard/", "/api/v1/telemetry/traffic/")
+_AUDIT_PREFIXES = ("/api/v1/dashboard/", "/api/v1/telemetry/traffic/", "/api/v1/wazuh/", "/api/v1/console/")
 _AUDIT_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -224,6 +229,8 @@ app.include_router(auth_router)
 app.include_router(alerts_router)
 app.include_router(debug_router)
 app.include_router(telemetry_router)
+app.include_router(wazuh_control_router)
+app.include_router(console_router)
 app.include_router(dashboard_router)
 app.include_router(reports_router)
 app.include_router(waha_webhook_router)

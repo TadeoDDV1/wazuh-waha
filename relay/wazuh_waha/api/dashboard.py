@@ -28,6 +28,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from ..common.logging import log
 from ..config import ENV_FILE, settings
+from ..infrastructure.wazuh_api import wazuh_api
 from .deps import verify_api_key, verify_write
 
 router = APIRouter(tags=["dashboard"])
@@ -625,12 +626,23 @@ async def get_wazuh_services_overview() -> dict[str, Any]:
             except Exception:
                 mitre_status = "No levantado"
 
+            daemons: dict[str, Any] = {}
+            try:
+                r_status = await client.get(f"{base}/manager/status", headers=headers)
+                if r_status.is_success:
+                    items = r_status.json().get("data", {}).get("affected_items", [])
+                    daemons = items[0] if items else {}
+            except Exception:
+                pass
+            modulesd = str(daemons.get("wazuh-modulesd", "")).lower()
+            vuln_ok = modulesd == "running"
             overview = {
                 "connected": True,
                 "manager_api": {"connected": True, "status": "Levantado", "version": manager_ver},
+                "daemons": daemons,
                 "fim": {"connected": fim_status == "Levantado", "status": fim_status, "monitored_files": fim_count},
                 "sca": {"connected": sca_status == "Levantado", "status": sca_status, "policies_count": sca_count, "score": sca_score},
-                "vuln": {"connected": True, "status": "Levantado"},
+                "vuln": {"connected": vuln_ok, "status": "Levantado" if vuln_ok else "No levantado"},
                 "mitre": {"connected": mitre_status == "Levantado", "status": mitre_status, "tactics_count": mitre_tactics, "techniques_count": mitre_techniques},
             }
             _wazuh_services_cache = overview
@@ -2706,207 +2718,93 @@ async def get_wazuh_recommendations(request: Request, agent_id: str = "000", _: 
 
 @router.post("/api/v1/dashboard/wazuh/modules/toggle")
 async def toggle_wazuh_module(request: Request, _: None = Depends(verify_write)):
-    from ..infrastructure.notifier import _get_token
-    from ..config import settings
-    import httpx
+    """Activa/desactiva un módulo de agente con merge seguro de agent.conf."""
+    from ..infrastructure import wazuh_control as control
 
     body = await request.json()
-    scope = body.get("scope", "global")
-    module = body.get("module")
+    group = str(body.get("group") or "default")
+    scope = str(body.get("scope") or "global")
+    module = str(body.get("module") or "")
     enabled = bool(body.get("enabled", True))
-
-    if not module:
-        raise HTTPException(status_code=400, detail="module field required")
-
-    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
-    if not host or not settings.wazuh_manager_api_pass:
-        raise HTTPException(status_code=500, detail="Wazuh API no configurada")
-
-    base = f"https://{host}:{settings.wazuh_manager_api_port}"
-    verify = settings.wazuh_manager_api_verify_tls
-
+    if module not in control.AGENT_MODULES:
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se pueden editar módulos de agente (FIM, SCA, rootcheck, syscollector, active-response)",
+        )
     try:
-        async with httpx.AsyncClient(timeout=15, verify=verify) as client:
-            token = await _get_token(client)
-            if not token:
-                raise HTTPException(status_code=500, detail="Error de autenticación con Wazuh API")
-
-            headers = {"Authorization": f"Bearer {token}"}
-
-            # 1. Read existing config
-            r_conf = await client.get(f"{base}/groups/default/configuration", headers=headers)
-            modules_config = {"global": dict(DEFAULT_STATE)}
-            if r_conf.is_success:
-                modules_config = _parse_agent_conf_response(r_conf.json().get("data", {}))
-
-            # 2. Update config for scope
-            if scope not in modules_config:
-                modules_config[scope] = dict(modules_config.get("global", DEFAULT_STATE))
-            modules_config[scope][module] = enabled
-
-            # 3. Build XML and send PUT
-            xml_data = _build_agent_conf_xml(modules_config)
-            xml_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/xml"}
-            r_put = await client.put(f"{base}/groups/default/configuration", headers=xml_headers, content=xml_data)
-            if not r_put.is_success:
-                raise HTTPException(status_code=500, detail=f"Error actualizando agent.conf: {r_put.text}")
-
-            # 4. Restart agents
-            if scope == "global" or scope == "000":
-                await client.put(f"{base}/agents/restart", headers=headers)
-            else:
-                await client.put(f"{base}/agents/restart?agents_list={scope}", headers=headers)
-
-            return {
-                "ok": True,
-                "scope": scope,
-                "module": module,
-                "enabled": enabled,
-                "modules_config": modules_config,
-                "message": f"Módulo {module} {'activado' if enabled else 'desactivado'} para {scope} con reinicio aplicado.",
-            }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return await control.toggle_agent_module(group, scope, module, enabled)
+    except control.WazuhControlError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/api/v1/dashboard/wazuh/modules/bulk")
 async def bulk_toggle_wazuh_modules(request: Request, _: None = Depends(verify_write)):
-    from ..infrastructure.notifier import _get_token
-    from ..config import settings
-    import httpx
+    """Activa/desactiva todos los módulos de agente preservando el resto del XML."""
+    from ..infrastructure import wazuh_control as control
 
     body = await request.json()
-    scope = body.get("scope", "global")
+    group = str(body.get("group") or "default")
+    scope = str(body.get("scope") or "global")
     enabled = bool(body.get("enabled", True))
-
-    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
-    if not host or not settings.wazuh_manager_api_pass:
-        raise HTTPException(status_code=500, detail="Wazuh API no configurada")
-
-    base = f"https://{host}:{settings.wazuh_manager_api_port}"
-    verify = settings.wazuh_manager_api_verify_tls
-
+    raw = await control.read_agent_conf(group)
+    current = control.parse_agent_conf(raw).get(scope if scope not in ("", "all") else "global", {})
+    changed: list[str] = []
     try:
-        async with httpx.AsyncClient(timeout=15, verify=verify) as client:
-            token = await _get_token(client)
-            if not token:
-                raise HTTPException(status_code=500, detail="Error de autenticación con Wazuh API")
-
-            headers = {"Authorization": f"Bearer {token}"}
-
-            # 1. Read existing config
-            r_conf = await client.get(f"{base}/groups/default/configuration", headers=headers)
-            modules_config = {"global": dict(DEFAULT_STATE)}
-            if r_conf.is_success:
-                modules_config = _parse_agent_conf_response(r_conf.json().get("data", {}))
-
-            # 2. Update all modules for scope
-            if scope not in modules_config:
-                modules_config[scope] = {}
-            for m in ALL_MODULE_IDS:
-                modules_config[scope][m] = enabled
-
-            # 3. Build XML and send PUT
-            xml_data = _build_agent_conf_xml(modules_config)
-            xml_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/xml"}
-            r_put = await client.put(f"{base}/groups/default/configuration", headers=xml_headers, content=xml_data)
-            if not r_put.is_success:
-                raise HTTPException(status_code=500, detail=f"Error actualizando agent.conf: {r_put.text}")
-
-            # 4. Restart agents
-            if scope == "global" or scope == "000":
-                await client.put(f"{base}/agents/restart", headers=headers)
-            else:
-                await client.put(f"{base}/agents/restart?agents_list={scope}", headers=headers)
-
-            return {
-                "ok": True,
-                "scope": scope,
-                "enabled": enabled,
-                "modules_config": modules_config,
-                "message": f"Todos los apartados fueron {'activados' if enabled else 'desactivados'} para {scope}.",
-            }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        for module in control.AGENT_MODULES:
+            if current.get(module, True) == enabled:
+                continue
+            await control.toggle_agent_module(group, scope, module, enabled, restart=False)
+            changed.append(module)
+        # Un único reinicio al final.
+        await control.restart_agents(scope)
+    except control.WazuhControlError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"ok": True, "group": group, "scope": scope, "enabled": enabled, "changed": changed}
 
 
 @router.post("/api/v1/dashboard/wazuh/modules/apply")
 async def apply_wazuh_modules_config(request: Request, _: None = Depends(verify_write)):
-    from ..infrastructure.notifier import _get_token
-    from ..config import settings
-    import httpx
+    """Aplica un diff de módulos de agente sin reconstruir agent.conf."""
+    from ..infrastructure import wazuh_control as control
 
     body = await request.json()
-    scope = body.get("scope", "global")
+    group = str(body.get("group") or "default")
+    scope = str(body.get("scope") or "global")
     modules = body.get("modules", {})
     if not isinstance(modules, dict):
         raise HTTPException(status_code=400, detail="modules dict required")
 
-    host = (settings.wazuh_manager_host or settings.wazuh_server_ip)
-    if not host or not settings.wazuh_manager_api_pass:
-        raise HTTPException(status_code=500, detail="Wazuh API no configurada")
-
-    base = f"https://{host}:{settings.wazuh_manager_api_port}"
-    verify = settings.wazuh_manager_api_verify_tls
-
+    raw = await control.read_agent_conf(group)
+    current = control.parse_agent_conf(raw).get(scope if scope not in ("", "all") else "global", {})
+    changed: list[str] = []
+    skipped: list[str] = []
     try:
-        async with httpx.AsyncClient(timeout=15, verify=verify) as client:
-            token = await _get_token(client)
-            if not token:
-                raise HTTPException(status_code=500, detail="Error de autenticación con Wazuh API")
+        for module, value in modules.items():
+            if module not in control.AGENT_MODULES:
+                skipped.append(module)
+                continue
+            enabled = bool(value)
+            if current.get(module, True) == enabled:
+                continue
+            await control.toggle_agent_module(group, scope, module, enabled, restart=False)
+            changed.append(module)
+        if changed:
+            await control.restart_agents(scope)
+    except control.WazuhControlError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
-            headers = {"Authorization": f"Bearer {token}"}
-
-            # 1. Read existing config
-            r_conf = await client.get(f"{base}/groups/default/configuration", headers=headers)
-            modules_config = {"global": dict(DEFAULT_STATE)}
-            if r_conf.is_success:
-                modules_config = _parse_agent_conf_response(r_conf.json().get("data", {}))
-
-            # 2. Update config for scope
-            if scope not in modules_config:
-                modules_config[scope] = dict(modules_config.get("global", DEFAULT_STATE))
-
-            for m_key, m_val in modules.items():
-                modules_config[scope][m_key] = bool(m_val)
-
-            # 3. Build XML and send PUT
-            xml_data = _build_agent_conf_xml(modules_config)
-            xml_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/xml"}
-            r_put = await client.put(f"{base}/groups/default/configuration", headers=xml_headers, content=xml_data)
-            if not r_put.is_success:
-                raise HTTPException(status_code=500, detail=f"Error actualizando agent.conf: {r_put.text}")
-
-            # 4. Restart agents
-            restarted_agents = []
-            if scope == "global" or scope == "000":
-                r_rst = await client.put(f"{base}/agents/restart", headers=headers)
-                if r_rst.is_success:
-                    restarted_agents = r_rst.json().get("data", {}).get("affected_items", ["all"])
-            else:
-                r_rst = await client.put(f"{base}/agents/restart?agents_list={scope}", headers=headers)
-                if r_rst.is_success:
-                    restarted_agents = r_rst.json().get("data", {}).get("affected_items", [scope])
-
-            log.info("wazuh_modules_applied scope=%s modules=%s user_ip=%s",
-                     scope, modules, request.client.host if request.client else "?")
-
-            return {
-                "ok": True,
-                "scope": scope,
-                "modules_config": modules_config,
-                "xml": xml_data,
-                "restarted_agents": restarted_agents,
-                "message": f"Configuración guardada en agent.conf y reinicio aplicado a {scope}.",
-            }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
+    log.info("wazuh_modules_applied group=%s scope=%s changed=%s skipped=%s",
+             group, scope, changed, skipped)
+    try:
+        state = control.parse_agent_conf(await control.read_agent_conf(group))
+    except Exception:
+        state = {}
+    return {
+        "ok": True,
+        "group": group,
+        "scope": scope,
+        "changed": changed,
+        "skipped": skipped,
+        "modules_config": state,
+        "message": "Configuración aplicada preservando directivas existentes",
+    }

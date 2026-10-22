@@ -7,6 +7,7 @@ import {
   fetchTrafficSource,
   simulateTrafficEvent,
 } from '../services/telemetryService';
+import { buildNetworkStreamUrl } from '../services/api';
 import {
   Terminal,
   Play,
@@ -65,6 +66,9 @@ export const LiveTrafficTerminal: React.FC<LiveTrafficTerminalProps> = ({
   const [connected, setConnected] = useState<boolean>(false);
   const [simulating, setSimulating] = useState<boolean>(false);
   const [sourceInfo, setSourceInfo] = useState<TrafficSourceInfo | null>(null);
+  const [connections, setConnections] = useState<any[]>([]);
+  const [showConnections, setShowConnections] = useState<boolean>(false);
+  const connEsRef = useRef<EventSource | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -82,6 +86,32 @@ export const LiveTrafficTerminal: React.FC<LiveTrafficTerminalProps> = ({
   useEffect(() => {
     pendingRef.current = pendingWhilePaused;
   }, [pendingWhilePaused]);
+
+  // Stream de conexiones reales (ss + syscollector) en paralelo a las alertas.
+  useEffect(() => {
+    if (!isOpen && !asPanel) return;
+    const es = new EventSource(buildNetworkStreamUrl());
+    connEsRef.current = es;
+    es.onmessage = (evt) => {
+      try {
+        const payload = JSON.parse(evt.data);
+        if (payload.type !== 'network_event') return;
+        const data = payload.data || {};
+        if (data.subtype !== 'connection' && data.type !== 'network_event') return;
+        setConnections((prev) => {
+          if (prev.some((c) => c.id === data.id)) return prev;
+          const next = [data, ...prev];
+          return next.length > 500 ? next.slice(0, 500) : next;
+        });
+      } catch {
+        /* ignore */
+      }
+    };
+    return () => {
+      es.close();
+      connEsRef.current = null;
+    };
+  }, [isOpen, asPanel]);
 
   const appendEvent = useCallback((newEvt: TrafficEvent) => {
     if (isPausedRef.current) {
@@ -435,6 +465,15 @@ export const LiveTrafficTerminal: React.FC<LiveTrafficTerminalProps> = ({
           </button>
 
           <button
+            className={`terminal-btn ${showConnections ? 'active' : ''}`}
+            onClick={() => setShowConnections((v) => !v)}
+            title="Ver conexiones reales (entrante/saliente/escucha)"
+          >
+            <Terminal size={12} />
+            <span>Conexiones ({connections.length})</span>
+          </button>
+
+          <button
             className="terminal-btn primary"
             onClick={handleSimulate}
             disabled={simulating}
@@ -504,7 +543,41 @@ export const LiveTrafficTerminal: React.FC<LiveTrafficTerminalProps> = ({
           </div>
         </div>
 
-        {filteredEvents.length === 0 ? (
+        {showConnections ? (
+          <div className="terminal-connections-list">
+            {connections.length === 0 ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '12px' }}>
+                Esperando conexiones reales de los agentes (ss + syscollector)…
+              </div>
+            ) : (
+              connections
+                .filter((c) => {
+                  if (!searchFilter.trim()) return true;
+                  const q = searchFilter.toLowerCase();
+                  return `${c.agent_name || ''} ${c.local_ip || ''} ${c.remote_ip || ''} ${c.domain || ''} ${c.process || ''} ${c.protocol || ''}`
+                    .toLowerCase()
+                    .includes(q);
+                })
+                .map((c) => {
+                  const dir = String(c.direction || 'conn');
+                  const color = dir === 'inbound' ? '#34d399' : dir === 'outbound' ? '#38bdf8' : '#cbd5e1';
+                  return (
+                    <div key={c.id} className="terminal-conn-row">
+                      <span className="t-time">{(c.timestamp || '').replace('T', ' ').slice(11, 19) || '--:--:--'}</span>
+                      <span className="t-agent">[{c.agent_id}] {c.agent_name}</span>
+                      <span className="terminal-conn-dir" style={{ color, borderColor: color }}>{dir.toUpperCase()}</span>
+                      <code>{c.local_ip}:{c.local_port}</code>
+                      <span className="terminal-conn-arrow">→</span>
+                      <code>{c.remote_ip}:{c.remote_port}</code>
+                      {c.domain && <span className="terminal-conn-domain">{c.domain}</span>}
+                      <span className="terminal-conn-proto">{c.protocol}</span>
+                      {c.process && <span className="terminal-conn-proc">[{c.process}]</span>}
+                    </div>
+                  );
+                })
+            )}
+          </div>
+        ) : filteredEvents.length === 0 ? (
           <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '12px' }}>
             {events.length === 0
               ? 'Conectando al stream de Wazuh... esperando tráfico de los agentes.'
