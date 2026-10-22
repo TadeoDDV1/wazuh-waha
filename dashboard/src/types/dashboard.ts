@@ -232,6 +232,8 @@ export interface AgentSocket {
   agent_id?: string;
   agent_name?: string;
   agent_ip?: string;
+  direction?: string;
+  scan_time?: string;
 }
 
 export interface AgentSiteActivity {
@@ -250,6 +252,8 @@ export interface AgentSiteActivity {
   agent_id: string;
   agent_name: string;
   agent_ip?: string;
+  direction?: string;
+  scan_time?: string;
   last_seen: string;
 }
 
@@ -338,6 +342,10 @@ export interface AgentTrafficDetails {
     version?: string;
     lastKeepAlive?: string;
   };
+  agent_status?: string;
+  last_keep_alive?: string;
+  scan_time?: string;
+  stale?: boolean;
   kpis: {
     total_sockets: number;
     listening_sockets: number;

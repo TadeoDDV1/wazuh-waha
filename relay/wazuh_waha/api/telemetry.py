@@ -953,11 +953,11 @@ async def _read_agent_queue_db_remote(
     try:
         raw_ports = await ssh_pool.read_sqlite_json(
             db_path,
-            "SELECT protocol, local_ip, local_port, remote_ip, remote_port, process, PID as pid, state, tx_queue, rx_queue FROM sys_ports",
+            "SELECT protocol, local_ip, local_port, remote_ip, remote_port, process, PID as pid, state, tx_queue, rx_queue, scan_time FROM sys_ports",
         )
         raw_ifaces = await ssh_pool.read_sqlite_json(
             db_path,
-            "SELECT name, adapter, type, state, mtu, mac, tx_packets, rx_packets, tx_bytes, rx_bytes, tx_errors, rx_errors, tx_dropped, rx_dropped FROM sys_netiface",
+            "SELECT name, adapter, type, state, mtu, mac, tx_packets, rx_packets, tx_bytes, rx_bytes, tx_errors, rx_errors, tx_dropped, rx_dropped, scan_time FROM sys_netiface",
         )
         raw_procs = await ssh_pool.read_sqlite_json(
             db_path,
@@ -982,6 +982,7 @@ async def _read_agent_queue_db_remote(
             "state": r.get("state") or "listening",
             "tx": {"packets": r.get("tx_queue") or 0},
             "rx": {"packets": r.get("rx_queue") or 0},
+            "scan_time": r.get("scan_time"),
             "_agent_id": aid,
         })
     ifaces = []
@@ -1006,6 +1007,7 @@ async def _read_agent_queue_db_remote(
             },
             "tx_bytes": r.get("tx_bytes") or 0,
             "rx_bytes": r.get("rx_bytes") or 0,
+            "scan_time": r.get("scan_time"),
             "_agent_id": aid,
         })
     procs = []
@@ -1082,7 +1084,7 @@ def _read_agent_queue_db(aid: str) -> tuple[list[dict[str, Any]], list[dict[str,
             # 1. Sockets y puertos
             try:
                 cursor.execute(
-                    "SELECT protocol, local_ip, local_port, remote_ip, remote_port, process, PID as pid, state, tx_queue, rx_queue FROM sys_ports"
+                    "SELECT protocol, local_ip, local_port, remote_ip, remote_port, process, PID as pid, state, tx_queue, rx_queue, scan_time FROM sys_ports"
                 )
                 for r in cursor.fetchall():
                     raw_ports.append({
@@ -1098,6 +1100,7 @@ def _read_agent_queue_db(aid: str) -> tuple[list[dict[str, Any]], list[dict[str,
                         "state": r["state"] or "listening",
                         "tx": {"packets": r["tx_queue"] or 0},
                         "rx": {"packets": r["rx_queue"] or 0},
+                        "scan_time": r["scan_time"] if "scan_time" in r.keys() else None,
                         "_agent_id": aid,
                     })
             except Exception:
@@ -1106,7 +1109,7 @@ def _read_agent_queue_db(aid: str) -> tuple[list[dict[str, Any]], list[dict[str,
             # 2. Interfaces de Red
             try:
                 cursor.execute(
-                    "SELECT name, adapter, type, state, mtu, mac, tx_packets, rx_packets, tx_bytes, rx_bytes, tx_errors, rx_errors, tx_dropped, rx_dropped FROM sys_netiface"
+                    "SELECT name, adapter, type, state, mtu, mac, tx_packets, rx_packets, tx_bytes, rx_bytes, tx_errors, rx_errors, tx_dropped, rx_dropped, scan_time FROM sys_netiface"
                 )
                 for r in cursor.fetchall():
                     raw_ifaces.append({
@@ -1129,6 +1132,7 @@ def _read_agent_queue_db(aid: str) -> tuple[list[dict[str, Any]], list[dict[str,
                         },
                         "tx_bytes": r["tx_bytes"] or 0,
                         "rx_bytes": r["rx_bytes"] or 0,
+                        "scan_time": r["scan_time"] if "scan_time" in r.keys() else None,
                         "_agent_id": aid,
                     })
             except Exception:
@@ -1264,6 +1268,20 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
     normalized_ports: list[dict[str, Any]] = []
     unique_remote_ips = set()
 
+    def _direction(state: str, local_port: int, remote_port: int) -> str:
+        st = (state or "").lower()
+        rp = int(remote_port or 0)
+        lp = int(local_port or 0)
+        if rp == 0:
+            return "listen"
+        if "listen" in st and rp == 0:
+            return "listen"
+        if lp < 32768 <= rp:
+            return "inbound"
+        if rp < 32768 <= lp:
+            return "outbound"
+        return "connection"
+
     for p in all_raw_ports:
         loc = p.get("local") if isinstance(p.get("local"), dict) else {}
         rem = p.get("remote") if isinstance(p.get("remote"), dict) else {}
@@ -1299,6 +1317,8 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
             "agent_id": aid,
             "agent_name": aname,
             "agent_ip": aip,
+            "direction": _direction(str(p.get("state") or ""), int(loc_port or 0), int(rem_port or 0)),
+            "scan_time": p.get("scan_time") or (p.get("scan") or {}).get("time") or "",
             "tx_packets": p.get("tx", {}).get("packets", 0) if isinstance(p.get("tx"), dict) else 0,
             "rx_packets": p.get("rx", {}).get("packets", 0) if isinstance(p.get("rx"), dict) else 0,
         })
@@ -1366,6 +1386,8 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
                 "agent_id": sock["agent_id"],
                 "agent_name": sock["agent_name"],
                 "agent_ip": sock.get("agent_ip", ""),
+                "direction": sock.get("direction", "unknown"),
+                "scan_time": sock.get("scan_time", ""),
                 "last_seen": time.strftime("%H:%M:%S"),
                 "_ts": time.time(),
             }
@@ -1442,6 +1464,7 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
             "ipv6_addresses": ipv6_addrs,
             "agent_id": i.get("_agent_id", "000"),
             "agent_name": i.get("_agent_name", "host"),
+            "scan_time": i.get("scan_time") or (i.get("scan") or {}).get("time") or "",
         })
 
     # Normalizar procesos
@@ -1456,6 +1479,26 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
             "agent_id": pr.get("_agent_id", "000"),
         })
 
+    # Frescura de los datos de syscollector
+    scan_times = [p.get("scan_time") for p in normalized_ports if p.get("scan_time")]
+    scan_times += [i.get("scan_time") for i in normalized_ifaces if i.get("scan_time")]
+    latest_scan = max(scan_times) if scan_times else ""
+    stale = False
+    if latest_scan:
+        try:
+            from datetime import datetime, timezone
+            ts = latest_scan
+            if "T" in ts:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            else:
+                dt = datetime.strptime(ts, "%Y/%m/%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            stale = (datetime.now(timezone.utc) - dt).total_seconds() > 600
+        except Exception:
+            stale = False
+    agent_status = (agent_info or {}).get("status", "unknown") if agent_info else "all"
+    if agent_status not in ("active", "all"):
+        stale = True
+
     # Extraer alertas Wazuh
     wazuh_alerts = _get_agent_wazuh_alerts(agent_id=agent_id_str, max_items=40)
 
@@ -1469,6 +1512,10 @@ async def _fetch_agent_traffic_details(agent_id: str) -> dict[str, Any]:
         "ok": True,
         "agent_id": agent_id_str,
         "agent_info": agent_info,
+        "agent_status": agent_status,
+        "last_keep_alive": (agent_info or {}).get("lastKeepAlive", "") if agent_info else "",
+        "scan_time": latest_scan,
+        "stale": stale,
         "kpis": {
             "total_sockets": len(normalized_ports),
             "listening_sockets": listening_count,
@@ -2021,6 +2068,25 @@ async def network_stream(
                 if step % 3 == 0:
                     snap = network_bus.snapshot()
                     yield f"data: {json.dumps({'type':'network_stats','data':snap.get('stats',{}),'ts':time.time()})}\n\n"
+                    try:
+                        for ag in await _fetch_network_agents_data():
+                            hb = {
+                                "type": "agent_heartbeat",
+                                "subtype": "keepalive",
+                                "id": f"hb-{ag.get('id','000')}-{int(time.time()*1000)}",
+                                "timestamp": ag.get("lastKeepAlive") or time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                                "agent_id": str(ag.get("id", "000")),
+                                "agent_name": ag.get("name", "agente"),
+                                "agent_ip": ag.get("ip", ""),
+                                "status": ag.get("status", "unknown"),
+                                "os": (ag.get("os") or {}).get("name", "Linux") if isinstance(ag.get("os"), dict) else "Linux",
+                                "version": ag.get("version", ""),
+                                "last_keep_alive": ag.get("lastKeepAlive", ""),
+                                "description": f"Agente {ag.get('name','')}: {ag.get('status','unknown')}",
+                            }
+                            yield f"data: {json.dumps({'type':'network_event','data':hb}, default=str)}\n\n"
+                    except Exception:
+                        pass
                 yield f"data: {json.dumps({'type':'stream_tick','ts':time.time()})}\n\n"
 
         except asyncio.CancelledError:

@@ -96,6 +96,7 @@ def _direction(state: str, local_port: int, remote_port: int) -> str:
             return "inbound"
         if remote_port < 32768 <= local_port:
             return "outbound"
+        return "connection"
     return "unknown"
 
 

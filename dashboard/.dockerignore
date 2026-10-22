@@ -13,3 +13,4 @@ dist-ssr
 Dockerfile
 .dockerignore
 README.md
+.DS_Store

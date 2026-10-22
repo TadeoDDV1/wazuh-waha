@@ -460,6 +460,23 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
               <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                 Inspección de sitios web visitados, procesos en red, sockets activos y equipos conectados a la misma red WiFi
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px', flexWrap: 'wrap', fontSize: '10px' }}>
+                {selectedAgentObj ? (
+                  <span style={{
+                    color: String(selectedAgentObj.status).toLowerCase() === 'active' ? '#34d399' : '#f87171',
+                    fontWeight: 700,
+                  }}>
+                    ● Agente {selectedAgentObj.id} {String(selectedAgentObj.status || 'unknown').toUpperCase()}
+                    {selectedAgentObj.lastKeepAlive ? ` · keepalive ${selectedAgentObj.lastKeepAlive}` : ''}
+                  </span>
+                ) : (
+                  <span style={{ color: '#38bdf8', fontWeight: 700 }}>● Todos los agentes</span>
+                )}
+                <span style={{ color: agentDetails?.stale ? '#fbbf24' : '#64748b' }}>
+                  syscollector: {agentDetails?.scan_time || 'sin datos'}
+                  {agentDetails?.stale ? ' (desactualizado)' : ''}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -611,7 +628,6 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
           {agentsList.map((ag: any) => {
             const isSel = selectedAgentId === ag.id;
             const osName = ag.os?.name || (ag.id === '000' ? 'Ubuntu' : 'Linux');
-            const isWifi = ag.id === '001' || (ag.ip && ag.ip.startsWith('192.168.122.1'));
             return (
               <button
                 key={ag.id}
@@ -638,13 +654,13 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                     width: '6px',
                     height: '6px',
                     borderRadius: '50%',
-                    background: ag.status === 'active' ? 'var(--green-healthy)' : 'var(--yellow-warning)',
+                    background: ag.status === 'active' ? 'var(--green-healthy)' : 'var(--red-error)',
                   }}
                 />
-                {isWifi ? <Wifi size={12} style={{ color: '#38bdf8' }} /> : <Laptop size={12} />}
+                <Laptop size={12} />
                 <span>[{ag.id}] <strong>{ag.name}</strong></span>
                 <span style={{ fontSize: '10px', opacity: 0.7 }}>
-                  ({osName} · {isWifi ? 'WiFi' : 'LAN'} · {ag.ip || '127.0.0.1'})
+                  ({osName} · {ag.ip || 'sin IP'} · {String(ag.status || 'unknown')})
                 </span>
               </button>
             );
@@ -1233,8 +1249,9 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                   const isTraffic = evt.type === 'network_traffic';
                   const isSite = evt.type === 'site_activity' || Boolean((evt as any).site_name);
                   const isConnection = evt.type === 'network_event' || (evt as any).subtype === 'connection';
+                  const isHeartbeat = evt.type === 'agent_heartbeat';
                   const isExpanded = expandedEventId === evt.id;
-                  const procName = evt.process || 'wazuh-agentd';
+                  const procName = isHeartbeat ? 'agent' : (evt.process || 'sistema');
 
                   return (
                     <div
@@ -1281,6 +1298,13 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                             <span style={{ fontSize: '9px', padding: '1px 4px', background: 'rgba(148,163,184,.15)', borderRadius: '3px' }}>{evt.protocol || 'TCP'}</span>
                             {evt.process && <span style={{ fontSize: '10px', color: '#94a3b8' }}>[{evt.process}]</span>}
                           </div>
+                        ) : isHeartbeat ? (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: String((evt as any).status || '').toLowerCase() === 'active' ? '#34d399' : '#f87171' }}>
+                            <span style={{ fontWeight: 700 }}>{String((evt as any).status || 'unknown').toUpperCase()}</span>
+                            <code>{evt.agent_ip || evt.src_ip || '—'}</code>
+                            {(evt as any).last_keep_alive && <span style={{ fontSize: '10px', color: '#94a3b8' }}>keepalive {(evt as any).last_keep_alive}</span>}
+                            {(evt as any).version && <span style={{ fontSize: '10px', color: '#64748b' }}>{String((evt as any).version)}</span>}
+                          </div>
                         ) : isSite ? (
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#38bdf8' }}>
                             <Globe size={11} />
@@ -1298,7 +1322,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                           </div>
                         ) : (
                           <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                            {evt.connection_socket || 'Socket Wazuh Remoted (1514/TCP)'}
+                            {evt.connection_socket || evt.description || 'sin datos de conexión'}
                           </span>
                         )}
 
@@ -1329,7 +1353,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                             <div className="drawer-item">
                               <span className="drawer-label">Destino / Socket:</span>
                               <span className="drawer-val">
-                                {evt.src_ip}:{evt.src_port || '0'} → {evt.dst_ip}:{evt.dst_port || '1514'} ({evt.protocol || 'TCP'})
+                                {evt.src_ip || '—'}:{evt.src_port || '—'} → {evt.dst_ip || '—'}:{evt.dst_port || '—'} ({evt.protocol || '—'})
                               </span>
                             </div>
                             <div className="drawer-item">
@@ -1368,7 +1392,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                 </p>
               </div>
               <span style={{ fontSize: '11px', color: '#34d399', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', padding: '3px 8px', borderRadius: '6px' }}>
-                Total: {agentDetails?.ports?.length || 0} sockets inspeccionados
+                Total: {agentDetails?.ports?.length || 0} sockets · syscollector {agentDetails?.scan_time || 'N/D'}
               </span>
             </div>
 
@@ -1387,6 +1411,7 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                   <thead>
                     <tr style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                       <th style={{ padding: '8px 12px' }}>Proto</th>
+                      <th style={{ padding: '8px 12px' }}>Dirección</th>
                       <th style={{ padding: '8px 12px' }}>Equipo</th>
                       <th style={{ padding: '8px 12px' }}>Proceso / PID</th>
                       <th style={{ padding: '8px 12px' }}>Puerto Local</th>
@@ -1419,6 +1444,18 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                               {socket.protocol}
                             </span>
                           </td>
+                          <td style={{ padding: '8px 12px' }}>
+                            <span style={{
+                              fontSize: '9px',
+                              fontWeight: 700,
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              background: socket.direction === 'inbound' ? 'rgba(16,185,129,.15)' : socket.direction === 'outbound' ? 'rgba(56,189,248,.15)' : 'rgba(148,163,184,.12)',
+                              color: socket.direction === 'inbound' ? '#34d399' : socket.direction === 'outbound' ? '#38bdf8' : '#94a3b8',
+                            }}>
+                              {String(socket.direction || 'conn').toUpperCase()}
+                            </span>
+                          </td>
                           <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>
                             [{socket.agent_id || '000'}] {socket.agent_name || 'host'}
                           </td>
@@ -1434,12 +1471,16 @@ export const NetworkAgentsTerminal: React.FC<NetworkAgentsTerminalProps> = ({
                               <div>
                                 <strong style={{ color: '#38bdf8', fontSize: '11px' }}>{socket.site_name}</strong>
                                 <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
-                                  {socket.remote_ip}:{socket.remote_port}
+                                  {socket.remote_ip === '0.0.0.0' || socket.remote_ip === '-' || socket.remote_port === 0
+                                    ? 'en escucha (sin destino remoto)'
+                                    : `${socket.remote_hostname || socket.domain || ''} ${socket.remote_ip}:${socket.remote_port}`.trim()}
                                 </div>
                               </div>
                             ) : (
                               <code style={{ color: socket.remote_ip !== '-' && socket.remote_ip !== '0.0.0.0' ? '#34d399' : 'var(--text-secondary)' }}>
-                                {socket.remote_ip}:{socket.remote_port}
+                                {socket.remote_ip === '0.0.0.0' || socket.remote_ip === '-' || socket.remote_port === 0
+                                  ? '—'
+                                  : `${socket.remote_hostname || socket.domain || ''} ${socket.remote_ip}:${socket.remote_port}`.trim()}
                               </code>
                             )}
                           </td>

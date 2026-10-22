@@ -1,47 +1,28 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
 import './LiveTrafficTerminal.css';
 import type { TrafficEvent, TrafficSourceInfo } from '../types/telemetry';
 import {
   buildTrafficStreamUrl,
   fetchTrafficTail,
   fetchTrafficSource,
-  simulateTrafficEvent,
 } from '../services/telemetryService';
 import { buildNetworkStreamUrl } from '../services/api';
-import {
-  Terminal,
-  Play,
-  Pause,
-  Trash2,
-  Copy,
-  Check,
-  Search,
-  Maximize2,
-  Minimize2,
-  X,
-  ArrowDown,
-  ArrowLeft,
-  Zap,
-  ChevronRight,
-  ChevronDown,
-} from 'lucide-react';
+import { X, Pause, Play, Trash2, Search, Maximize2, Minimize2, ArrowLeft, Cable } from 'lucide-react';
 
 interface LiveTrafficTerminalProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Si true, se renderiza como panel/pestaña principal (sin overlay modal). */
   asPanel?: boolean;
 }
-
-const MAX_EVENTS = 500;
-const BASE_RETRY_MS = 1000;
-const MAX_RETRY_MS = 30000;
 
 const SOURCE_LABELS: Record<string, string> = {
   auto: 'auto',
   local: 'alerts.json local',
-  ssh: 'SSH → VM manager',
-  api: 'API Wazuh manager',
+  ssh: 'SSH → Wazuh Manager',
+  api: 'API Wazuh Manager',
   off: 'inactivo',
   relay: 'relay /alerts',
   simulate: 'simulación',
@@ -49,704 +30,327 @@ const SOURCE_LABELS: Record<string, string> = {
   unknown: 'desconocida',
 };
 
+const MAX_BUFFER = 2000;
+
+function ts(value?: string): string {
+  if (!value) return new Date().toISOString().slice(11, 23);
+  return value.replace('T', ' ').slice(11, 23);
+}
+
+function ansiLevel(level: number): string {
+  if (level >= 12) return '\x1b[1;31m'; // rojo
+  if (level >= 8) return '\x1b[1;33m';  // amarillo
+  if (level >= 5) return '\x1b[1;36m';  // cyan
+  return '\x1b[0;37m';
+}
+
+function ansiDirection(dir: string): string {
+  if (dir === 'inbound') return '\x1b[1;32m'; // verde
+  if (dir === 'outbound') return '\x1b[1;36m'; // cyan
+  if (dir === 'listen') return '\x1b[1;34m'; // azul
+  return '\x1b[0;37m';
+}
+
+const RESET = '\x1b[0m';
+const DIM = '\x1b[2m';
+
 export const LiveTrafficTerminal: React.FC<LiveTrafficTerminalProps> = ({
   isOpen,
   onClose,
   asPanel = false,
 }) => {
-  const [events, setEvents] = useState<TrafficEvent[]>([]);
-  const [isPaused, setIsPaused] = useState<boolean>(false);
-  const [pendingWhilePaused, setPendingWhilePaused] = useState<TrafficEvent[]>([]);
-  const [autoScroll, setAutoScroll] = useState<boolean>(true);
-  const [searchFilter, setSearchFilter] = useState<string>('');
-  const [minLevel, setMinLevel] = useState<number>(1);
-  const [maximized, setMaximized] = useState<boolean>(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [copied, setCopied] = useState<boolean>(false);
-  const [connected, setConnected] = useState<boolean>(false);
-  const [simulating, setSimulating] = useState<boolean>(false);
-  const [sourceInfo, setSourceInfo] = useState<TrafficSourceInfo | null>(null);
-  const [connections, setConnections] = useState<any[]>([]);
-  const [showConnections, setShowConnections] = useState<boolean>(false);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const alertEsRef = useRef<EventSource | null>(null);
   const connEsRef = useRef<EventSource | null>(null);
+  const pausedRef = useRef(false);
+  const filterRef = useRef('');
+  const showConnRef = useRef(true);
+  const pendingRef = useRef<string[]>([]);
+  const lineCountRef = useRef(0);
+  const [paused, setPaused] = useState(false);
+  const [showConnections, setShowConnections] = useState(true);
+  const [filter, setFilter] = useState('');
+  const [connected, setConnected] = useState(false);
+  const [maximized, setMaximized] = useState(false);
+  const [sourceInfo, setSourceInfo] = useState<TrafficSourceInfo | null>(null);
+  const [lines, setLines] = useState(0);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const retryDelayRef = useRef(BASE_RETRY_MS);
-  const failuresRef = useRef(0);
-  const activeRef = useRef(true);
-  const isPausedRef = useRef(isPaused);
-  const pendingRef = useRef<TrafficEvent[]>([]);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+  useEffect(() => { filterRef.current = filter; }, [filter]);
+  useEffect(() => { showConnRef.current = showConnections; }, [showConnections]);
 
-  useEffect(() => {
-    isPausedRef.current = isPaused;
-  }, [isPaused]);
-
-  useEffect(() => {
-    pendingRef.current = pendingWhilePaused;
-  }, [pendingWhilePaused]);
-
-  // Stream de conexiones reales (ss + syscollector) en paralelo a las alertas.
-  useEffect(() => {
-    if (!isOpen && !asPanel) return;
-    const es = new EventSource(buildNetworkStreamUrl());
-    connEsRef.current = es;
-    es.onmessage = (evt) => {
-      try {
-        const payload = JSON.parse(evt.data);
-        if (payload.type !== 'network_event') return;
-        const data = payload.data || {};
-        if (data.subtype !== 'connection' && data.type !== 'network_event') return;
-        setConnections((prev) => {
-          if (prev.some((c) => c.id === data.id)) return prev;
-          const next = [data, ...prev];
-          return next.length > 500 ? next.slice(0, 500) : next;
-        });
-      } catch {
-        /* ignore */
-      }
-    };
-    return () => {
-      es.close();
-      connEsRef.current = null;
-    };
-  }, [isOpen, asPanel]);
-
-  const appendEvent = useCallback((newEvt: TrafficEvent) => {
-    if (isPausedRef.current) {
-      const next = [...pendingRef.current, newEvt];
-      pendingRef.current = next.slice(-MAX_EVENTS);
-      setPendingWhilePaused(pendingRef.current);
+  const write = useCallback((line: string) => {
+    const term = termRef.current;
+    if (!term) return;
+    const f = filterRef.current.trim().toLowerCase();
+    if (f) {
+      const plain = line.replace(/\x1b\[[0-9;]*m/g, '').toLowerCase();
+      if (!plain.includes(f)) return;
+    }
+    if (pausedRef.current) {
+      pendingRef.current.push(line);
+      if (pendingRef.current.length > MAX_BUFFER) pendingRef.current.shift();
       return;
     }
-    setEvents((prev) => {
-      if (prev.some((e) => e.id === newEvt.id)) return prev;
-      const updated = [...prev, newEvt];
-      return updated.length > MAX_EVENTS ? updated.slice(updated.length - MAX_EVENTS) : updated;
-    });
+    term.writeln(line);
+    lineCountRef.current += 1;
   }, []);
 
-  const connectSSERef = useRef<() => void>(() => undefined);
+  const banner = useCallback((info: TrafficSourceInfo | null) => {
+    const term = termRef.current;
+    if (!term) return;
+    const source = SOURCE_LABELS[info?.resolved || info?.mode || 'auto'] || info?.resolved || 'auto';
+    term.writeln('\x1b[1;36mwazuh-waha — consola de tráfico en vivo\x1b[0m');
+    term.writeln(`${DIM}host: ${window.location.host}   fuente: ${source}   journal: ${info?.journal || '-'}${RESET}`);
+    term.writeln(`${DIM}stream: alertas Wazuh + conexiones reales (ss/syscollector)${RESET}`);
+    term.writeln('\x1b[32m$\x1b[0m tail -f /var/ossec/logs/alerts/alerts.json && ss -tunap');
+    term.writeln('');
+  }, []);
 
-  const connectSSE = useCallback(() => {
-    if (!activeRef.current) return;
+  useEffect(() => {
+    if (!isOpen && !asPanel) return;
+    if (!hostRef.current) return;
 
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    if (retryTimerRef.current) {
-      clearTimeout(retryTimerRef.current);
-      retryTimerRef.current = null;
-    }
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: 12.5,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      theme: {
+        background: '#05080e',
+        foreground: '#d8e2f0',
+        cursor: '#00e5ff',
+        selectionBackground: '#1e3a4a',
+        black: '#0b1220',
+        red: '#f87171',
+        green: '#34d399',
+        yellow: '#fbbf24',
+        blue: '#60a5fa',
+        magenta: '#c084fc',
+        cyan: '#22d3ee',
+        white: '#e2e8f0',
+      },
+      scrollback: 10000,
+      convertEol: true,
+      disableStdin: true,
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(hostRef.current);
+    fit.fit();
+    termRef.current = term;
+    fitRef.current = fit;
 
-    const es = new EventSource(buildTrafficStreamUrl());
-    eventSourceRef.current = es;
-
-    es.onopen = () => {
-      if (!activeRef.current) return;
-      failuresRef.current = 0;
-      retryDelayRef.current = BASE_RETRY_MS;
-      setConnected(true);
+    let disposed = false;
+    const safeWrite = (line: string) => {
+      if (!disposed) write(line);
     };
 
-    es.onmessage = (msgEvent) => {
-      if (!activeRef.current) return;
+    const init = async () => {
+      let info: TrafficSourceInfo | null = null;
       try {
-        const payload = JSON.parse(msgEvent.data);
-        if (payload.type === 'event' && payload.data) {
-          appendEvent(payload.data as TrafficEvent);
+        info = await fetchTrafficSource();
+      } catch { /* sin fuente */ }
+      if (disposed) return;
+      setSourceInfo(info);
+      safeWrite('\x1b[2J\x1b[H');
+      banner(info);
+      try {
+        const items = await fetchTrafficTail(120);
+        if (disposed) return;
+        const recent = items.slice(-80);
+        if (recent.length === 0) {
+          safeWrite(`${DIM}(sin eventos previos en el journal)${RESET}`);
         }
-      } catch {
-        // frames heartbeat/connected o malformados: ignorar
-      }
+        recent.forEach((ev) => {
+          safeWrite(
+            `${DIM}${ts(ev.timestamp)}${RESET} ${ansiLevel(ev.level)}ALERT L${ev.level}${RESET} ` +
+            `[${ev.agent_id} ${ev.agent_name}] #${ev.rule_id} ` +
+            `${ev.src_ip ? `${ev.src_ip}${ev.src_port ? ':' + ev.src_port : ''} ` : ''}` +
+            `${ev.description}`
+          );
+        });
+      } catch { /* ignore */ }
+    };
+    init();
+
+    const connectAlerts = () => {
+      const es = new EventSource(buildTrafficStreamUrl());
+      alertEsRef.current = es;
+      es.onopen = () => setConnected(true);
+      es.onerror = () => {
+        setConnected(false);
+        es.close();
+        if (!disposed) setTimeout(() => { if (!disposed) connectAlerts(); }, 3000);
+      };
+      es.onmessage = (evt) => {
+        try {
+          const payload = JSON.parse(evt.data);
+          if (payload.type === 'connected') { setConnected(true); return; }
+          if (payload.type !== 'event') return;
+          const ev: TrafficEvent = payload.data;
+          const src = ev.src_ip ? `${ev.src_ip}${ev.src_port ? ':' + ev.src_port : ''} ` : '';
+          safeWrite(
+            `${DIM}${ts(ev.timestamp)}${RESET} ${ansiLevel(ev.level)}ALERT L${ev.level}${RESET} ` +
+            `[${ev.agent_id} ${ev.agent_name}] #${ev.rule_id} ${src}${ev.description}`
+          );
+        } catch { /* ignore */ }
+      };
     };
 
-    es.onerror = () => {
-      if (!activeRef.current) return;
-      setConnected(false);
-      failuresRef.current += 1;
-      es.close();
-      if (eventSourceRef.current === es) eventSourceRef.current = null;
-
-      const jitter = Math.random() * 400;
-      const delay = Math.min(retryDelayRef.current + jitter, MAX_RETRY_MS);
-      retryDelayRef.current = Math.min(retryDelayRef.current * 2, MAX_RETRY_MS);
-      retryTimerRef.current = setTimeout(() => {
-        if (activeRef.current) connectSSERef.current();
-      }, delay);
+    const connectConnections = () => {
+      const es = new EventSource(buildNetworkStreamUrl());
+      connEsRef.current = es;
+      es.onopen = () => setConnected(true);
+      es.onerror = () => {
+        es.close();
+        if (!disposed) setTimeout(() => { if (!disposed) connectConnections(); }, 3000);
+      };
+      es.onmessage = (evt) => {
+        if (!showConnRef.current) return;
+        try {
+          const payload = JSON.parse(evt.data);
+          if (payload.type !== 'network_event') return;
+          const data = payload.data || {};
+          if (data.subtype === 'connection' || data.type === 'network_event') {
+            const dir = String(data.direction || 'conn').toUpperCase();
+            const color = ansiDirection(String(data.direction || ''));
+            safeWrite(
+              `${DIM}${ts(data.timestamp)}${RESET} ${color}NET ${dir.padEnd(8)}${RESET} ` +
+              `[${data.agent_id} ${data.agent_name}] ` +
+              `${data.local_ip}:${data.local_port} -> ${data.remote_ip}:${data.remote_port} ` +
+              `${data.protocol} ${data.state} ` +
+              `${data.domain ? `(${data.domain}) ` : ''}` +
+              `${data.process ? `[${data.process}]` : ''}`
+            );
+          } else if (data.type === 'agent_heartbeat') {
+            safeWrite(
+              `${DIM}${ts(data.timestamp)}${RESET} \x1b[1;35mAGENT${RESET} ` +
+              `[${data.agent_id} ${data.agent_name}] ${String(data.status || '').toUpperCase()} ` +
+              `${data.agent_ip || ''} ${data.last_keep_alive ? `last=${data.last_keep_alive}` : ''}`
+            );
+          }
+        } catch { /* ignore */ }
+      };
     };
-  }, [appendEvent]);
 
-  useEffect(() => {
-    connectSSERef.current = connectSSE;
-  }, [connectSSE]);
+    connectAlerts();
+    connectConnections();
 
-  // ── Abrir/cerrar terminal: tail + SSE + source info ──────────────────────
-  useEffect(() => {
-    if (!isOpen) {
-      activeRef.current = false;
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-      if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current);
-        retryTimerRef.current = null;
-      }
-      setConnected(false);
-      return;
-    }
-
-    activeRef.current = true;
-    failuresRef.current = 0;
-    retryDelayRef.current = BASE_RETRY_MS;
-
-    fetchTrafficTail(100)
-      .then((items) => {
-        if (activeRef.current && items.length > 0) {
-          setEvents(items);
-        }
-      })
-      .catch(() => {
-        // tail opcional; el stream puede seguir solo
-      });
-
-    fetchTrafficSource()
-      .then((info) => {
-        if (activeRef.current) setSourceInfo(info);
-      })
-      .catch(() => undefined);
-
-    if (typeof EventSource === 'undefined') {
-      setConnected(false);
-    } else {
-      connectSSE();
-    }
+    const onResize = () => {
+      try { fit.fit(); } catch { /* ignore */ }
+    };
+    const ro = new ResizeObserver(onResize);
+    ro.observe(hostRef.current);
+    window.addEventListener('resize', onResize);
+    const counter = setInterval(() => setLines(lineCountRef.current), 700);
 
     return () => {
-      activeRef.current = false;
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-      if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current);
-        retryTimerRef.current = null;
-      }
+      disposed = true;
+      clearInterval(counter);
+      window.removeEventListener('resize', onResize);
+      ro.disconnect();
+      alertEsRef.current?.close();
+      connEsRef.current?.close();
+      alertEsRef.current = null;
+      connEsRef.current = null;
+      term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+      setConnected(false);
     };
-  }, [isOpen, connectSSE]);
+  }, [isOpen, asPanel, write, banner]);
 
-  // Reanudar: volcar cola de pausa
-  useEffect(() => {
-    if (!isPaused && pendingWhilePaused.length > 0) {
-      setEvents((prev) => {
-        const ids = new Set(prev.map((e) => e.id));
-        const merged = [...prev];
-        for (const ev of pendingWhilePaused) {
-          if (!ids.has(ev.id)) {
-            merged.push(ev);
-            ids.add(ev.id);
-          }
+  const togglePause = () => {
+    setPaused((prev) => {
+      const next = !prev;
+      pausedRef.current = next;
+      if (!next && pendingRef.current.length > 0) {
+        const term = termRef.current;
+        if (term) {
+          pendingRef.current.forEach((line) => term.writeln(line));
+          lineCountRef.current += pendingRef.current.length;
         }
-        return merged.length > MAX_EVENTS ? merged.slice(merged.length - MAX_EVENTS) : merged;
-      });
-      setPendingWhilePaused([]);
-      pendingRef.current = [];
-    }
-  }, [isPaused, pendingWhilePaused]);
-
-  // ── Auto-scroll ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (autoScroll && !isPaused && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [events, autoScroll, isPaused]);
-
-  const handleScroll = () => {
-    if (!scrollRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    const atBottom = scrollHeight - scrollTop - clientHeight < 40;
-    if (!atBottom && autoScroll) {
-      setAutoScroll(false);
-    }
-  };
-
-  const filteredEvents = useMemo(() => {
-    const query = searchFilter.trim().toLowerCase();
-    return events.filter((ev) => {
-      if (ev.level < minLevel) return false;
-      if (!query) return true;
-      return (
-        ev.rule_id.toLowerCase().includes(query) ||
-        ev.description.toLowerCase().includes(query) ||
-        ev.agent_name.toLowerCase().includes(query) ||
-        (ev.src_ip && ev.src_ip.toLowerCase().includes(query)) ||
-        (ev.src_user && ev.src_user.toLowerCase().includes(query)) ||
-        (ev.dst_user && ev.dst_user.toLowerCase().includes(query)) ||
-        (ev.command && ev.command.toLowerCase().includes(query)) ||
-        (ev.full_log && ev.full_log.toLowerCase().includes(query))
-      );
+        pendingRef.current = [];
+      }
+      return next;
     });
-  }, [events, searchFilter, minLevel]);
-
-  const handleClear = () => {
-    setEvents([]);
-    setPendingWhilePaused([]);
-    pendingRef.current = [];
   };
 
-  const handleCopy = () => {
-    const textLines = filteredEvents.map((ev) => {
-      const src = ev.src_ip ? `${ev.src_ip}:${ev.src_port || ''}` : 'local';
-      return `${ev.timestamp} [L${ev.level}] [${ev.agent_name}] [${src}] #${ev.rule_id}: ${ev.description} | ${ev.full_log}`;
-    }).join('\n');
-
-    navigator.clipboard.writeText(textLines).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }).catch(() => undefined);
+  const clear = () => {
+    const term = termRef.current;
+    if (!term) return;
+    term.clear();
+    lineCountRef.current = 0;
+    setLines(0);
+    banner(sourceInfo);
   };
 
-  const handleSimulate = async () => {
-    setSimulating(true);
-    try {
-      await simulateTrafficEvent({
-        rule_id: '57100',
-        level: 10,
-        description: 'Simulación: SSH login exitoso generado desde la consola del Dashboard',
-        src_ip: '192.168.122.1',
-        src_user: 'operator',
-      });
-    } catch {
-      // el error de red no debe romper la UI; el stream mostrará el evento si llega
-    } finally {
-      setTimeout(() => setSimulating(false), 600);
-    }
-  };
+  if (!isOpen && !asPanel) return null;
 
-  if (!isOpen) return null;
-
-  const levelBadgeClass = (lvl: number) => {
-    if (lvl >= 12) return 't-level crit';
-    if (lvl >= 8) return 't-level high';
-    if (lvl >= 5) return 't-level warn';
-    return 't-level info';
-  };
-
-  const levelText = (lvl: number) => {
-    if (lvl >= 12) return `CRIT L${lvl}`;
-    if (lvl >= 8) return `HIGH L${lvl}`;
-    if (lvl >= 5) return `WARN L${lvl}`;
-    return `INFO L${lvl}`;
-  };
-
-  const resolvedSource =
-    sourceInfo?.resolved ||
-    sourceInfo?.mode ||
-    'auto';
-  const sourceLabel = SOURCE_LABELS[resolvedSource] || resolvedSource;
-
-  const window = (
-    <div
-      className={`traffic-terminal-window ${maximized ? 'maximized' : ''} ${asPanel ? 'as-panel' : ''}`}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {/* ── Titlebar ── */}
-      <div className="terminal-titlebar">
-        <div className="terminal-titlebar-left">
-          {asPanel && (
-            <button
-              type="button"
-              className="terminal-back-btn"
-              onClick={onClose}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                background: 'rgba(255, 255, 255, 0.08)',
-                border: '1px solid var(--border-card)',
-                color: 'var(--text-primary)',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                marginRight: '6px',
-                transition: 'all 0.2s',
-              }}
-              title="Volver a la vista del Dashboard"
-            >
-              <ArrowLeft size={13} />
-              <span>Dashboard</span>
-            </button>
-          )}
-
-          {!asPanel && (
-            <div className="terminal-window-dots">
-              <button className="terminal-dot close" onClick={onClose} title="Cerrar terminal" />
-              <button className="terminal-dot minimize" onClick={() => setMaximized(false)} title="Restaurar ventana" />
-              <button className="terminal-dot maximize" onClick={() => setMaximized((p) => !p)} title="Maximizar terminal" />
+  return (
+    <div className={`live-console-host ${asPanel ? 'as-panel' : ''} ${maximized ? 'maximized' : ''}`}>
+      <div className="live-console-window">
+        <div className="live-console-toolbar">
+          <div className="live-console-left">
+            {asPanel && (
+              <button className="live-console-btn" onClick={onClose} title="Volver al dashboard">
+                <ArrowLeft size={13} /> Dashboard
+              </button>
+            )}
+            <div className="live-console-title">
+              <Cable size={15} />
+              <span>wazuh@relay:~$</span>
+              <span className="live-console-tag">
+                tráfico en vivo · {SOURCE_LABELS[sourceInfo?.resolved || sourceInfo?.mode || 'auto'] || 'auto'}
+              </span>
             </div>
-          )}
-
-          <div className="terminal-title">
-            <Terminal size={16} style={{ color: '#00e5ff' }} />
-            <span>wazuh@relay:~$</span>
-            <span className="terminal-title-tag">
-              tráfico Wazuh · fuente: {sourceLabel}
+            <span className={`live-console-status ${connected ? 'on' : 'off'}`}>
+              <span className="dot" /> {connected ? 'STREAM ACTIVO' : 'RECONECTANDO'}
             </span>
           </div>
 
-          <div className={`terminal-status-badge ${connected ? (isPaused ? 'paused' : 'live') : 'offline'}`}>
-            <div className="terminal-pulse-dot" />
-            {connected ? (isPaused ? `EN PAUSA (+${pendingWhilePaused.length})` : 'LIVE (SSE)') : 'RECONECTANDO'}
-          </div>
-        </div>
-
-        <div className="terminal-titlebar-right">
-          {!asPanel && (
-            <>
-              <button
-                className="terminal-action-icon-btn"
-                onClick={() => setMaximized((p) => !p)}
-                title={maximized ? 'Restaurar' : 'Maximizar'}
-              >
-                {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-              </button>
-              <button className="terminal-action-icon-btn" onClick={onClose} title="Cerrar (Esc)">
-                <X size={15} />
-              </button>
-            </>
-          )}
-          {asPanel && (
-            <button className="terminal-action-icon-btn" onClick={onClose} title="Volver al dashboard">
-              <X size={15} />
+          <div className="live-console-right">
+            <div className="live-console-search">
+              <Search size={12} />
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="filtrar ip, agente, regla, dominio..."
+              />
+            </div>
+            <button className={`live-console-btn ${paused ? 'active' : ''}`} onClick={togglePause} title={paused ? 'Reanudar' : 'Pausar'}>
+              {paused ? <Play size={12} /> : <Pause size={12} />}
+              <span>{paused ? `Reanudar${pendingRef.current.length ? ` (${pendingRef.current.length})` : ''}` : 'Pausar'}</span>
             </button>
-          )}
-        </div>
-      </div>
-
-      {/* ── Toolbar ── */}
-      <div className="terminal-toolbar">
-        <div className="terminal-toolbar-left">
-          <button
-            className={`terminal-btn ${isPaused ? 'active' : ''}`}
-            onClick={() => setIsPaused((p) => !p)}
-            title={isPaused ? 'Reanudar y volcar eventos encolados' : 'Pausar: retiene eventos sin mover el scroll'}
-          >
-            {isPaused ? <Play size={12} /> : <Pause size={12} />}
-            <span>{isPaused ? `Reanudar${pendingWhilePaused.length ? ` (+${pendingWhilePaused.length})` : ''}` : 'Pausar'}</span>
-          </button>
-
-          <button
-            className={`terminal-btn ${autoScroll ? 'active' : ''}`}
-            onClick={() => {
-              setAutoScroll(true);
-              if (scrollRef.current) {
-                scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-              }
-            }}
-            title="Seguir automáticamente las líneas nuevas al final"
-          >
-            <ArrowDown size={12} />
-            <span>Auto-Scroll</span>
-          </button>
-
-          <button className="terminal-btn danger" onClick={handleClear} title="Limpiar buffer visual">
-            <Trash2 size={12} />
-            <span>Limpiar</span>
-          </button>
-
-          <button className="terminal-btn" onClick={handleCopy} title="Copiar logs visibles al portapapeles">
-            {copied ? <Check size={12} style={{ color: '#2ecc71' }} /> : <Copy size={12} />}
-            <span>{copied ? 'Copiado!' : 'Copiar'}</span>
-          </button>
-
-          <button
-            className={`terminal-btn ${showConnections ? 'active' : ''}`}
-            onClick={() => setShowConnections((v) => !v)}
-            title="Ver conexiones reales (entrante/saliente/escucha)"
-          >
-            <Terminal size={12} />
-            <span>Conexiones ({connections.length})</span>
-          </button>
-
-          <button
-            className="terminal-btn primary"
-            onClick={handleSimulate}
-            disabled={simulating}
-            title="Generar evento de prueba en el stream"
-          >
-            <Zap size={12} />
-            <span>{simulating ? 'Enviando...' : 'Test Event'}</span>
-          </button>
-        </div>
-
-        <div className="terminal-toolbar-right">
-          <select
-            className="terminal-select"
-            value={minLevel}
-            onChange={(e) => setMinLevel(Number(e.target.value))}
-            title="Filtrar por nivel mínimo de severidad"
-          >
-            <option value={1}>Severidad: Todas (L1+)</option>
-            <option value={3}>Severidad: Info (L3+)</option>
-            <option value={5}>Severidad: Media (L5+)</option>
-            <option value={8}>Severidad: Alta / WAHA (L8+)</option>
-            <option value={12}>Severidad: Crítica (L12+)</option>
-          </select>
-
-          <div className="terminal-search-box">
-            <Search size={13} style={{ color: '#6b7280' }} />
-            <input
-              type="text"
-              className="terminal-search-input"
-              placeholder="Buscar IP, regla, usuario, texto..."
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-            />
-            {searchFilter && (
-              <button
-                className="terminal-action-icon-btn"
-                style={{ padding: 0 }}
-                onClick={() => setSearchFilter('')}
-              >
-                <X size={12} />
+            <button className={`live-console-btn ${showConnections ? 'active' : ''}`} onClick={() => setShowConnections((v) => !v)} title="Mostrar/ocultar conexiones reales">
+              <Cable size={12} /> <span>Conexiones</span>
+            </button>
+            <button className="live-console-btn" onClick={clear} title="Limpiar pantalla">
+              <Trash2 size={12} /> <span>Limpiar</span>
+            </button>
+            <button className="live-console-btn icon" onClick={() => setMaximized((v) => !v)} title={maximized ? 'Restaurar' : 'Pantalla completa'}>
+              {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            </button>
+            {!asPanel && (
+              <button className="live-console-btn icon" onClick={onClose} title="Cerrar">
+                <X size={13} />
               </button>
             )}
           </div>
         </div>
-      </div>
 
-      {/* ── Console Output ── */}
-      <div className="terminal-output-container" ref={scrollRef} onScroll={handleScroll}>
-        <div className="terminal-welcome-banner">
-          <pre>{` _       __                     __  ______  ___   ____  ___   _____ ____  ______
-| |     / /___ _____  __  ______/ / / / __ \\/   | / __ \\/   | / ___// __ \\/ ____/
-| | /| / / __ \`/ __ \\/ / / / __  / / / /_/ / /| |/ /_/ / /| | \\__ \\/ / / / /
-| |/ |/ / /_/ / /_/ / /_/ / /_/ / /_/ / __  / ___ / _, _/ ___ |___/ / /_/ / /___
-|__/|__/\\__,_/\\__,_/\\__,_/\\__,_/\\____/_/ /_/_/  |_/_/ |_/_/  |_/____/\\____/\\____/`}</pre>
-          <div style={{ marginTop: '8px' }}>
-            <strong>Terminal de Telemetría y Tráfico Wazuh en Vivo</strong> · fuente:{' '}
-            <code>{sourceLabel}</code>
-            {sourceInfo?.journal && (
-              <>
-                {' · journal: '}
-                <code>{sourceInfo.journal}</code>
-              </>
-            )}
-            <br />
-            Muestra alertas de <strong>todos los agentes</strong> que reportan al manager Wazuh.
-            Clic en un evento para inspeccionar el payload JSON completo.
-          </div>
+        <div className="live-console-term-wrap">
+          <div ref={hostRef} className="live-console-term" />
         </div>
 
-        {showConnections ? (
-          <div className="terminal-connections-list">
-            {connections.length === 0 ? (
-              <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '12px' }}>
-                Esperando conexiones reales de los agentes (ss + syscollector)…
-              </div>
-            ) : (
-              connections
-                .filter((c) => {
-                  if (!searchFilter.trim()) return true;
-                  const q = searchFilter.toLowerCase();
-                  return `${c.agent_name || ''} ${c.local_ip || ''} ${c.remote_ip || ''} ${c.domain || ''} ${c.process || ''} ${c.protocol || ''}`
-                    .toLowerCase()
-                    .includes(q);
-                })
-                .map((c) => {
-                  const dir = String(c.direction || 'conn');
-                  const color = dir === 'inbound' ? '#34d399' : dir === 'outbound' ? '#38bdf8' : '#cbd5e1';
-                  return (
-                    <div key={c.id} className="terminal-conn-row">
-                      <span className="t-time">{(c.timestamp || '').replace('T', ' ').slice(11, 19) || '--:--:--'}</span>
-                      <span className="t-agent">[{c.agent_id}] {c.agent_name}</span>
-                      <span className="terminal-conn-dir" style={{ color, borderColor: color }}>{dir.toUpperCase()}</span>
-                      <code>{c.local_ip}:{c.local_port}</code>
-                      <span className="terminal-conn-arrow">→</span>
-                      <code>{c.remote_ip}:{c.remote_port}</code>
-                      {c.domain && <span className="terminal-conn-domain">{c.domain}</span>}
-                      <span className="terminal-conn-proto">{c.protocol}</span>
-                      {c.process && <span className="terminal-conn-proc">[{c.process}]</span>}
-                    </div>
-                  );
-                })
-            )}
-          </div>
-        ) : filteredEvents.length === 0 ? (
-          <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '12px' }}>
-            {events.length === 0
-              ? 'Conectando al stream de Wazuh... esperando tráfico de los agentes.'
-              : 'Ningún evento coincide con los filtros aplicados.'}
-            <span className="terminal-cursor" />
-          </div>
-        ) : (
-          filteredEvents.map((ev, index) => {
-            const isExpanded = expandedId === ev.id;
-            const formattedTime = ev.timestamp ? ev.timestamp.replace('T', ' ').slice(11, 23) : '--:--:--';
-            const srcDisplay = ev.src_ip ? `${ev.src_ip}${ev.src_port ? `:${ev.src_port}` : ''}` : '';
-
-            return (
-              <div
-                key={`${ev.id}-${index}`}
-                className={`terminal-row ${isExpanded ? 'expanded' : ''}`}
-                onClick={() => setExpandedId(isExpanded ? null : ev.id)}
-              >
-                <div className="terminal-row-line">
-                  {isExpanded ? <ChevronDown size={11} color="#00e5ff" /> : <ChevronRight size={11} color="#6b7280" />}
-                  <span className="t-time">{formattedTime}</span>
-                  <span className={levelBadgeClass(ev.level)}>{levelText(ev.level)}</span>
-                  <span className="t-agent">[{ev.agent_name || ev.agent_id}]</span>
-                  {srcDisplay && <span className="t-ip">[{srcDisplay}]</span>}
-                  <span className="t-rule">#{ev.rule_id}</span>
-                  <span className="t-desc">{ev.description}</span>
-                  {ev.source && ev.source !== 'unknown' && (
-                    <span className="t-mitre">[{ev.source}]</span>
-                  )}
-                  {ev.mitre_ids && ev.mitre_ids.length > 0 && (
-                    <span className="t-mitre">[{ev.mitre_ids.join(', ')}]</span>
-                  )}
-                </div>
-
-                {isExpanded && (
-                  <div className="terminal-row-detail" onClick={(e) => e.stopPropagation()}>
-                    <div className="terminal-meta-grid">
-                      <div className="terminal-meta-item">
-                        <span className="terminal-meta-label">Timestamp completo:</span>
-                        <span className="terminal-meta-val">{ev.timestamp}</span>
-                      </div>
-                      <div className="terminal-meta-item">
-                        <span className="terminal-meta-label">Agente:</span>
-                        <span className="terminal-meta-val">{ev.agent_name} (ID: {ev.agent_id})</span>
-                      </div>
-                      {ev.src_ip && (
-                        <div className="terminal-meta-item">
-                          <span className="terminal-meta-label">IP / Puerto Origen:</span>
-                          <span className="terminal-meta-val" style={{ color: '#00e5ff' }}>
-                            {ev.src_ip}{ev.src_port ? `:${ev.src_port}` : ''}
-                          </span>
-                        </div>
-                      )}
-                      {(ev.src_user || ev.dst_user) && (
-                        <div className="terminal-meta-item">
-                          <span className="terminal-meta-label">Usuarios:</span>
-                          <span className="terminal-meta-val">
-                            {ev.src_user ? `origen: ${ev.src_user} ` : ''}
-                            {ev.dst_user ? `destino: ${ev.dst_user}` : ''}
-                          </span>
-                        </div>
-                      )}
-                      {ev.command && (
-                        <div className="terminal-meta-item">
-                          <span className="terminal-meta-label">Comando ejecutado:</span>
-                          <span className="terminal-meta-val" style={{ color: '#f39c12' }}>{ev.command}</span>
-                        </div>
-                      )}
-                      {ev.location && (
-                        <div className="terminal-meta-item">
-                          <span className="terminal-meta-label">Ubicación / Decoder:</span>
-                          <span className="terminal-meta-val">{ev.location}</span>
-                        </div>
-                      )}
-                      {ev.source && (
-                        <div className="terminal-meta-item">
-                          <span className="terminal-meta-label">Fuente:</span>
-                          <span className="terminal-meta-val">{SOURCE_LABELS[ev.source] || ev.source}</span>
-                        </div>
-                      )}
-                      {ev.mitre_techniques && ev.mitre_techniques.length > 0 && (
-                        <div className="terminal-meta-item">
-                          <span className="terminal-meta-label">Técnicas MITRE:</span>
-                          <span className="terminal-meta-val" style={{ color: '#ec4899' }}>
-                            {ev.mitre_techniques.join(', ')}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {ev.full_log && (
-                      <div>
-                        <div className="terminal-meta-label" style={{ marginBottom: '4px' }}>Log en Bruto:</div>
-                        <div style={{ background: '#090d16', padding: '6px 8px', borderRadius: '4px', color: '#e5e7eb', fontSize: '11px', wordBreak: 'break-all' }}>
-                          {ev.full_log}
-                        </div>
-                      </div>
-                    )}
-
-                    {ev.raw_json != null && (
-                      <div>
-                        <div className="terminal-meta-label" style={{ marginBottom: '4px' }}>Payload JSON de Wazuh:</div>
-                        <pre className="terminal-json-viewer">
-                          {JSON.stringify(ev.raw_json, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {/* ── Footer ── */}
-      <div className="terminal-footer">
-        <div className="terminal-footer-left">
-          <div className="terminal-footer-chip">
-            <span>Eventos visibles:</span>
-            <strong>{filteredEvents.length}</strong> / {events.length}
-          </div>
-          {searchFilter && (
-            <div className="terminal-footer-chip" style={{ color: '#00e5ff' }}>
-              <span>Filtro activo:</span>
-              <strong>"{searchFilter}"</strong>
-            </div>
-          )}
-          {minLevel > 1 && (
-            <div className="terminal-footer-chip" style={{ color: '#f39c12' }}>
-              <span>Nivel min:</span>
-              <strong>L{minLevel}</strong>
-            </div>
-          )}
-          {isPaused && pendingWhilePaused.length > 0 && (
-            <div className="terminal-footer-chip" style={{ color: '#f1c40f' }}>
-              <span>Encolados en pausa:</span>
-              <strong>{pendingWhilePaused.length}</strong>
-            </div>
-          )}
-        </div>
-
-        <div className="terminal-footer-right">
-          <div className="terminal-footer-chip">
-            <span>Fuente:</span>
-            <strong style={{ color: '#00e5ff' }}>{sourceLabel}</strong>
-          </div>
-          <div className="terminal-footer-chip">
-            <span>Auto-Scroll:</span>
-            <strong style={{ color: autoScroll ? '#2ecc71' : '#e74c3c' }}>
-              {autoScroll ? 'ACTIVO' : 'PAUSADO'}
-            </strong>
-          </div>
-          <div className="terminal-footer-chip">
-            <span>Buffer:</span>
-            <strong>{events.length} / {MAX_EVENTS}</strong>
-          </div>
+        <div className="live-console-footer">
+          <span>{lines} líneas</span>
+          <span>fuente: {SOURCE_LABELS[sourceInfo?.resolved || sourceInfo?.mode || 'auto'] || 'auto'}</span>
+          <span>{sourceInfo?.journal || ''}</span>
         </div>
       </div>
-    </div>
-  );
-
-  if (asPanel) {
-    return <div className="traffic-terminal-panel-host">{window}</div>;
-  }
-
-  return (
-    <div className="traffic-terminal-overlay" onClick={onClose}>
-      {window}
     </div>
   );
 };
