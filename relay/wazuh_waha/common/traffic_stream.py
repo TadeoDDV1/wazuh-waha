@@ -300,8 +300,20 @@ class TrafficStreamWatcher:
                     st = journal.path.stat()
                     if st.st_size < self._journal_offset:
                         _log.info("journal_truncated reseek")
+                        if self._journal_fd:
+                            try:
+                                self._journal_fd.close()
+                            except Exception:
+                                pass
+                        self._journal_fd, _ = journal.open_for_follow()
                         self._journal_offset = 0
                 except FileNotFoundError:
+                    if self._journal_fd:
+                        try:
+                            self._journal_fd.close()
+                        except Exception:
+                            pass
+                        self._journal_fd = None
                     await asyncio.sleep(1.0)
                     continue
 

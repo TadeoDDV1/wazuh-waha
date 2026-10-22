@@ -1518,12 +1518,12 @@ async def _generate_and_send_agent_report(agent_id: str, chat_id: str | None = N
         det_count = len(profile.get("recent_detections") or [])
 
         caption = (
-            f"📄 *Reporte Forense & Auditoría SOC (PDF v2.0)*\n"
+            f"📄 *Reporte Forense & Auditoría SOC (PDF v2.5)*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"• *Endpoint:* `{ag_name}` (ID: `{aid}`)\n"
             f"• *Sistema:* `{profile.get('os', {}).get('name', 'Linux')}`\n"
             f"• *SCA CIS:* `{sca_str}` · *Alertas:* `{det_count}`\n"
-            f"• *Contenido:* 10 apartados forenses explicados\n"
+            f"• *Contenido:* 13 apartados forenses explicados\n"
             f"• *Emisión:* `{time.strftime('%d/%m/%Y %H:%M:%S')}` ({round(len(pdf_bytes)/1024, 1)} KB)\n"
             f"_Wazuh-WAHA SOC Suite_"
         )

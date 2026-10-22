@@ -751,48 +751,85 @@ async def _check_socket_port(host: str, port: int, timeout: float = 0.5) -> bool
         return False
 
 
+def _read_agents_from_global_db() -> list[dict[str, Any]]:
+    """Lee el catálogo de agentes directamente de /var/ossec/queue/db/global.db como fallback ultra-rápido."""
+    db_path = "/var/ossec/queue/db/global.db"
+    if not os.path.exists(db_path):
+        return []
+    try:
+        uri = f"file:{db_path}?mode=ro"
+        with sqlite3.connect(uri, uri=True, timeout=1.5) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, name, ip, register_ip, os_name, os_version, os_platform, os_arch, version, last_keepalive, connection_status FROM agent ORDER BY id ASC"
+            )
+            items = []
+            for r in cursor.fetchall():
+                aid = str(r["id"]).zfill(3)
+                lka = r["last_keepalive"]
+                try:
+                    lka_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(lka)) if lka and lka < 2000000000 else "-"
+                except Exception:
+                    lka_str = "-"
+                items.append({
+                    "id": aid,
+                    "name": r["name"] or f"agent-{aid}",
+                    "ip": r["ip"] or r["register_ip"] or "127.0.0.1",
+                    "status": r["connection_status"] or "active",
+                    "os": {
+                        "name": r["os_name"] or "Linux",
+                        "platform": r["os_platform"] or "linux",
+                        "version": r["os_version"] or "",
+                        "arch": r["os_arch"] or "x86_64",
+                    },
+                    "version": r["version"] or "Wazuh v4.x",
+                    "lastKeepAlive": lka_str,
+                })
+            return items
+    except Exception as e:
+        log.debug("read_agents_global_db_failed err=%s", e)
+        return []
+
+
 async def _fetch_network_agents_data() -> list[dict[str, Any]]:
-    """Obtiene información de agentes conectados desde la API de Wazuh con fallback local."""
+    """Obtiene información de agentes conectados desde la API de Wazuh con fallback a global.db."""
     from ..config import settings
     from ..infrastructure.notifier import _get_token
     import httpx
 
     mgr_host = settings.wazuh_manager_host or settings.wazuh_server_ip
-    if not mgr_host or not settings.wazuh_manager_api_pass:
-        return [
-            {
-                "id": "000",
-                "name": settings.wazuh_vm_ssh_user or "manager-host",
-                "ip": mgr_host or "127.0.0.1",
-                "status": "active",
-                "os": {"name": "Linux", "arch": "x86_64"},
-                "version": "Wazuh v4.9.0",
-                "lastKeepAlive": time.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-        ]
+    if mgr_host and settings.wazuh_manager_api_pass:
+        base = f"https://{mgr_host}:{settings.wazuh_manager_api_port}"
+        verify = settings.wazuh_manager_api_verify_tls
 
-    base = f"https://{mgr_host}:{settings.wazuh_manager_api_port}"
-    verify = settings.wazuh_manager_api_verify_tls
+        try:
+            async with httpx.AsyncClient(timeout=10, verify=verify) as client:
+                token = await _get_token(client)
+                if token:
+                    headers = {"Authorization": f"Bearer {token}"}
+                    r = await client.get(f"{base}/agents?limit=100", headers=headers)
+                    if r.is_success:
+                        items = r.json().get("data", {}).get("affected_items", [])
+                        if items:
+                            return items
+        except Exception as e:
+            log.debug("fetch_network_agents_api_err err=%s", e)
 
-    try:
-        async with httpx.AsyncClient(timeout=4, verify=verify) as client:
-            token = await _get_token(client)
-            if token:
-                headers = {"Authorization": f"Bearer {token}"}
-                r = await client.get(f"{base}/agents", headers=headers)
-                if r.is_success:
-                    return r.json().get("data", {}).get("affected_items", [])
-    except Exception:
-        pass
+    # Fallback 1: SQLite local directo (siempre actualizado y sin timeouts)
+    local_agents = _read_agents_from_global_db()
+    if local_agents:
+        return local_agents
 
+    # Fallback 2: Entrada básica del manager
     return [
         {
             "id": "000",
-            "name": "wazuh-manager",
+            "name": settings.wazuh_vm_ssh_user or "wazuh-manager",
             "ip": mgr_host or "127.0.0.1",
             "status": "active",
             "os": {"name": "Linux", "arch": "x86_64"},
-            "version": "Wazuh v4.9.0",
+            "version": "Wazuh v4.x",
             "lastKeepAlive": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
     ]
@@ -1909,8 +1946,182 @@ async def _fetch_agent_full_profile(agent_id: str) -> dict[str, Any]:
         except Exception:
             pass
 
+    # Enriquecimiento y fallbacks directos desde SQLite (/var/ossec/queue/db/{aid}.db)
+    _enrich_profile_from_sqlite(profile, aid)
+
     _AGENT_PROFILE_CACHE[aid] = {"data": profile, "_ts": now}
     return profile
+
+
+def _enrich_profile_from_sqlite(profile: dict[str, Any], aid: str) -> None:
+    """Extrae datos de módulos forenses directamente desde /var/ossec/queue/db/{aid}.db."""
+    db_path = f"/var/ossec/queue/db/{aid}.db"
+    if not os.path.exists(db_path):
+        return
+    try:
+        uri = f"file:{db_path}?mode=ro"
+        with sqlite3.connect(uri, uri=True, timeout=1.5) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # 1. Cuentas de usuario (sys_users)
+            try:
+                cursor.execute("SELECT COUNT(*) FROM sys_users")
+                total_users = cursor.fetchone()[0]
+                cursor.execute(
+                    "SELECT user_name, user_id, user_group_id, user_home, user_shell FROM sys_users ORDER BY user_id ASC LIMIT 30"
+                )
+                users_list = [
+                    {
+                        "user_name": r["user_name"],
+                        "uid": r["user_id"],
+                        "gid": r["user_group_id"],
+                        "home": r["user_home"],
+                        "shell": r["user_shell"],
+                    }
+                    for r in cursor.fetchall()
+                ]
+                profile["users"] = {
+                    "total_users": total_users,
+                    "sample_users": users_list,
+                }
+            except Exception:
+                pass
+
+            # 2. Servicios del sistema (sys_services)
+            try:
+                cursor.execute("SELECT COUNT(*) FROM sys_services")
+                total_services = cursor.fetchone()[0]
+                cursor.execute(
+                    "SELECT service_name, service_description, service_state, service_enabled, service_start_type FROM sys_services ORDER BY service_name ASC LIMIT 40"
+                )
+                services_list = [
+                    {
+                        "name": r["service_name"],
+                        "description": r["service_description"] or "-",
+                        "state": r["service_state"] or "running",
+                        "enabled": r["service_enabled"] or "-",
+                        "start_type": r["service_start_type"] or "-",
+                    }
+                    for r in cursor.fetchall()
+                ]
+                profile["services"] = {
+                    "total_services": total_services,
+                    "sample_services": services_list,
+                }
+            except Exception:
+                pass
+
+            # 3. FIM fallback si API no trajo datos
+            if not profile.get("fim", {}).get("total_monitored"):
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM fim_entry")
+                    total_fim = cursor.fetchone()[0]
+                    cursor.execute(
+                        "SELECT file, size, perm, uname, date, md5 FROM fim_entry ORDER BY rowid DESC LIMIT 25"
+                    )
+                    fim_files = [
+                        {
+                            "file": r["file"],
+                            "size": r["size"] or 0,
+                            "perm": r["perm"] or "-",
+                            "uname": r["uname"] or "-",
+                            "date": r["date"] or "-",
+                            "md5": r["md5"] or "-",
+                        }
+                        for r in cursor.fetchall()
+                    ]
+                    profile["fim"] = {
+                        "total_monitored": total_fim,
+                        "recent_files": fim_files,
+                    }
+                except Exception:
+                    pass
+
+            # 4. SCA fallback si API no trajo datos
+            if not profile.get("sca", {}).get("total_checks"):
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM sca_check WHERE result='passed'")
+                    pass_c = cursor.fetchone()[0]
+                    cursor.execute("SELECT COUNT(*) FROM sca_check WHERE result='failed'")
+                    fail_c = cursor.fetchone()[0]
+                    tot = pass_c + fail_c
+                    score = round((pass_c / tot * 100), 1) if tot > 0 else 0
+                    cursor.execute(
+                        "SELECT id, title, rationale, remediation FROM sca_check WHERE result='failed' LIMIT 15"
+                    )
+                    failed = [
+                        {
+                            "id": r["id"],
+                            "title": r["title"] or "Control fallado",
+                            "rationale": (r["rationale"] or "")[:140],
+                            "remediation": (r["remediation"] or "")[:140],
+                        }
+                        for r in cursor.fetchall()
+                    ]
+                    profile["sca"] = {
+                        "name": "CIS Benchmark (Auditoría Integral)",
+                        "policy_id": "cis",
+                        "score": score,
+                        "pass": pass_c,
+                        "fail": fail_c,
+                        "total_checks": tot,
+                        "failed_checks": failed,
+                    }
+                except Exception:
+                    pass
+
+            # 5. Software fallback si API no trajo datos
+            if not profile.get("software", {}).get("total_packages"):
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM sys_programs")
+                    tot_pkg = cursor.fetchone()[0]
+                    cursor.execute(
+                        "SELECT name, version, vendor, description FROM sys_programs ORDER BY name ASC LIMIT 30"
+                    )
+                    pkgs = [
+                        {
+                            "name": r["name"],
+                            "version": r["version"] or "-",
+                            "vendor": r["vendor"] or "-",
+                            "description": (r["description"] or "")[:80],
+                        }
+                        for r in cursor.fetchall()
+                    ]
+                    profile["software"] = {
+                        "total_packages": tot_pkg,
+                        "sample_packages": pkgs,
+                    }
+                except Exception:
+                    pass
+
+            # 6. Puertos fallback si no hay datos
+            if not profile.get("ports", {}).get("total_count"):
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM sys_ports")
+                    tot_ports = cursor.fetchone()[0]
+                    cursor.execute(
+                        "SELECT protocol, local_ip, local_port, process, PID as pid, state FROM sys_ports LIMIT 50"
+                    )
+                    ports_items = [
+                        {
+                            "protocol": (r["protocol"] or "tcp").upper(),
+                            "local_ip": r["local_ip"] or "",
+                            "local_port": r["local_port"] or 0,
+                            "process": r["process"] or "sistema",
+                            "pid": r["pid"] or 0,
+                            "state": r["state"] or "listening",
+                        }
+                        for r in cursor.fetchall()
+                    ]
+                    profile["ports"] = {
+                        "total_count": tot_ports,
+                        "items": ports_items,
+                    }
+                except Exception:
+                    pass
+    except Exception as e:
+        log.debug("enrich_profile_sqlite_err aid=%s err=%s", aid, e)
 
 
 @router.get("/api/v1/telemetry/agents/{agent_id}/full-profile")

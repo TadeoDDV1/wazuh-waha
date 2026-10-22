@@ -853,9 +853,113 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
     story.append(Spacer(1, 4 * mm))
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 8. SEGURIDAD DE CONFIGURACIÓN (SCA — CIS BENCHMARK)
+    # 8. AUDITORÍA DE CUENTAS DE USUARIO Y PRIVILEGIOS DEL SISTEMA
     # ══════════════════════════════════════════════════════════════════════════
-    story.append(Paragraph(f"8. Seguridad de Configuración (SCA) — {_fmt(sca.get('name'), 'CIS Benchmark')}", section_style))
+    users_data = profile.get("users") or {}
+    sample_users = users_data.get("sample_users") or []
+    total_users_count = users_data.get("total_users", len(sample_users))
+
+    story.append(Paragraph(f"8. Auditoría de Cuentas de Usuario y Privilegios ({total_users_count} cuentas registradas)", section_style))
+    _add_section_callout(
+        objective="Auditar las cuentas de usuario locales declaradas en el endpoint, sus identificadores UID/GID, directorios home y shells asignados.",
+        relevance="Permite descubrir cuentas no autorizadas, puertas traseras creadas con UID 0 (root), cuentas de servicio con shells interactivos o permisos anómalos.",
+        interpretation="Solo las cuentas administrativas legítimas deben tener UID 0 o shells activos (/bin/bash, /bin/sh). Cuentas de sistema/daemons deben tener /usr/sbin/nologin o /bin/false.",
+    )
+
+    if sample_users:
+        u_header = [
+            Paragraph("Nombre de Usuario", cell_header_style),
+            Paragraph("UID / GID", cell_header_style),
+            Paragraph("Directorio Home", cell_header_style),
+            Paragraph("Shell de Acceso", cell_header_style),
+            Paragraph("Nivel de Privilegio", cell_header_style),
+        ]
+        u_rows = [u_header]
+        for u in sample_users[:25]:
+            uid_val = str(u.get("uid", "-"))
+            shell_val = str(u.get("shell") or "-")
+            is_root = uid_val == "0" or u.get("user_name") == "root"
+            is_interactive = any(s in shell_val for s in ("bash", "sh", "zsh", "fish")) and not any(n in shell_val for n in ("nologin", "false"))
+
+            if is_root:
+                priv_tag = "<font color='#ef4444'><b>SUPERUSUARIO (ROOT)</b></font>"
+            elif is_interactive:
+                priv_tag = "<font color='#0284c7'><b>INTERACTIVO</b></font>"
+            else:
+                priv_tag = "<font color='#64748b'>Servicio / Daemon</font>"
+
+            u_rows.append([
+                Paragraph(_fmt(u.get("user_name")), cell_bold_style),
+                Paragraph(f"{uid_val} / {_fmt(u.get('gid'))}", cell_style),
+                Paragraph(_fmt(u.get("home")), cell_style),
+                Paragraph(_fmt(shell_val), cell_style),
+                Paragraph(priv_tag, cell_style),
+            ])
+        t_users = Table(u_rows, colWidths=[40 * mm, 24 * mm, 46 * mm, 36 * mm, 32 * mm])
+        t_users.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t_users)
+    else:
+        _add_empty_state("Sin registros de cuentas de usuario reportados en Syscollector.")
+    story.append(Spacer(1, 4 * mm))
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 9. SERVICIOS Y DAEMONS DEL SISTEMA SUPERVISADOS
+    # ══════════════════════════════════════════════════════════════════════════
+    services_data = profile.get("services") or {}
+    sample_services = services_data.get("sample_services") or []
+    total_services_count = services_data.get("total_services", len(sample_services))
+
+    story.append(Paragraph(f"9. Servicios y Daemons del Sistema ({total_services_count} servicios supervisados)", section_style))
+    _add_section_callout(
+        objective="Auditar el catálogo de servicios en segundo plano, su estado de ejecución actual y directiva de inicio automático del sistema.",
+        relevance="Detecta servicios maliciosos persistentes, daemons deshabilitados o servicios críticos caídos que comprometen la operación del endpoint.",
+        interpretation="Servicios con estado 'running' pero sin descripción clara o con binarios en /tmp o rutas no estándar deben aislarse para análisis de malware.",
+    )
+
+    if sample_services:
+        s_header = [
+            Paragraph("Nombre del Servicio", cell_header_style),
+            Paragraph("Estado de Ejecución", cell_header_style),
+            Paragraph("Arranque", cell_header_style),
+            Paragraph("Descripción / Propósito", cell_header_style),
+        ]
+        s_rows = [s_header]
+        for s in sample_services[:25]:
+            st_val = str(s.get("state", "unknown")).lower()
+            st_color = "#10b981" if "run" in st_val or "active" in st_val else "#64748b"
+            s_rows.append([
+                Paragraph(_fmt(s.get("name")), cell_bold_style),
+                Paragraph(f"<font color='{st_color}'><b>{st_val.upper()}</b></font>", cell_style),
+                Paragraph(_fmt(s.get("start_type") or s.get("enabled")), cell_style),
+                Paragraph(_fmt((s.get("description") or "-")[:75]), cell_style),
+            ])
+        t_services = Table(s_rows, colWidths=[48 * mm, 32 * mm, 26 * mm, 72 * mm])
+        t_services.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t_services)
+    else:
+        _add_empty_state("Sin registros de servicios del sistema reportados en Syscollector.")
+    story.append(Spacer(1, 4 * mm))
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 10. SEGURIDAD DE CONFIGURACIÓN (SCA — CIS BENCHMARK)
+    # ══════════════════════════════════════════════════════════════════════════
+    story.append(Paragraph(f"10. Seguridad de Configuración (SCA) — {_fmt(sca.get('name'), 'CIS Benchmark')}", section_style))
     _add_section_callout(
         objective="Auditar la postura de fortificación (hardening) del sistema operativo contra los estándares internacionales del Center for Internet Security (CIS Benchmark).",
         relevance="Las brechas de configuración (como permisos laxos, contraseñas débiles o servicios obsoletos activos) son los vectores más explotados por atacantes para acceder a una red.",
@@ -910,10 +1014,10 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
     story.append(Spacer(1, 4 * mm))
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 9. INTEGRIDAD DE ARCHIVOS (FIM) & AUDITORÍA ANTIMALWARE (ROOTCHECK)
+    # 11. INTEGRIDAD DE ARCHIVOS (FIM) & AUDITORÍA ANTIMALWARE (ROOTCHECK)
     # ══════════════════════════════════════════════════════════════════════════
     fim_files = fim.get("recent_files") or []
-    story.append(Paragraph(f"9. Integridad de Archivos (FIM) & Auditoría Antimalware ({fim_count} archivos supervisados)", section_style))
+    story.append(Paragraph(f"11. Integridad de Archivos (FIM) & Auditoría Antimalware ({fim_count} archivos supervisados)", section_style))
     _add_section_callout(
         objective="Rastrear cambios, modificaciones no autorizadas, alteraciones de permisos o creación/eliminación de archivos críticos del sistema mediante huellas hash MD5/SHA256, y auditar malware, rootkits y anomalías del kernel.",
         relevance="La alteración de archivos de configuración (/etc/passwd, /etc/sudoers), reemplazo de binarios o presencia de ganchos ocultos es el sello de intrusiones y rootkits.",
@@ -987,9 +1091,9 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
     story.append(Spacer(1, 4 * mm))
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 10. DETECCIONES Y ALERTAS RECIENTES DE SEGURIDAD (WAZUH SIEM)
+    # 12. DETECCIONES Y ALERTAS RECIENTES DE SEGURIDAD (WAZUH SIEM)
     # ══════════════════════════════════════════════════════════════════════════
-    story.append(Paragraph(f"10. Detecciones y Alertas Recientes de Seguridad ({len(detections)} eventos)", section_style))
+    story.append(Paragraph(f"12. Detecciones y Alertas Recientes de Seguridad ({len(detections)} eventos)", section_style))
     _add_section_callout(
         objective="Consolidar las alertas e incidentes de seguridad correlacionados por los motores de reglas y firmas del Wazuh SIEM en el endpoint.",
         relevance="Provee la evidencia directa de intentos de intrusión (fuerza bruta SSH, escaneo de puertos, inyección, malware o anomalías de comportamiento).",
@@ -1132,10 +1236,10 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
         _add_empty_state("No se registran alertas de seguridad en el periodo analizado para este agente.")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 11. DICTAMEN EJECUTIVO Y RECOMENDACIONES DEL SOC
+    # 13. DICTAMEN EJECUTIVO Y RECOMENDACIONES DEL SOC
     # ══════════════════════════════════════════════════════════════════════════
     story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph("11. Dictamen Ejecutivo y Recomendaciones del SOC", section_style))
+    story.append(Paragraph("13. Dictamen Ejecutivo y Recomendaciones del SOC", section_style))
     _add_section_callout(
         objective="Sintetizar la postura de seguridad global del agente analizado y prescribir las acciones técnicas de remediación inmediata recomendadas por el Centro de Operaciones de Seguridad.",
         relevance="Permite a los administradores de sistemas y oficiales de seguridad priorizar tareas de mitigación basadas en evidencias concretas recolectadas por Wazuh.",

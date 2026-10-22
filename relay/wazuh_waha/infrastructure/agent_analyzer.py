@@ -160,15 +160,23 @@ def format_hardening_report(profile: dict[str, Any], agent_id: str, trigger_reas
     vuln_count = len([d for d in recent_detections if "vulnerab" in str(d.get("description", "")).lower()])
     high_sev = len([d for d in recent_detections if int(d.get("level", 0)) >= 8])
 
+    # 8. Cuentas de Usuario y Privilegios
+    users_info = profile.get("users", {}) or {}
+    users_count = users_info.get("total_users", len(users_info.get("sample_users", [])))
+
+    # 9. Servicios y Daemons del Sistema
+    services_info = profile.get("services", {}) or {}
+    services_count = services_info.get("total_services", len(services_info.get("sample_services", [])))
+
     lines = [
-        "🟢 *[AGENTE CONECTADO • ANÁLISIS DE SEGURIDAD SOC]*",
+        "🟢 *[AGENTE CONECTADO • ANÁLISIS DE SEGURIDAD SOC • MULTI-MÓDULO]*",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━",
         f"🛡️ *Endpoint en Línea:* `{name}` _(ID: {aid})_",
         f"🌐 *Dirección IP:* `{ip}`",
         f"🐧 *Sistema Operativo:* `{os_desc}` ({arch}) • Kernel `{kernel}`",
         f"🔔 *Evento:* `Detección de {trigger_reason} y auditoría de apartados completada`",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        "📊 *RESUMEN DE APARTADOS DEL SIEM:*",
+        "📊 *REPORTE DE APARTADOS WAZUH:*",
         "",
         "1️⃣ *Seguridad de Configuración (CIS SCA):*",
         f"   • Postura Global: `[{bar}] {score:.1f}%`",
@@ -193,7 +201,13 @@ def format_hardening_report(profile: dict[str, Any], agent_id: str, trigger_reas
         f"   • Procesos Activos: `{procs_count} procesos ejecutándose`" if procs_count else "   • Procesos: `Monitoreo continuo activo`",
         f"   • Consumo de Memoria RAM: `{ram_str}`",
         "",
-        "7️⃣ *Alertas y Eventos SIEM Correlacionados:*",
+        "7️⃣ *Cuentas de Usuario & Seguridad de Acceso:*",
+        f"   • Cuentas Locales Auditadas: `{users_count} usuarios en sistema`" if users_count else "   • Cuentas de Usuario: `Auditadas`",
+        "",
+        "8️⃣ *Servicios & Daemons del Sistema:*",
+        f"   • Servicios Supervisados: `{services_count} servicios registrados`" if services_count else "   • Servicios: `En ejecución y supervisión activa`",
+        "",
+        "9️⃣ *Alertas y Eventos SIEM Correlacionados:*",
         f"   • Total Eventos Recientes: `{len(recent_detections)} eventos`",
     ]
 
@@ -261,10 +275,10 @@ async def analyze_and_notify_agent(agent_id: str, reason: str = "conexión") -> 
                 filename = f"reporte_agente_{aid}_{now_str}.pdf"
                 ag_name = profile.get("name") or profile.get("agent_name") or f"agente-{aid}"
                 caption = (
-                    f"📄 *Reporte Forense & Auditoría SOC (PDF v2.0)*\n"
+                    f"📄 *Reporte Forense & Auditoría SOC (PDF v2.5)*\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"• *Endpoint:* `{ag_name}` (ID: `{aid}`)\n"
-                    f"• *Auditoría:* 10 apartados forenses consolidados\n"
+                    f"• *Auditoría:* 13 apartados forenses consolidados\n"
                     f"• *Emisión:* `{time.strftime('%d/%m/%Y %H:%M:%S')}` ({round(len(pdf_bytes)/1024, 1)} KB)\n"
                     f"_Wazuh-WAHA SOC Suite_"
                 )
@@ -332,47 +346,62 @@ class AgentConnectionWatcher:
 
     async def _check_agents_state(self) -> None:
         host = settings.wazuh_server_ip or settings.wazuh_manager_host
-        if not host or not settings.wazuh_manager_api_pass:
+        agents: list[dict[str, Any]] = []
+
+        if host and settings.wazuh_manager_api_pass:
+            base = f"https://{host}:{settings.wazuh_manager_api_port}"
+            auth = (settings.wazuh_manager_api_user, settings.wazuh_manager_api_pass)
+            verify = settings.wazuh_manager_api_verify_tls
+
+            try:
+                async with httpx.AsyncClient(verify=verify, timeout=8.0) as client:
+                    r_auth = await client.post(f"{base}/security/user/authenticate", auth=auth)
+                    if r_auth.status_code == 200:
+                        token = r_auth.json().get("data", {}).get("token")
+                        headers = {"Authorization": f"Bearer {token}"}
+                        r_ag = await client.get(f"{base}/agents?limit=100", headers=headers)
+                        if r_ag.status_code == 200:
+                            agents = r_ag.json().get("data", {}).get("affected_items", []) or []
+            except Exception as e:
+                log.debug("check_agents_state_api_err err=%s", e)
+
+        # Fallback local a global.db si la API REST no respondió a tiempo
+        if not agents:
+            try:
+                from ..api.telemetry import _read_agents_from_global_db
+                agents = _read_agents_from_global_db()
+            except Exception:
+                pass
+
+        if not agents:
             return
 
-        base = f"https://{host}:{settings.wazuh_manager_api_port}"
-        auth = (settings.wazuh_manager_api_user, settings.wazuh_manager_api_pass)
-        verify = settings.wazuh_manager_api_verify_tls
+        now = time.time()
+        for ag in agents:
+            aid = str(ag.get("id", ""))
+            status = str(ag.get("status", "")).lower()
+            prev_status = _LAST_AGENT_STATUSES.get(aid)
 
-        try:
-            async with httpx.AsyncClient(verify=verify, timeout=8.0) as client:
-                r_auth = await client.post(f"{base}/security/user/authenticate", auth=auth)
-                if r_auth.status_code != 200:
-                    return
-                token = r_auth.json().get("data", {}).get("token")
-                headers = {"Authorization": f"Bearer {token}"}
+            # Detección de transición o nueva conexión de agente
+            is_new_connect = False
+            if status == "active":
+                if prev_status in ("disconnected", "never_connected", "pending"):
+                    is_new_connect = True
+                elif prev_status is None and aid not in _LAST_ANALYSIS_TS:
+                    # Primera detección de agente activo al iniciar
+                    is_new_connect = True
 
-                r_ag = await client.get(f"{base}/agents?limit=100", headers=headers)
-                if r_ag.status_code != 200:
-                    return
+            if is_new_connect:
+                last_ts = _LAST_ANALYSIS_TS.get(aid, 0.0)
+                if now - last_ts >= _ANALYSIS_COOLDOWN_SECONDS:
+                    reason = "conexión" if prev_status is None else "reconexión"
+                    log.info("agent_connection_detected aid=%s prev=%s cur=%s triggering_analysis=True", aid, prev_status, status)
+                    _LAST_ANALYSIS_TS[aid] = now
+                    asyncio.create_task(analyze_and_notify_agent(aid, reason=reason))
+                else:
+                    log.debug("agent_connection_cooldown_active aid=%s elapsed=%.1fs", aid, now - last_ts)
 
-                agents = r_ag.json().get("data", {}).get("affected_items", []) or []
-                now = time.time()
-
-                for ag in agents:
-                    aid = str(ag.get("id", ""))
-                    status = str(ag.get("status", "")).lower()
-                    prev_status = _LAST_AGENT_STATUSES.get(aid)
-
-                    # Detección de transición a activo
-                    if status == "active" and prev_status in ("disconnected", "never_connected"):
-                        last_ts = _LAST_ANALYSIS_TS.get(aid, 0.0)
-                        if now - last_ts >= _ANALYSIS_COOLDOWN_SECONDS:
-                            log.info("agent_connection_detected aid=%s prev=%s cur=%s triggering_analysis=True", aid, prev_status, status)
-                            _LAST_ANALYSIS_TS[aid] = now
-                            asyncio.create_task(analyze_and_notify_agent(aid, reason="reconexión"))
-                        else:
-                            log.debug("agent_connection_cooldown_active aid=%s elapsed=%.1fs", aid, now - last_ts)
-
-                    _LAST_AGENT_STATUSES[aid] = status
-
-        except Exception as e:
-            log.debug("check_agents_state_failed err=%s", e)
+            _LAST_AGENT_STATUSES[aid] = status
 
 
 agent_watcher = AgentConnectionWatcher()
