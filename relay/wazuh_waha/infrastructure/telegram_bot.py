@@ -2107,6 +2107,13 @@ async def process_admin_command(text: str, source: str = "telegram", chat_id: st
         target_aid = arg if arg else "000"
         from .agent_analyzer import analyze_and_notify_agent
         return await analyze_and_notify_agent(target_aid, reason="solicitud manual")
+    elif cmd in ("/desglose", "/breakdown", "/apartados"):
+        target_aid = arg if arg else "000"
+        from ..api.telemetry import _fetch_agent_full_profile
+        from ..domain.wazuh_breakdown import build_wazuh_module_breakdown, format_wazuh_breakdown_notification
+        prof = await _fetch_agent_full_profile(target_aid)
+        bd = build_wazuh_module_breakdown(prof)
+        return format_wazuh_breakdown_notification(bd, trigger_reason="solicitud de desglose")
     elif cmd in ("/agregar_agente", "/crear_agente", "/nuevo_agente"):
         if not arg:
             return "ℹ️ Uso: `/agregar_agente <nombre> [ip]`. Ejemplo: `/agregar_agente servidor-web 192.168.1.50`"

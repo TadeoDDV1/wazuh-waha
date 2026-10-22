@@ -2134,6 +2134,18 @@ async def agent_full_profile(
     return JSONResponse(content=data)
 
 
+@router.get("/api/v1/telemetry/agents/{agent_id}/breakdown")
+async def agent_module_breakdown(
+    agent_id: str,
+    _: None = Depends(verify_api_key),
+) -> JSONResponse:
+    """Devuelve el desglose módulo por módulo, regla por regla y en español de la postura del agente."""
+    from ..domain.wazuh_breakdown import build_wazuh_module_breakdown
+    profile = await _fetch_agent_full_profile(agent_id)
+    breakdown = build_wazuh_module_breakdown(profile)
+    return JSONResponse(content={"ok": True, "breakdown": breakdown})
+
+
 @router.get("/api/v1/telemetry/agents/{agent_id}/traffic")
 async def agent_traffic_details(
     agent_id: str,

@@ -216,6 +216,19 @@ def format_hardening_report(profile: dict[str, Any], agent_id: str, trigger_reas
     if high_sev > 0:
         lines.append(f"   • Alertas de Severidad Alta (Nivel ≥ 8): `🚨 {high_sev} críticas`")
 
+    if recent_detections:
+        lines.append("")
+        lines.append("🚨 *REGLAS DE SEGURIDAD WAZUH DETECTADAS / ROTAS:*")
+        from ..domain.wazuh_breakdown import explain_wazuh_rule
+        for idx, det in enumerate(recent_detections[:3], 1):
+            rid = str(det.get("rule_id") or det.get("id") or "0")
+            lvl = det.get("level", 0)
+            desc = str(det.get("description", ""))
+            exp = explain_wazuh_rule(rid, lvl, desc, det.get("groups", []))
+            lines.append(f"{idx}. *Regla #{rid}* [{exp['severity_badge']} L{lvl}] • *{exp['title']}*")
+            lines.append(f"   💡 _Riesgo:_ {exp['risk']}")
+            lines.append(f"   🛠️ _Acción:_ `{exp['remediation']}`")
+
     lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
     lines.append("🔧 *PLAN DE MEJORAS & HARDENING RECOMENDADO:*")
 

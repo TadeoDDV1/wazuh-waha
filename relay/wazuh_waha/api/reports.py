@@ -987,12 +987,15 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
         story.append(Spacer(1, 3 * mm))
         story.append(Paragraph("<b>Principales Controles Fallidos que Requieren Remediación:</b>", body_style))
         story.append(Spacer(1, 1.5 * mm))
+        from ..domain.cis_translator import localize_cis_check
         for chk in failed_checks[:10]:
+            loc = localize_cis_check(chk)
             chk_card = [
                 Paragraph(
-                    f"<b>Control #{_fmt(chk.get('id'))}:</b> {_fmt(chk.get('title'))}<br/>"
-                    f"<b>Riesgo Identificado:</b> <font color='#64748b'>{_fmt(chk.get('rationale'))}</font><br/>"
-                    f"<b>Procedimiento de Remediación:</b> <font color='#0369a1'><code>{_fmt(chk.get('remediation'))}</code></font>",
+                    f"<b>Control #{_fmt(chk.get('id'))}:</b> <font color='#0f172a'><b>{_fmt(loc['title'])}</b></font><br/>"
+                    f"<b>Regla que se rompe:</b> {_fmt(chk.get('title'))}<br/>"
+                    f"<b>Riesgo para el Sistema:</b> <font color='#475569'>{_fmt(loc['rationale'])}</font><br/>"
+                    f"<b>Acción de Remediación Inmediata:</b> <font color='#0369a1'><code>{_fmt(loc['remediation'])}</code></font>",
                     callout_style,
                 )
             ]
@@ -1199,12 +1202,18 @@ def _build_pdf(profile: dict[str, Any]) -> bytes:
                 badge_color = "#0284c7"
                 lvl_label = f"BAJO (L{lvl})"
 
-            detail_p = f"<b>{grp['desc_es']}</b>"
+            from ..domain.wazuh_breakdown import explain_wazuh_rule
+            exp = explain_wazuh_rule(grp["rule_id"], lvl, grp["desc_es"])
+
+            detail_p = f"<b>{exp['title']}</b>"
             if grp["count"] > 1:
                 detail_p += f" <font color='#6366f1'><b>(x{grp['count']} eventos)</b></font>"
+            detail_p += f"<br/><font size='7' color='#334155'><b>Categoría:</b> {exp['category']} · <b>Severidad:</b> {exp['severity_label']}</font>"
+            detail_p += f"<br/><font size='7' color='#b91c1c'><b>Riesgo:</b> {exp['risk'][:130]}</font>"
+            detail_p += f"<br/><font size='7' color='#0284c7'><b>Acción SOC:</b> {exp['remediation'][:130]}</font>"
             if grp["log_clean"] and grp["log_clean"] != grp["desc_es"]:
-                clean_snippet = grp["log_clean"][:100] + ("..." if len(grp["log_clean"]) > 100 else "")
-                detail_p += f"<br/><font size='6.5' color='#475569'><i>{clean_snippet}</i></font>"
+                clean_snippet = grp["log_clean"][:90] + ("..." if len(grp["log_clean"]) > 90 else "")
+                detail_p += f"<br/><font size='6.5' color='#64748b'><i>Registro crudo: {clean_snippet}</i></font>"
 
             actor_info = f"<b>{grp['srcip']}{grp['port_suffix']}</b>"
             if grp["user"] and grp["user"] != "No especificado":
