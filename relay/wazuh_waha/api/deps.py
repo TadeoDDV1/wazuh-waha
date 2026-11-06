@@ -3,12 +3,13 @@ import hmac
 from fastapi import HTTPException, Request, status
 
 from ..common.logging import log
+from ..common.request import client_ip
 from ..common.session import SCOPE_FULL, verify_session
 from ..config import settings
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "?"
+    return client_ip(request)
 
 
 def _auth_failed(request: Request) -> None:

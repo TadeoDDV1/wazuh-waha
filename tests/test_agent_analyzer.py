@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from relay.wazuh_waha.infrastructure.agent_analyzer import (
+from wazuh_waha.infrastructure.agent_analyzer import (
     _render_progress_bar,
     format_hardening_report,
     trigger_wazuh_scans,
@@ -11,7 +11,7 @@ from relay.wazuh_waha.infrastructure.agent_analyzer import (
     _LAST_AGENT_STATUSES,
     _LAST_ANALYSIS_TS,
 )
-from relay.wazuh_waha.main import app
+from wazuh_waha.main import app
 
 
 def test_render_progress_bar():
@@ -22,7 +22,7 @@ def test_render_progress_bar():
 
 
 def test_cis_translator_catalog_and_heuristic():
-    from relay.wazuh_waha.domain.cis_translator import localize_cis_check
+    from wazuh_waha.domain.cis_translator import localize_cis_check
 
     check1 = {
         "title": "Ensure unused filesystems kernel modules are not available.",
@@ -114,8 +114,8 @@ def test_format_hardening_report_full_compliance():
 
 @pytest.mark.anyio
 async def test_trigger_wazuh_scans_missing_credentials():
-    with patch("relay.wazuh_waha.config.settings.wazuh_server_ip", ""):
-        with patch("relay.wazuh_waha.config.settings.wazuh_manager_host", ""):
+    with patch("wazuh_waha.config.settings.wazuh_server_ip", ""):
+        with patch("wazuh_waha.config.settings.wazuh_manager_host", ""):
             res = await trigger_wazuh_scans("001")
             assert res["ok"] is False
             assert "Credenciales" in res["error"]
@@ -151,10 +151,10 @@ async def test_agent_connection_watcher_transition():
     mock_client.__aenter__.return_value = mock_client
     mock_client.__aexit__.return_value = None
 
-    with patch("relay.wazuh_waha.config.settings.wazuh_server_ip", "127.0.0.1"), \
-         patch("relay.wazuh_waha.config.settings.wazuh_manager_api_pass", "secret"), \
+    with patch("wazuh_waha.config.settings.wazuh_server_ip", "127.0.0.1"), \
+         patch("wazuh_waha.config.settings.wazuh_manager_api_pass", "secret"), \
          patch("httpx.AsyncClient", return_value=mock_client), \
-         patch("relay.wazuh_waha.infrastructure.agent_analyzer.analyze_and_notify_agent", new_callable=AsyncMock) as mock_analyze:
+         patch("wazuh_waha.infrastructure.agent_analyzer.analyze_and_notify_agent", new_callable=AsyncMock) as mock_analyze:
 
         await watcher._check_agents_state()
 
@@ -171,13 +171,13 @@ async def test_agent_connection_watcher_transition():
 @pytest.mark.anyio
 async def test_alert_pipeline_triggers_analysis_on_connection_rule():
     import time
-    from relay.wazuh_waha.config import settings
+    from wazuh_waha.config import settings
 
     unique_aid = f"99_{int(time.time() * 1000)}"
     client = TestClient(app)
 
-    with patch("relay.wazuh_waha.domain.dedup.deduper.is_duplicate", return_value=False), \
-         patch("relay.wazuh_waha.infrastructure.agent_analyzer.analyze_and_notify_agent", new_callable=AsyncMock) as mock_analyze:
+    with patch("wazuh_waha.domain.dedup.deduper.is_duplicate", return_value=False), \
+         patch("wazuh_waha.infrastructure.agent_analyzer.analyze_and_notify_agent", new_callable=AsyncMock) as mock_analyze:
         payload = {
             "rule": {
                 "id": "57150",
@@ -199,9 +199,9 @@ async def test_alert_pipeline_triggers_analysis_on_connection_rule():
 
 @pytest.mark.anyio
 async def test_telegram_analizar_agente_command():
-    from relay.wazuh_waha.infrastructure import telegram_bot
+    from wazuh_waha.infrastructure import telegram_bot
 
-    with patch("relay.wazuh_waha.infrastructure.agent_analyzer.analyze_and_notify_agent", new_callable=AsyncMock) as mock_analyze:
+    with patch("wazuh_waha.infrastructure.agent_analyzer.analyze_and_notify_agent", new_callable=AsyncMock) as mock_analyze:
         mock_analyze.return_value = "🟢 [AGENTE CONECTADO • ANÁLISIS DE SEGURIDAD SOC]"
         res = await telegram_bot.process_admin_command("/analizar_agente 000")
         assert "ANÁLISIS DE SEGURIDAD SOC" in res

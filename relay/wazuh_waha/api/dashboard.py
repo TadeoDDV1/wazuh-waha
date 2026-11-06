@@ -1268,6 +1268,18 @@ def _write_env_batch(updates: dict[str, str]) -> bool:
     """Actualiza o agrega múltiples pares KEY=value en el .env del proyecto, con un único backup."""
     if not ENV_FILE.exists():
         return False
+
+    # Sanitización: ni claves ni valores pueden inyectar líneas nuevas (lo que
+    # permitiría sobrescribir otras variables, p. ej. RELAY_API_KEY) ni NUL.
+    for key, value in updates.items():
+        if not key or not key.replace("_", "").isalnum() or not key[0].isalpha():
+            log.warning("env_write_invalid_key key=%r", key)
+            return False
+        if any(ch in value for ch in ("\n", "\r", "\x00")):
+            log.warning("env_write_invalid_value key=%s", key)
+            return False
+
+    tmp_path = ENV_FILE.with_name(f".env.tmp.{os.getpid()}")
     try:
         ts = int(time.time())
         shutil.copy2(ENV_FILE, ENV_FILE.with_name(f".env.bak.{ts}"))
@@ -1294,10 +1306,17 @@ def _write_env_batch(updates: dict[str, str]) -> bool:
             if k not in handled:
                 out.append(f"{k}={v}")
 
-        ENV_FILE.write_text("\n".join(out) + "\n")
+        # Escritura atómica: un corte a medias no deja el .env corrupto.
+        tmp_path.write_text("\n".join(out) + "\n")
+        os.chmod(tmp_path, ENV_FILE.stat().st_mode & 0o777)
+        os.replace(tmp_path, ENV_FILE)
         return True
     except Exception as e:
         log.error("env_write_batch_failed err=%s", e)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
         return False
 
 

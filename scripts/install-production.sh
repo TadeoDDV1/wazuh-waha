@@ -192,5 +192,5 @@ Siguientes pasos:
        - Usuario API de Wazuh
        - Firewall (ufw) y backups externos
 
-Documentación: $APP_DIR/docs/DEPLOYMENT.md
+Documentación: $APP_DIR/README.md y $APP_DIR/docs/DOCUMENTACION_TECNICA_WAZUH_WAHA.docx
 NEXT

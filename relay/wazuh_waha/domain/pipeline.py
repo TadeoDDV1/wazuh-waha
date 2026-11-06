@@ -113,20 +113,25 @@ async def format_alert(alert: dict) -> tuple[str, dict]:
             meta["decision"] = "internal_telemetry_login"
             return ("", meta)
 
-    if deduper.is_duplicate(rule_id, agent_id, key_extra=src_ip):
-        meta["decision"] = "duplicate"
-        return ("", meta)
-    deduper.mark(rule_id, agent_id, key_extra=src_ip)
-
+    # Se genera primero el mensaje: si la regla no produce notificación
+    # (por umbral, etc.) no debe consumir una reserva de deduplicación.
     msg = templates.render(rule_id, alert)
     if msg:
         meta["decision"] = "template"
-        return (msg, meta)
-
-    if level < settings.relay_min_level_unknown:
+    elif level < settings.relay_min_level_unknown:
         meta["decision"] = "below_threshold"
         return ("", meta)
+    else:
+        meta["decision"] = "default"
+        msg = templates.render_default(alert)
 
-    meta["decision"] = "default"
-    return (templates.render_default(alert), meta)
+    # Reserva atómica: evita que dos workers envíen la misma alerta a la vez.
+    # alerts.py libera la reserva si el envío falla por completo.
+    if not deduper.claim(rule_id, agent_id, key_extra=src_ip):
+        meta["decision"] = "duplicate"
+        return ("", meta)
+    meta["dedup_claimed"] = True
+    meta["dedup_key"] = {"rule_id": rule_id, "agent_id": agent_id, "key_extra": src_ip}
+
+    return (msg, meta)
 

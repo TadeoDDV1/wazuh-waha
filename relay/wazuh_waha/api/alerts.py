@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from ..common.backup import save_alert_backup
 from ..common.context import WORKER_ID, record_recent
 from ..common.logging import log
+from ..common.tasks import spawn
 from ..common.telemetry import telemetry_store
 from ..common.traffic_stream import traffic_watcher
 from ..config import settings
@@ -83,8 +84,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         record["error"] = str(e)
         _finish_record(record, alert)
         # ── telemetría ──
-        import asyncio
-        asyncio.create_task(telemetry_store.record(
+        spawn(telemetry_store.record(
             rule_id=rule_id, level=level,
             agent_id=agent_id, agent_name=agent_name,
             description=description, decision="format_error",
@@ -102,8 +102,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         record["result"] = "deduped"
         _finish_record(record, alert)
         # ── telemetría ──
-        import asyncio
-        asyncio.create_task(telemetry_store.record(
+        spawn(telemetry_store.record(
             rule_id=rule_id, level=level,
             agent_id=agent_id, agent_name=agent_name,
             description=description, decision="deduped",
@@ -118,7 +117,6 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
     record["msg_len"] = len(message)
     record["msg_preview"] = message[:160]
 
-    import asyncio
 
     channels_sent: list[str] = []
     channels_errors: list[str] = []
@@ -128,7 +126,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
     if getattr(settings, "telegram_enabled", False):
         try:
             from ..infrastructure.telegram_bot import send_alert
-            asyncio.create_task(send_alert(
+            spawn(send_alert(
                 message_text=message,
                 level=level,
                 rule_id=rule_id,
@@ -143,7 +141,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
     if getattr(settings, "email_alerts_enabled", False) and settings.admin_email:
         try:
             subject = f"🚨 [Wazuh Alerta Nivel {level}] {agent_name} - Regla #{rule_id}"
-            asyncio.create_task(notify_alert_email(
+            spawn(notify_alert_email(
                 subject=subject,
                 message=message,
                 rule_id=rule_id,
@@ -170,7 +168,11 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
                 record["result"] = "waha_error"
                 record["error"] = str(e)
                 _finish_record(record, alert)
-                asyncio.create_task(telemetry_store.record(
+                dedup_key = meta.get("dedup_key")
+                if dedup_key:
+                    from ..domain.dedup import deduper
+                    deduper.release(**dedup_key)
+                spawn(telemetry_store.record(
                     rule_id=rule_id, level=level,
                     agent_id=agent_id, agent_name=agent_name,
                     description=description, decision="waha_error",
@@ -187,7 +189,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
     if rule_id in ("57150", "501", "502", "503") or ("agent" in description.lower() and "started" in description.lower()):
         try:
             from ..infrastructure.agent_analyzer import analyze_and_notify_agent
-            asyncio.create_task(analyze_and_notify_agent(agent_id, reason="alerta de conexión"))
+            spawn(analyze_and_notify_agent(agent_id, reason="alerta de conexión"))
         except Exception as _an_err:
             log.warning("agent_analyzer_trigger_err aid=%s err=%s", agent_id, _an_err)
 
@@ -196,6 +198,10 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         log.info("alert_ignored_all_channels_disabled rule=%s agent=%s", rule_id, agent_id)
         record["result"] = "no_channels_enabled"
         _finish_record(record, alert)
+        dedup_key = meta.get("dedup_key")
+        if dedup_key:
+            from ..domain.dedup import deduper
+            deduper.release(**dedup_key)
         return {
             "status": "ignored",
             "reason": "no_channels_enabled",
@@ -215,7 +221,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
     _finish_record(record, alert)
 
     # ── telemetría ──
-    asyncio.create_task(telemetry_store.record(
+    spawn(telemetry_store.record(
         rule_id=rule_id, level=level,
         agent_id=agent_id, agent_name=agent_name,
         description=description, decision="sent",

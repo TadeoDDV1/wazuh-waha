@@ -1,3 +1,4 @@
+import html as _html
 import re
 import time
 from typing import Callable
@@ -305,6 +306,23 @@ def render_soc_alert_html(alert: dict, title: str = "", recommendation: str = ""
         else:
             rec = "Evento registrado para auditoría y correlación continua del SOC."
 
+    # Escapar todo valor dinámico: proviene de logs/alertas y puede contener
+    # HTML/JS (XSS en el cliente de correo o robo de datos vía <img>).
+    def esc(value: object) -> str:
+        return _html.escape(str(value), quote=True)
+
+    desc_es_h = esc(desc_es)
+    badge_text_h = esc(badge_text)
+    rule_id_h = esc(rule_id)
+    agent_name_h = esc(agent_name)
+    agent_id_h = esc(agent_id)
+    src_ip_h = esc(src_ip)
+    user_h = esc(user)
+    proc_h = esc(proc)
+    timestamp_h = esc(timestamp)
+    rec_h = esc(rec)
+    log_es_h = esc(log_es[:200])
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -329,22 +347,22 @@ def render_soc_alert_html(alert: dict, title: str = "", recommendation: str = ""
 <body>
   <div class="container">
     <div class="header">
-      <span class="badge">{badge_text}</span>
-      <h2 class="title">🛡️ Regla #{rule_id}: {desc_es}</h2>
+      <span class="badge">{badge_text_h}</span>
+      <h2 class="title">🛡️ Regla #{rule_id_h}: {desc_es_h}</h2>
     </div>
     <div class="content">
       <table class="table">
-        <tr><td class="label">💻 Endpoint / Agente:</td><td class="value">{agent_name} (ID: {agent_id})</td></tr>
-        <tr><td class="label">🌐 Origen / IP:</td><td class="value">{src_ip}</td></tr>
-        <tr><td class="label">👤 Usuario:</td><td class="value">{user}</td></tr>
-        <tr><td class="label">⚙️ Proceso / Servicio:</td><td class="value">{proc}</td></tr>
-        <tr><td class="label">⏰ Marca de Tiempo:</td><td class="value">{timestamp}</td></tr>
+        <tr><td class="label">💻 Endpoint / Agente:</td><td class="value">{agent_name_h} (ID: {agent_id_h})</td></tr>
+        <tr><td class="label">🌐 Origen / IP:</td><td class="value">{src_ip_h}</td></tr>
+        <tr><td class="label">👤 Usuario:</td><td class="value">{user_h}</td></tr>
+        <tr><td class="label">⚙️ Proceso / Servicio:</td><td class="value">{proc_h}</td></tr>
+        <tr><td class="label">⏰ Marca de Tiempo:</td><td class="value">{timestamp_h}</td></tr>
       </table>
       <div class="action-box">
         <div class="action-title">💡 Acción SOC Recomendada:</div>
-        <p class="action-text">{rec}</p>
+        <p class="action-text">{rec_h}</p>
       </div>
-      {f'<div style="font-size: 12px; color: #94a3b8; background: #0b1120; padding: 10px; border-radius: 6px; font-family: monospace;"><b>Evidencia:</b> {log_es[:200]}</div>' if log_es else ''}
+      {f'<div style="font-size: 12px; color: #94a3b8; background: #0b1120; padding: 10px; border-radius: 6px; font-family: monospace;"><b>Evidencia:</b> {log_es_h}</div>' if log_es else ''}
     </div>
     <div class="footer">
       Wazuh-WAHA SOC Suite · Notificación Automatizada Multi-Canal

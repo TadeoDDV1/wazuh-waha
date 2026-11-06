@@ -3,8 +3,8 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from relay.wazuh_waha.config import settings
-from relay.wazuh_waha.main import app
+from wazuh_waha.config import settings
+from wazuh_waha.main import app
 
 AUTH = {"X-Api-Key": settings.relay_api_key}
 
@@ -37,7 +37,7 @@ class TestReportsEndpoint(unittest.TestCase):
 
 class TestBuildPDF(unittest.TestCase):
     def test_build_pdf_valid_header(self):
-        from relay.wazuh_waha.api.reports import _build_pdf
+        from wazuh_waha.api.reports import _build_pdf
 
         profile = {
             "ok": True,
@@ -63,7 +63,7 @@ class TestBuildPDF(unittest.TestCase):
         self.assertGreater(len(pdf), 500)
 
     def test_build_pdf_with_data(self):
-        from relay.wazuh_waha.api.reports import _build_pdf
+        from wazuh_waha.api.reports import _build_pdf
 
         profile = {
             "ok": True,

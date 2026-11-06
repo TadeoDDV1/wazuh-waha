@@ -48,8 +48,27 @@ class WazuhControlError(Exception):
     pass
 
 
+_GROUP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_AGENT_SCOPE_RE = re.compile(r"^(global|default|all|[A-Za-z0-9][A-Za-z0-9._-]{0,63})$")
+
+
+def _validate_group(group: str) -> str:
+    """Evita path traversal / inyección en la ruta remota y en la URL de la API."""
+    if not isinstance(group, str) or not _GROUP_RE.match(group):
+        raise WazuhControlError(f"Grupo inválido: {group!r}")
+    return group
+
+
+def _validate_scope(scope: str) -> str:
+    if scope == "":
+        return scope
+    if isinstance(scope, str) and _AGENT_SCOPE_RE.match(scope):
+        return scope
+    raise WazuhControlError(f"Scope de agente inválido: {scope!r}")
+
+
 def _agent_conf_path(group: str) -> str:
-    return f"/var/ossec/etc/shared/{group}/agent.conf"
+    return f"/var/ossec/etc/shared/{_validate_group(group)}/agent.conf"
 
 
 async def read_agent_conf(group: str = "default") -> str:
@@ -61,6 +80,7 @@ async def read_agent_conf(group: str = "default") -> str:
 
 
 def _backup_agent_conf(group: str, raw: str) -> Path:
+    group = _validate_group(group)
     backup_dir = Path(settings.relay_backup_dir)
     backup_dir.mkdir(parents=True, exist_ok=True)
     path = backup_dir / f"agent-conf-{group}-{int(time.time())}.xml"
@@ -69,6 +89,7 @@ def _backup_agent_conf(group: str, raw: str) -> Path:
 
 
 def _root_for_scope(root: ET.Element, scope: str) -> ET.Element:
+    scope = _validate_scope(scope)
     if not scope or scope in ("global", "default", "all"):
         return root
     for child in root.findall("agent_config"):
@@ -179,8 +200,10 @@ async def toggle_agent_module(
     backup = _backup_agent_conf(group, raw)
     new_xml = apply_agent_module(raw, scope, module, enabled)
 
+    from urllib.parse import quote
+
     r = await wazuh_api.put(
-        f"/groups/{group}/configuration",
+        f"/groups/{quote(_validate_group(group), safe='')}/configuration",
         content=new_xml.encode("utf-8"),
         headers={"Content-Type": "application/xml"},
         timeout=20,
@@ -208,6 +231,7 @@ async def toggle_agent_module(
 
 async def restart_agents(scope: str = "global") -> list[str]:
     """Reinicia agentes activos (excluye 000, que es el manager)."""
+    scope = _validate_scope(scope)
     ids: list[str] = []
     if scope in ("", "global", "default", "all"):
         try:

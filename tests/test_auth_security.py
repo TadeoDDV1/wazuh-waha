@@ -222,11 +222,29 @@ class TestRateLimitIdentity(unittest.TestCase):
         self.assertEqual(main_mod._client_ip(req), "1.2.3.4")
 
     def test_xff_chain_takes_first_untrusted_hop(self):
-        # Cadena: cliente real → proxy confiable → peer
-        req = _make_request(
-            [(b"x-forwarded-for", b"1.2.3.4, 172.17.0.1")], peer="127.0.0.1"
-        )
-        self.assertEqual(main_mod._client_ip(req), "1.2.3.4")
+        # Cadena: cliente real → proxy confiable → peer. El proxy debe estar
+        # declarado explícitamente en TRUSTED_PROXIES (el default es loopback).
+        old = settings.trusted_proxies
+        try:
+            settings.trusted_proxies = "127.0.0.1,::1,172.17.0.0/16"
+            req = _make_request(
+                [(b"x-forwarded-for", b"1.2.3.4, 172.17.0.1")], peer="127.0.0.1"
+            )
+            self.assertEqual(main_mod._client_ip(req), "1.2.3.4")
+        finally:
+            settings.trusted_proxies = old
+
+    def test_xff_ignored_from_untrusted_peer(self):
+        old = settings.trusted_proxies
+        try:
+            settings.trusted_proxies = "127.0.0.1,::1"
+            req = _make_request(
+                [(b"x-forwarded-for", b"1.2.3.4")], peer="203.0.113.9"
+            )
+            # Sin proxy de confianza no se acepta la cabecera falseable.
+            self.assertEqual(main_mod._client_ip(req), "203.0.113.9")
+        finally:
+            settings.trusted_proxies = old
 
     def test_sweep_prunes_empty_buckets(self):
         main_mod._RATE_LIMITS.clear()

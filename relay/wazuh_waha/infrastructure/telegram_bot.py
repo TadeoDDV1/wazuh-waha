@@ -354,8 +354,9 @@ async def send_document(
     caption: str = "",
     chat_id: str | None = None,
     token: str | None = None,
+    mime_type: str = "application/octet-stream",
 ) -> bool:
-    """Envía un archivo/documento (como reporte PDF) a Telegram."""
+    """Envía un archivo/documento (como reporte PDF o respaldo comprimido) a Telegram."""
     tk = token or getattr(settings, "telegram_bot_token", "")
     cid = chat_id or getattr(settings, "telegram_chat_id", "")
     if not tk or not cid:
@@ -368,8 +369,17 @@ async def send_document(
         data["caption"] = caption[:1024]
         data["parse_mode"] = "Markdown"
 
+    actual_mime = mime_type
+    if not actual_mime or actual_mime == "application/octet-stream":
+        if filename.endswith(".pdf"):
+            actual_mime = "application/pdf"
+        elif filename.endswith((".tar.gz", ".tgz", ".gz")):
+            actual_mime = "application/gzip"
+        elif filename.endswith(".json"):
+            actual_mime = "application/json"
+
     files = {
-        "document": (filename, document_bytes, "application/pdf")
+        "document": (filename, document_bytes, actual_mime)
     }
 
     try:
@@ -506,6 +516,10 @@ BOT_COMMANDS_SPEC = [
     {"command": "agente", "description": "Ficha forense de un agente (/agente <id>)"},
     {"command": "analizar_agente", "description": "Auditar seguridad y hardening (/analizar_agente <id>)"},
     {"command": "reporte", "description": "Generar PDF forense SOC (/reporte <id>)"},
+    {"command": "diagnostico", "description": "Diagnóstico profundo del stack y salud"},
+    {"command": "backup", "description": "Compilar y enviar respaldo .tar.gz (/backup [config|alertas])"},
+    {"command": "seguridad", "description": "Auditoría de firewall UFW y accesos SSH"},
+    {"command": "limpieza", "description": "Mantenimiento seguro y vaciado de logs"},
     {"command": "alertas", "description": "Ultimas alertas de seguridad recibidas"},
     {"command": "buscar_alerta", "description": "Buscar alerta por termino (/buscar <texto>)"},
     {"command": "silenciar", "description": "Silenciar regla temporalmente (/silenciar <id>)"},
@@ -2039,6 +2053,241 @@ def _set_wazuh_manager_ip(arg: str) -> str:
     return f"🛡️ *IP del Wazuh Manager actualizada a:* `{ip}`"
 
 
+async def _compile_and_send_backup(arg: str = "config", chat_id: str | None = None) -> str:
+    """Compila un respaldo seguro (.tar.gz) y lo envía directamente por Telegram."""
+    sub = (arg or "config").strip().lower()
+    if sub not in ("config", "alertas", "proyecto"):
+        sub = "config"
+
+    project_root = Path(__file__).resolve().parents[3]
+    ts = time.strftime("%Y-%m-%d_%H-%M-%S")
+    tar_name = f"backup_{sub}_{ts}.tar.gz"
+
+    import tempfile
+    import subprocess
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dest_tar = Path(tmpdir) / tar_name
+        dest_tar_str = str(dest_tar)
+
+        cmd = ["tar", "-czf", dest_tar_str]
+        if sub == "config":
+            cmd += ["-C", str(project_root), ".env", "docker-compose.yml", "scripts", "deploy", "manager-side"]
+        elif sub == "alertas":
+            cmd += ["-C", str(project_root), "logs"]
+            if (project_root / "backups").exists():
+                cmd += ["backups"]
+        else:
+            cmd += [
+                f"--exclude={project_root}/backups",
+                f"--exclude={project_root}/.git",
+                f"--exclude={project_root}/relay/.venv",
+                f"--exclude={project_root}/dashboard/node_modules",
+                f"--exclude={project_root}/dashboard/dist",
+                "-C", str(project_root.parent), str(project_root.name),
+            ]
+
+        try:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+            if not dest_tar.exists() or dest_tar.stat().st_size == 0:
+                err = res.stderr.decode("utf-8", errors="replace")[:200]
+                return f"❌ Error compilando respaldo `{tar_name}`: {err or 'archivo no generado'}"
+
+            size_kb = round(dest_tar.stat().st_size / 1024, 1)
+            tar_bytes = dest_tar.read_bytes()
+
+            caption = (
+                f"💾 *RESPALDO SOC COMPILADO*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"• *Tipo:* `{sub}`\n"
+                f"• *Archivo:* `{tar_name}`\n"
+                f"• *Tamaño:* `{size_kb} KB`\n"
+                f"• *Permisos:* `0600 (Restringido)`\n"
+                f"• *Host:* `{platform.node()}`"
+            )
+            ok = await send_document(
+                tar_bytes,
+                filename=tar_name,
+                caption=caption,
+                chat_id=chat_id,
+                mime_type="application/gzip",
+            )
+            if ok:
+                return f"✅ *Respaldo `{tar_name}` ({size_kb} KB) compilado y entregado exitosamente por Telegram.*"
+            else:
+                return f"⚠️ Respaldo compilado (`{size_kb} KB`), pero no se pudo entregar en Telegram. Verifica permisos del bot."
+        except Exception as e:
+            return f"❌ Error durante la compilación del respaldo: {e}"
+
+
+async def _get_deep_diagnostics_summary() -> str:
+    """Ejecuta un diagnóstico profundo del stack de administración Wazuh-WAHA."""
+    import subprocess
+    t0 = time.time()
+    results = []
+
+    # 1. Contenedor WAHA
+    try:
+        out = subprocess.check_output(
+            ["docker", "inspect", "-f", "{{.State.Running}}", "wazuh-waha"],
+            stderr=subprocess.DEVNULL, timeout=3,
+        ).decode().strip()
+        if out == "true":
+            results.append("• *WAHA Docker:* `[✓] ACTIVO Y CORRIENDO`")
+        else:
+            results.append("• *WAHA Docker:* `[✗] DETENIDO`")
+    except Exception:
+        results.append("• *WAHA Docker:* `[!] NO DETECTADO / ERROR DOCKER`")
+
+    # 2. Sesión WhatsApp (WAHA)
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            headers = {"X-Api-Key": settings.waha_api_key} if settings.waha_api_key else {}
+            r = await client.get(f"{settings.waha_host}/api/sessions/default", headers=headers)
+            if r.is_success:
+                st = r.json().get("status", "UNKNOWN")
+                icon = "[✓]" if st == "WORKING" else "[!]"
+                results.append(f"• *Sesión WAHA:* `{icon} {st}`")
+            else:
+                results.append(f"• *Sesión WAHA:* `[✗] HTTP {r.status_code}`")
+    except Exception:
+        results.append("• *Sesión WAHA:* `[✗] SIN RESPUESTA`")
+
+    # 3. Relay HTTP
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            r = await client.get(f"http://localhost:{settings.relay_port}/health")
+            if r.is_success:
+                results.append(f"• *Relay HTTP (:{settings.relay_port}):* `[✓] OPERATIVO`")
+            else:
+                results.append(f"• *Relay HTTP:* `[✗] HTTP {r.status_code}`")
+    except Exception:
+        results.append("• *Relay HTTP:* `[✗] ERROR DE CONEXIÓN`")
+
+    # 4. Agente Wazuh local / conexión al manager (puerto 1514)
+    mgr_host = settings.wazuh_server_ip or settings.wazuh_manager_host or "127.0.0.1"
+    try:
+        r_stream, w_stream = await asyncio.wait_for(
+            asyncio.open_connection(mgr_host, 1514), timeout=1.5
+        )
+        w_stream.close()
+        await w_stream.wait_closed()
+        results.append(f"• *Manager TCP 1514:* `[✓] ALCANZABLE ({mgr_host})`")
+    except Exception:
+        results.append(f"• *Manager TCP 1514:* `[!] NO RESPONDE ({mgr_host})`")
+
+    # 5. Wazuh Manager API (55000 + JWT token)
+    try:
+        from .wazuh_api import get_token
+        tk = await get_token()
+        if tk:
+            results.append("• *Wazuh API 55000:* `[✓] AUTENTICADO (JWT OK)`")
+        else:
+            results.append("• *Wazuh API 55000:* `[✗] FALLO DE AUTENTICACIÓN`")
+    except Exception as e:
+        results.append(f"• *Wazuh API 55000:* `[✗] ERROR: {e}`")
+
+    # 6. Dashboard Web 8001
+    try:
+        async with httpx.AsyncClient(timeout=2) as client:
+            r = await client.get("http://localhost:8001/")
+            if r.is_success:
+                results.append("• *Dashboard Web (:8001):* `[✓] DISPONIBLE`")
+            else:
+                results.append(f"• *Dashboard Web (:8001):* `[!] HTTP {r.status_code}`")
+    except Exception:
+        results.append("• *Dashboard Web (:8001):* `[✗] NO RESPONDE`")
+
+    elapsed = round((time.time() - t0), 2)
+    return (
+        "🩺 *DIAGNÓSTICO PROFUNDO DEL STACK WAZUH-WAHA*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        + "\n".join(results) + "\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏱️ Tiempo: `{elapsed}s` | Servidor: `{platform.node()}`"
+    )
+
+
+def _get_host_security_summary() -> str:
+    """Audita puertos, estado del firewall y últimos accesos fallidos SSH."""
+    import subprocess
+    lines = [
+        "🛡️ *AUDITORÍA DE SEGURIDAD DEL SERVIDOR*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    # 1. SSH Server status
+    try:
+        out = subprocess.check_output(
+            ["systemctl", "is-active", "ssh"], stderr=subprocess.DEVNULL, timeout=2
+        ).decode().strip()
+        lines.append(f"• *Servicio OpenSSH:* `[{out.upper()}]`")
+    except Exception:
+        lines.append("• *Servicio OpenSSH:* `[NO DISPONIBLE]`")
+
+    # 2. Firewall UFW
+    try:
+        ufw_out = subprocess.check_output(
+            ["ufw", "status"], stderr=subprocess.DEVNULL, timeout=2
+        ).decode().strip().splitlines()
+        first_line = ufw_out[0] if ufw_out else "No disponible"
+        lines.append(f"• *Firewall UFW:* `{first_line}`")
+    except Exception:
+        lines.append("• *Firewall UFW:* `[Requiere permisos / Inactivo]`")
+
+    # 3. Accesos SSH fallidos recientes (detección de fuerza bruta)
+    try:
+        failed_out = subprocess.check_output(
+            ["journalctl", "-u", "ssh", "--no-pager", "-n", "30", "-q"],
+            stderr=subprocess.DEVNULL, timeout=3
+        ).decode(errors="replace")
+        failed_lines = [l for l in failed_out.splitlines() if "failed" in l.lower() or "invalid" in l.lower()]
+        count_failed = len(failed_lines)
+        if count_failed > 0:
+            lines.append(f"• *Intentos SSH Fallidos (Últimos 30 logs):* `⚠️ {count_failed} detectados`")
+            for fl in failed_lines[-3:]:
+                clean_fl = fl.split("sshd")[-1].strip() if "sshd" in fl else fl[-60:]
+                lines.append(f"  └ `{clean_fl[:55]}`")
+        else:
+            lines.append("• *Intentos SSH Fallidos:* `[✓] Ninguno reciente detectado`")
+    except Exception:
+        lines.append("• *Logs SSH:* `[No accesibles sin privilegios]`")
+
+    return "\n".join(lines)
+
+
+async def _run_system_maintenance() -> str:
+    """Ejecuta una limpieza y mantenimiento seguro (journalctl y docker prune)."""
+    import subprocess
+    results = [
+        "🧹 *MANTENIMIENTO DEL SERVIDOR*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+    try:
+        res = subprocess.run(
+            ["journalctl", "--vacuum-time=7d"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8
+        )
+        out = res.stdout.decode(errors="replace").strip()
+        first_line = out.splitlines()[-1] if out else "Journal depurado"
+        results.append(f"• *Journald Systemd:* `{first_line}`")
+    except Exception as e:
+        results.append(f"• *Journald:* `Error: {e}`")
+
+    try:
+        res = subprocess.run(
+            ["docker", "system", "prune", "-f"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15
+        )
+        out = res.stdout.decode(errors="replace").strip()
+        freed = [l for l in out.splitlines() if "Total reclaimed space" in l]
+        results.append(f"• *Docker Cache:* `{freed[0] if freed else 'Caché optimizada'}`")
+    except Exception as e:
+        results.append(f"• *Docker Cache:* `Error: {e}`")
+
+    return "\n".join(results)
+
+
 # ─────────────────────────────────────────────────────────────
 # 4. Procesador Central de Comandos (Telegram + WhatsApp)
 # ─────────────────────────────────────────────────────────────
@@ -2075,6 +2324,14 @@ async def process_admin_command(text: str, source: str = "telegram", chat_id: st
         return _get_system_status()
     elif cmd in ("/servicios", "/services"):
         return await _get_services_status()
+    elif cmd in ("/diagnostico", "/diag", "/salud"):
+        return await _get_deep_diagnostics_summary()
+    elif cmd in ("/backup", "/compilar_backup", "/respaldo"):
+        return await _compile_and_send_backup(arg, chat_id=chat_id)
+    elif cmd in ("/seguridad", "/auditoria_seguridad"):
+        return _get_host_security_summary()
+    elif cmd in ("/limpieza", "/mantenimiento", "/limpiar"):
+        return await _run_system_maintenance()
     elif cmd in ("/uptime", "/tiempo"):
         return _get_system_status()
     elif cmd in ("/ip", "/ips", "/red_ip"):
@@ -2320,13 +2577,13 @@ class TelegramBotWorker:
                 await asyncio.sleep(4)
 
     async def _handle_update(self, update: dict) -> None:
-        msg = update.get("message")
+        msg = update.get("message") or update.get("channel_post")
         if not msg:
             return
         chat = msg.get("chat", {})
         chat_id = str(chat.get("id", ""))
         text = (msg.get("text") or "").strip()
-        first_name = chat.get("first_name", "Usuario")
+        first_name = chat.get("first_name") or chat.get("title") or "Usuario"
 
         if not text:
             return

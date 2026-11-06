@@ -24,10 +24,16 @@ router = APIRouter(tags=["reports"])
 
 
 def _fmt(value: Any, default: str = "-") -> str:
-    """Formatea un valor de forma segura para PDF (evita None/empty)."""
+    """Formatea un valor de forma segura para PDF (evita None/empty).
+
+    Escapa `&`, `<` y `>` porque el resultado se inserta en `Paragraph`,
+    que interpreta mini-HTML: un log con `<` rompería el PDF o inyectaría
+    marcado.
+    """
     if value is None or value == "" or value == 0:
         return default
-    return str(value)
+    text = str(value)
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _fmt_bytes_mb(value: Any) -> str:

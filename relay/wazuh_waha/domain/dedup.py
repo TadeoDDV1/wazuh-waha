@@ -54,24 +54,56 @@ class Deduper:
         now = time.time()
         return {k: ts for k, ts in state.items() if now - ts <= self.ttl}
 
+    def _key(self, rule_id: str, agent_id: str, key_extra: str = "") -> str:
+        return f"{rule_id}:{agent_id}:{key_extra}" if key_extra else f"{rule_id}:{agent_id}"
+
     def is_duplicate(self, rule_id: str, agent_id: str, key_extra: str = "") -> bool:
         state = self._cleanup(self._read_state())
-        key = f"{rule_id}:{agent_id}:{key_extra}" if key_extra else f"{rule_id}:{agent_id}"
+        key = self._key(rule_id, agent_id, key_extra)
         return key in state
+
+    def claim(self, rule_id: str, agent_id: str, key_extra: str = "") -> bool:
+        """Reserva atómicamente la clave. True si no existía (y la marca).
+
+        Check + escritura ocurren bajo el mismo lock exclusivo, así dos
+        workers no pueden enviar la misma alerta a la vez.
+        """
+        key = self._key(rule_id, agent_id, key_extra)
+        with self._locked_state("w") as f:
+            state = self._cleanup(self._read_owned(f))
+            if key in state:
+                return False
+            state[key] = time.time()
+            self._write_owned(f, state)
+            return True
+
+    def release(self, rule_id: str, agent_id: str, key_extra: str = "") -> None:
+        """Libera una reserva (el envío falló; se permite reintentar)."""
+        key = self._key(rule_id, agent_id, key_extra)
+        with self._locked_state("w") as f:
+            state = self._cleanup(self._read_owned(f))
+            if state.pop(key, None) is not None:
+                self._write_owned(f, state)
 
     def mark(self, rule_id: str, agent_id: str, key_extra: str = "") -> None:
         with self._locked_state("w") as f:
-            try:
-                state = json.loads(f.read().decode("utf-8") or "{}")
-            except (json.JSONDecodeError, ValueError):
-                state = {}
-            state = self._cleanup(state)
-            key = f"{rule_id}:{agent_id}:{key_extra}" if key_extra else f"{rule_id}:{agent_id}"
-            state[key] = time.time()
-            f.seek(0)
-            f.truncate()
-            f.write(json.dumps(state).encode("utf-8"))
-            f.flush()
+            state = self._cleanup(self._read_owned(f))
+            state[self._key(rule_id, agent_id, key_extra)] = time.time()
+            self._write_owned(f, state)
+
+    @staticmethod
+    def _read_owned(f) -> dict:
+        try:
+            return json.loads(f.read().decode("utf-8") or "{}")
+        except (json.JSONDecodeError, ValueError):
+            return {}
+
+    @staticmethod
+    def _write_owned(f, state: dict) -> None:
+        f.seek(0)
+        f.truncate()
+        f.write(json.dumps(state).encode("utf-8"))
+        f.flush()
 
 
 deduper = Deduper(

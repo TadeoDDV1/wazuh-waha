@@ -13,7 +13,8 @@ sudo nano .env
 sudo bash scripts/deploy-production.sh
 ```
 
-La guía completa está en [`docs/DEPLOYMENT.md`](../../docs/DEPLOYMENT.md).
+La guía completa está en el [`README`](../../README.md) y en
+[`docs/DOCUMENTACION_TECNICA_WAZUH_WAHA.docx`](../../docs/DOCUMENTACION_TECNICA_WAZUH_WAHA.docx).
 
 ## Componentes
 

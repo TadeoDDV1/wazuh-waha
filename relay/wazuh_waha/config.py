@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     waha_session: str = "default"
     waha_log_level: str = "info"
     waha_hook_url: str = ""
+    # Token que WAHA debe enviar en X-Api-Key (o ?token=) al webhook entrante.
+    # Vacío = usar WAHA_API_KEY. Nunca se acepta un webhook sin token válido.
+    waha_webhook_token: str = ""
 
     # --- Wazuh Manager API (para reportar health events) ---
     wazuh_manager_host: str = ""
@@ -97,8 +100,10 @@ class Settings(BaseSettings):
     # API key opcional de solo-lectura (login con scope "read": ve dashboard
     # y telemetría pero no puede mutar config/agents/módulos)
     relay_readonly_api_key: str = ""
-    # IPs/redes desde las que se confía X-Forwarded-For (proxy: nginx)
-    trusted_proxies: str = "127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8"
+    # IPs/redes desde las que se confía X-Forwarded-For. Por defecto SOLO
+    # loopback; en Docker/añade la red del proxy explícitamente en .env
+    # (p. ej. TRUSTED_PROXIES=127.0.0.1,::1,172.16.0.0/12).
+    trusted_proxies: str = "127.0.0.1,::1"
     # Documentación interactiva (/docs, /openapi.json): apagada en prod
     enable_docs: bool = False
     # SSH del traffic source: yes = exigir known_hosts pre-provisionado

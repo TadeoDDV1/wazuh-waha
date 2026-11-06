@@ -87,6 +87,9 @@ log() {
 }
 
 pausar() {
+    if [ "${CLI_MODE:-0}" = "1" ] || [ ! -t 0 ]; then
+        return 0
+    fi
     echo ""
     read -rp "  Presione [Enter] para continuar..."
 }
@@ -169,12 +172,13 @@ vm_ssh() {
         base+=(-i "$WAZUH_VM_SSH_KEY_PATH")
     fi
 
-    # 1) Clave SSH sin prompts
+    # 1) Clave SSH sin prompts (Recomendado y Seguro)
     if ssh -o BatchMode=yes "${base[@]}" "$destino" "$cmd" 2>/dev/null; then
         return 0
     fi
-    # 2) Contraseña desde .env (requiere sshpass)
+    # 2) Contraseña desde .env (Requiere sshpass - advertencia de seguridad)
     if [ -n "${WAZUH_VM_SSH_PASS:-}" ] && command -v sshpass >/dev/null 2>&1; then
+        warn "Uso de WAZUH_VM_SSH_PASS: se recomienda migrar a llaves SSH (ssh-copy-id) para evitar contraseñas en procesos."
         sshpass -p "$WAZUH_VM_SSH_PASS" ssh -o BatchMode=yes "${base[@]}" "$destino" "$cmd"
         return $?
     fi
@@ -1151,9 +1155,9 @@ menu_notificaciones() {
 
         6)
             echo ""
-            local DEST_EMAIL="$ADMIN_EMAIL"
-            read -rp "  Correo destinatario [Default: ${DEST_EMAIL:-josededios3030@gmail.com}]: " INPUT_MAIL
-            DEST_EMAIL="${INPUT_MAIL:-${DEST_EMAIL:-josededios3030@gmail.com}}"
+            local DEST_EMAIL="${ADMIN_EMAIL:-admin@localhost}"
+            read -rp "  Correo destinatario [Default: $DEST_EMAIL]: " INPUT_MAIL
+            DEST_EMAIL="${INPUT_MAIL:-$DEST_EMAIL}"
 
             info "Enviando correo de prueba a $DEST_EMAIL..."
             local mail_res
@@ -1189,19 +1193,21 @@ realizar_backup() {
     local FECHA
     FECHA=$(date +"%Y-%m-%d_%H-%M-%S")
     mkdir -p "$BACKUP_DIR"
+    chmod 700 "$BACKUP_DIR" 2>/dev/null || true
+    # Máscara restrictiva para proteger claves y secretos en backups
+    umask 077
 
-    info "Directorio de almacenamiento: ${AMARILLO}$BACKUP_DIR${NC}\n"
+    info "Directorio de almacenamiento: ${AMARILLO}$BACKUP_DIR${NC} (Permisos: 0700)\n"
 
     echo -e "  Seleccione el tipo de respaldo:"
     echo -e "    ${AMARILLO}1)${NC} Proyecto completo comprimido (backup_proyecto_*.tar.gz)"
     echo -e "    ${AMARILLO}2)${NC} Configuraciones críticas (.env, docker-compose, scripts) (.tar.gz)"
     echo -e "    ${AMARILLO}3)${NC} Solo registros de alertas y logs (.tar.gz)"
     echo -e "    ${AMARILLO}4)${NC} Snapshot descomprimido en carpeta (backup_YYYY-MM-DD_HH-MM-SS/)"
-    echo -e "    ${AMARILLO}5)${NC} Directorio personal completo (\$HOME)"
-    echo -e "    ${AMARILLO}6)${NC} Sesión WAHA (volumen docker wazuh_waha_sessions)"
-    echo -e "    ${ROJO}7)${NC} Cancelar"
+    echo -e "    ${AMARILLO}5)${NC} Sesión WAHA (volumen docker wazuh_waha_sessions)"
+    echo -e "    ${ROJO}6)${NC} Cancelar"
     separador
-    read -rp "  Seleccione [1-7]: " tipo
+    read -rp "  Seleccione [1-6]: " tipo
 
     local ARCHIVO=""
     case $tipo in
@@ -1243,20 +1249,12 @@ realizar_backup() {
                 mkdir -p "$DEST_FOLDER/alertas"
                 cp "$BACKUP_DIR"/*.jsonl "$DEST_FOLDER/alertas/" 2>/dev/null || true
             fi
+            chmod 700 "$DEST_FOLDER" 2>/dev/null || true
             ok "¡Snapshot generado exitosamente en carpeta $DEST_FOLDER!"
             log "BACKUP: Generado snapshot en carpeta $DEST_FOLDER"
             pausar; return
             ;;
         5)
-            ARCHIVO="$BACKUP_DIR/backup_home_$FECHA.tar.gz"
-            info "Generando respaldo del directorio personal en: $ARCHIVO ..."
-            tar -czf "$ARCHIVO" \
-                --exclude="$BACKUP_DIR" \
-                --exclude="$HOME/.cache" \
-                --exclude="$HOME/.docker" \
-                "$HOME" 2>/dev/null
-            ;;
-        6)
             ARCHIVO="$BACKUP_DIR/waha_sessions_$FECHA.tar.gz"
             detectar_docker_contexto
             local vol_size
@@ -1278,7 +1276,7 @@ realizar_backup() {
                 return
             fi
             ;;
-        7) return ;;
+        6) return ;;
         *) fail "Opción no válida"; sleep 1; return ;;
     esac
 
@@ -1600,44 +1598,29 @@ verificar_seguridad() {
 }
 
 # ==============================================================================
-# 14. INSTALACIÓN / ACTUALIZACIÓN DE HERRAMIENTAS
+# 14. VERIFICACIÓN DE HERRAMIENTAS Y DEPENDENCIAS
 # ==============================================================================
-instalar_herramientas() {
+verificar_dependencias() {
     limpiar
-    titulo "INSTALACIÓN DE HERRAMIENTAS DE SOPORTE"
+    titulo "AUDITORÍA DE DEPENDENCIAS Y HERRAMIENTAS DEL SISTEMA"
 
-    local HERRAMIENTAS_DEB=("openssh-server" "htop" "curl" "net-tools" "ufw" "tree" "jq" "sshpass" "nmap" "qrencode")
-    local HERRAMIENTAS_GEN=("openssh" "htop" "curl" "net-tools" "ufw" "tree" "jq" "sshpass" "nmap" "qrencode")
-    local rc=0
+    local HERRAMIENTAS=("curl" "jq" "ufw" "ss" "tar" "python3" "docker" "openssh-client")
+    echo -e "  ${BLANCO}Comprobando herramientas necesarias en el host:${NC}\n"
 
-    if command -v pacman >/dev/null 2>&1; then
-        info "Gestor detectado: pacman (Arch) — sincronizando e instalando..."
-        info "Paquetes: ${AMARILLO}${HERRAMIENTAS_GEN[*]}${NC}"
-        sudo pacman -Sy --noconfirm --needed "${HERRAMIENTAS_GEN[@]}"
-        rc=$?
-    elif command -v apt-get >/dev/null 2>&1; then
-        info "Gestor detectado: apt-get (Debian/Ubuntu) — sincronizando e instalando..."
-        info "Paquetes: ${AMARILLO}${HERRAMIENTAS_DEB[*]}${NC}"
-        sudo apt-get update -qq 2>/dev/null
-        sudo apt-get install -y "${HERRAMIENTAS_DEB[@]}"
-        rc=$?
-    elif command -v dnf >/dev/null 2>&1; then
-        info "Gestor detectado: dnf (RHEL/Fedora) — instalando..."
-        info "Paquetes: ${AMARILLO}${HERRAMIENTAS_GEN[*]}${NC}"
-        sudo dnf install -y "${HERRAMIENTAS_GEN[@]}"
-        rc=$?
-    else
-        fail "Gestor de paquetes no reconocido (se esperaba pacman, apt-get o dnf)."
-        pausar
-        return
-    fi
+    for tool in "${HERRAMIENTAS[@]}"; do
+        printf "  %-32s" "• $tool"
+        if command -v "$tool" >/dev/null 2>&1; then
+            echo -e "${VERDE}[INSTALADO: $(command -v "$tool")]${NC}"
+        else
+            echo -e "${AMARILLO}[NO ENCONTRADO - se recomienda instalar]${NC}"
+        fi
+    done
 
-    if [ $rc -eq 0 ]; then
-        ok "Todas las herramientas necesarias están operativas."
-        log "INSTALACION: Herramientas instaladas correctamente."
-    else
-        warn "Algunos paquetes no pudieron instalarse automáticamente."
-    fi
+    echo ""
+    info "Nota de seguridad: La instalación y actualización de paquetes base del sistema"
+    info "se realiza de forma aislada mediante 'scripts/install-production.sh'."
+    separador
+    log "DEPENDENCIAS: Verificación de herramientas completada."
     pausar
 }
 
@@ -1770,75 +1753,169 @@ menu_conectar() {
 }
 
 # ==============================================================================
-# 17. VER CREDENCIALES DEL SISTEMA
+# 17. VERIFICAR CONFIGURACIÓN Y ESTADO DE SECRETOS (ENMASCARADO)
 # ==============================================================================
-ver_credenciales() {
+verificar_configuracion() {
     limpiar
-    titulo "CREDENCIALES Y SECRETOS DEL SISTEMA"
-
-    warn "Se mostrarán las contraseñas, tokens y API keys configuradas EN CLARO."
-    read -rp "  ¿Desea continuar? (s/N): " c_sec
-    if [[ ! "$c_sec" =~ ^[sSyY]$ ]]; then
-        info "Operación cancelada."
-        log "CREDENCIALES: Visualización cancelada por el usuario."
-        pausar
-        return
-    fi
+    titulo "ESTADO DE CONFIGURACIÓN Y CREDENCIALES (MODO SEGURO)"
 
     recargar_env
 
-    sec() {
+    sec_info() {
         printf "  %-34s" "$1"
         if [ -n "$2" ]; then
-            echo -e "${AMARILLO}$2${NC}"
+            echo -e "${CYAN}$2${NC}"
         else
             echo -e "${GRIS}(no configurado)${NC}"
         fi
     }
 
+    sec_secret() {
+        printf "  %-34s" "$1"
+        if [ -n "$2" ]; then
+            local len=${#2}
+            echo -e "${VERDE}[CONFIGURADO - ${len} caracteres]${NC}"
+        else
+            echo -e "${ROJO}[NO CONFIGURADO]${NC}"
+        fi
+    }
+
     echo -e "\n  ${BLANCO}── Wazuh Manager API & Acceso ──${NC}"
-    sec "URL API Manager"                  "https://${WAZUH_SERVER_IP:-}:${WAZUH_MANAGER_API_PORT:-55000}"
-    sec "Usuario API"                      "${WAZUH_MANAGER_API_USER:-wazuh}"
-    sec "Password API"                     "${WAZUH_MANAGER_API_PASS:-}"
-    sec "SSH Manager"                      "${WAZUH_VM_SSH_USER:-root}@${WAZUH_VM_SSH_HOST:-$WAZUH_SERVER_IP}:${WAZUH_VM_SSH_PORT:-22}"
-    sec "Clave SSH (Key Path)"             "${WAZUH_VM_SSH_KEY_PATH:-(predeterminada ~/.ssh)}"
+    sec_info   "URL API Manager"                  "https://${WAZUH_SERVER_IP:-}:${WAZUH_MANAGER_API_PORT:-55000}"
+    sec_info   "Usuario API"                      "${WAZUH_MANAGER_API_USER:-wazuh}"
+    sec_secret "Password API (Secreto)"           "${WAZUH_MANAGER_API_PASS:-}"
+    sec_info   "SSH Manager"                      "${WAZUH_VM_SSH_USER:-root}@${WAZUH_VM_SSH_HOST:-$WAZUH_SERVER_IP}:${WAZUH_VM_SSH_PORT:-22}"
+    sec_info   "Clave SSH (Key Path)"             "${WAZUH_VM_SSH_KEY_PATH:-(predeterminada ~/.ssh)}"
+    sec_secret "Password SSH (Runtime)"           "${WAZUH_VM_SSH_PASS:-}"
 
     echo -e "\n  ${BLANCO}── Wazuh-WAHA Relay & Dashboard ──${NC}"
-    sec "URL Relay"                        "${RELAY_HOST:-http://localhost:8765}"
-    sec "RELAY_API_KEY (Master)"           "${RELAY_API_KEY:-}"
-    sec "RELAY_READONLY_API_KEY"           "${RELAY_READONLY_API_KEY:-}"
-    sec "Session Cookie Secure"            "${SESSION_COOKIE_SECURE:-false}"
-    sec "Session TTL (Horas)"              "${SESSION_TTL_HOURS:-8}"
+    sec_info   "URL Relay"                        "${RELAY_HOST:-http://localhost:8765}"
+    sec_secret "RELAY_API_KEY (Master)"           "${RELAY_API_KEY:-}"
+    sec_secret "RELAY_READONLY_API_KEY"           "${RELAY_READONLY_API_KEY:-}"
+    sec_info   "Session Cookie Secure"            "${SESSION_COOKIE_SECURE:-false}"
+    sec_info   "Session TTL (Horas)"              "${SESSION_TTL_HOURS:-8}"
 
     echo -e "\n  ${BLANCO}── WAHA (WhatsApp HTTP API) ──${NC}"
-    sec "Host WAHA"                        "${WAHA_HOST:-http://localhost:3001}"
-    sec "Sesión WAHA"                      "${WAHA_SESSION:-default}"
-    sec "WAHA_API_KEY"                     "${WAHA_API_KEY:-}"
-    sec "Teléfono Destino (Alertas)"       "${ADMIN_PHONE:-}"
+    sec_info   "Host WAHA"                        "${WAHA_HOST:-http://localhost:3001}"
+    sec_info   "Sesión WAHA"                      "${WAHA_SESSION:-default}"
+    sec_secret "WAHA_API_KEY (Secreto)"           "${WAHA_API_KEY:-}"
+    sec_info   "Teléfono Destino (Alertas)"       "${ADMIN_PHONE:-}"
 
     echo -e "\n  ${BLANCO}── Telegram Bot (Monitoreo & Alertas) ──${NC}"
-    sec "Telegram Activado"                "${TELEGRAM_ENABLED:-false}"
-    sec "Telegram Bot Token"               "${TELEGRAM_BOT_TOKEN:-}"
-    sec "Telegram Chat ID"                 "${TELEGRAM_CHAT_ID:-}"
-    sec "Nivel Mínimo Telegram"            "${TELEGRAM_MIN_LEVEL:-8}"
+    sec_info   "Telegram Activado"                "${TELEGRAM_ENABLED:-false}"
+    sec_secret "Telegram Bot Token"               "${TELEGRAM_BOT_TOKEN:-}"
+    sec_info   "Telegram Chat ID"                 "${TELEGRAM_CHAT_ID:-}"
+    sec_info   "Nivel Mínimo Telegram"            "${TELEGRAM_MIN_LEVEL:-8}"
 
     echo -e "\n  ${BLANCO}── Respaldos & Notificaciones Secundarias ──${NC}"
-    sec "Proveedor Notificaciones"         "${EMAIL_PROVIDER:-off}"
-    sec "Email Destino"                    "${ADMIN_EMAIL:-}"
+    sec_info   "Proveedor Notificaciones"         "${EMAIL_PROVIDER:-off}"
+    sec_info   "Email Destino"                    "${ADMIN_EMAIL:-}"
     if [ "${EMAIL_PROVIDER:-}" = "smtp" ]; then
-        sec "SMTP Servidor"                "${SMTP_HOST:-}:${SMTP_PORT:-587}"
-        sec "SMTP Usuario"                 "${SMTP_USER:-}"
-        sec "SMTP Password"                "${SMTP_PASS:-}"
+        sec_info   "SMTP Servidor"                "${SMTP_HOST:-}:${SMTP_PORT:-587}"
+        sec_info   "SMTP Usuario"                 "${SMTP_USER:-}"
+        sec_secret "SMTP Password (Secreto)"      "${SMTP_PASS:-}"
     elif [ "${EMAIL_PROVIDER:-}" = "hyvor_relay" ]; then
-        sec "Hyvor Base URL"               "${HYVOR_BASE_URL:-}"
-        sec "Hyvor API Key"                "${HYVOR_API_KEY:-}"
+        sec_info   "Hyvor Base URL"               "${HYVOR_BASE_URL:-}"
+        sec_secret "Hyvor API Key (Secreto)"      "${HYVOR_API_KEY:-}"
     fi
 
     echo ""
+    info "Nota de seguridad: Los valores sensibles se mantienen enmascarados para evitar fugas."
+    info "Para modificarlos, edite directamente el archivo '.env' con permisos 600."
     separador
-    log "CREDENCIALES: Visualización de credenciales completas en pantalla."
+    log "CONFIG: Verificación de presencia de credenciales completada."
     pausar
 }
+
+# ==============================================================================
+# PROCESAMIENTO DE ARGUMENTOS CLI (MODO NO-INTERACTIVO)
+# ==============================================================================
+if [ $# -gt 0 ]; then
+    CLI_MODE=1
+    case "$1" in
+        --status|-s)
+            info_sistema
+            exit 0
+            ;;
+        --servicios|--services)
+            estado_servicios
+            exit 0
+            ;;
+        --diagnostico|--diag|-d)
+            diagnostico
+            exit 0
+            ;;
+        --backup|-b)
+            tipo="${2:-config}"
+            mkdir -p "$BACKUP_DIR"
+            chmod 700 "$BACKUP_DIR" 2>/dev/null || true
+            umask 077
+            FECHA=$(date +"%Y-%m-%d_%H-%M-%S")
+            case "$tipo" in
+                proyecto)
+                    ARCHIVO="$BACKUP_DIR/backup_proyecto_$FECHA.tar.gz"
+                    tar -czf "$ARCHIVO" \
+                        --exclude="$BACKUP_DIR" \
+                        --exclude="$PROJECT_ROOT/.git" \
+                        --exclude="$PROJECT_ROOT/relay/.venv" \
+                        --exclude="$PROJECT_ROOT/dashboard/node_modules" \
+                        --exclude="$PROJECT_ROOT/dashboard/dist" \
+                        -C "$(dirname "$PROJECT_ROOT")" "$(basename "$PROJECT_ROOT")" 2>/dev/null
+                    ;;
+                alertas)
+                    ARCHIVO="$BACKUP_DIR/backup_alertas_$FECHA.tar.gz"
+                    tar -czf "$ARCHIVO" -C "$PROJECT_ROOT" backups/*.jsonl logs/ 2>/dev/null
+                    ;;
+                config|*)
+                    ARCHIVO="$BACKUP_DIR/backup_config_$FECHA.tar.gz"
+                    tar -czf "$ARCHIVO" -C "$PROJECT_ROOT" .env docker-compose.yml scripts/ deploy/ manager-side/ 2>/dev/null
+                    ;;
+            esac
+            if [ -f "$ARCHIVO" ]; then
+                echo "OK: Respaldo generado en $ARCHIVO ($(du -sh "$ARCHIVO" | cut -f1))"
+                log "CLI_BACKUP: Generado $ARCHIVO"
+                exit 0
+            else
+                echo "FAIL: No se pudo generar el respaldo"
+                exit 1
+            fi
+            ;;
+        --seguridad|--security)
+            verificar_seguridad
+            exit 0
+            ;;
+        --limpiar|--clean)
+            sudo journalctl --vacuum-time=7d 2>/dev/null || true
+            docker system prune -f 2>/dev/null || true
+            echo "OK: Limpieza de mantenimiento completada."
+            exit 0
+            ;;
+        --config|--check-config)
+            verificar_configuracion
+            exit 0
+            ;;
+        --help|-h)
+            echo "Uso: $0 [OPCIÓN]"
+            echo ""
+            echo "Opciones CLI disponibles:"
+            echo "  --status, -s               Muestra estadísticas del host (CPU, RAM, Disco)"
+            echo "  --servicios                Muestra estado de servicios Wazuh, Docker y Relay"
+            echo "  --diagnostico, -d          Ejecuta diagnóstico de salud integral del stack"
+            echo "  --backup [config|alertas]  Compila un respaldo comprimido con permisos 0600"
+            echo "  --seguridad                Auditoría de puertos, firewall UFW y accesos SSH"
+            echo "  --limpiar                  Limpieza de journalctl y caché Docker"
+            echo "  --config                   Verifica presencia de credenciales enmascaradas"
+            echo "  --help, -h                 Muestra este mensaje de ayuda"
+            echo ""
+            echo "Sin argumentos: Inicia el panel interactivo de administración."
+            exit 0
+            ;;
+        *)
+            echo "Opción no reconocida: $1. Use --help para ver opciones disponibles."
+            exit 1
+            ;;
+    esac
+fi
 
 # ==============================================================================
 # BUCLE DEL MENÚ PRINCIPAL
@@ -1870,18 +1947,18 @@ while true; do
     echo -e "${AZUL}║${NC}  ${CYAN}── Respaldos y Mantenimiento ──────────────────────────────${NC}       ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${AMARILLO} 8)${NC} 💾 Generar respaldo automatizado en 'backups/'                ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${AMARILLO} 9)${NC} 📂 Listar y explorar respaldos existentes en 'backups/'      ${AZUL}║${NC}"
-    echo -e "${AZUL}║${NC}   ${AMARILLO}10)${NC} 🧹 Limpieza y mantenimiento del servidor (Docker/Journal/Apt) ${AZUL}║${NC}"
+    echo -e "${AZUL}║${NC}   ${AMARILLO}10)${NC} 🧹 Limpieza y mantenimiento del servidor (Docker/Journal)    ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}                                                                      ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}  ${CYAN}── Gestión de Infraestructura ─────────────────────────────${NC}       ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${AMARILLO}11)${NC} Gestionar servicios (iniciar/detener/reiniciar)              ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${AMARILLO}12)${NC} Auto-detección y reconciliación de IP del Manager             ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${AMARILLO}13)${NC} Verificación de seguridad (SSH, Firewall, accesos)           ${AZUL}║${NC}"
-    echo -e "${AZUL}║${NC}   ${AMARILLO}14)${NC} Instalar / actualizar herramientas del sistema               ${AZUL}║${NC}"
+    echo -e "${AZUL}║${NC}   ${AMARILLO}14)${NC} 🔍 Auditoría de dependencias y herramientas del sistema       ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}                                                                      ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}  ${CYAN}── Automatización y Auditoría ─────────────────────────────${NC}       ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${AMARILLO}15)${NC} Ver historial de auditoría (admin-wazuh-waha.log)            ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${VERDE}16)${NC} ⚡ Ejecutar TODO el mantenimiento integral                    ${AZUL}║${NC}"
-    echo -e "${AZUL}║${NC}   ${AMARILLO}17)${NC} 🔑 Ver credenciales completas (Wazuh, Relay, Telegram, WAHA)  ${AZUL}║${NC}"
+    echo -e "${AZUL}║${NC}   ${AMARILLO}17)${NC} 🛡️  Verificar presencia de credenciales (Modo seguro)          ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}   ${ROJO}18)${NC} Salir                                                         ${AZUL}║${NC}"
     echo -e "${AZUL}║${NC}                                                                      ${AZUL}║${NC}"
     echo -e "${AZUL}╚══════════════════════════════════════════════════════════════════════╝${NC}"
@@ -1891,24 +1968,24 @@ while true; do
     fi
 
     case $opcion in
-        0)  menu_conectar;         pausar ;;
-        1)  info_sistema;          pausar ;;
-        2)  estado_servicios;      pausar ;;
-        3)  diagnostico;           pausar ;;
-        4)  ver_logs                      ;;
-        5)  menu_agentes                  ;;
-        6)  menu_modulos_seguridad         ;;
-        7)  menu_notificaciones           ;;
-        8)  realizar_backup               ;;
-        9)  listar_backups                ;;
-        10) limpieza                      ;;
-        11) gestionar_servicios           ;;
-        12) auto_setup_ip                 ;;
-        13) verificar_seguridad           ;;
-        14) instalar_herramientas         ;;
-        15) ver_auditoria                 ;;
-        16) ejecutar_todo                 ;;
-        17) ver_credenciales              ;;
+        0)  menu_conectar;             pausar ;;
+        1)  info_sistema;              pausar ;;
+        2)  estado_servicios;          pausar ;;
+        3)  diagnostico;               pausar ;;
+        4)  ver_logs                          ;;
+        5)  menu_agentes                      ;;
+        6)  menu_modulos_seguridad             ;;
+        7)  menu_notificaciones               ;;
+        8)  realizar_backup                   ;;
+        9)  listar_backups                    ;;
+        10) limpieza                          ;;
+        11) gestionar_servicios               ;;
+        12) auto_setup_ip                     ;;
+        13) verificar_seguridad               ;;
+        14) verificar_dependencias            ;;
+        15) ver_auditoria                     ;;
+        16) ejecutar_todo                     ;;
+        17) verificar_configuracion           ;;
         18)
             echo -e "\n  ${VERDE}Saliendo del administrador. ¡Hasta pronto!${NC}\n"
             log "SESION: Salida del panel de administración."

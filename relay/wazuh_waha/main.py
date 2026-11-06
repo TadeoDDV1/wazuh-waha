@@ -1,7 +1,6 @@
 """
 wazuh-waha: servicio HTTP que recibe alertas de Wazuh y las manda a WhatsApp via WAHA.
 """
-import ipaddress
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
@@ -25,6 +24,7 @@ from .common.body_limit import BodySizeLimitMiddleware
 from .common.context import WORKER_ID
 from .common.logging import log
 from .common.network_bus import network_bus
+from .common.request import client_ip as _client_ip
 from .common.session import COOKIE_NAME, verify_session
 from .common.traffic_stream import traffic_watcher
 from .config import settings
@@ -41,43 +41,6 @@ _RATE_MAX_TELEMETRY = 600
 _RATE_MAX_AUTH = 5          # login: fuerza bruta de la API key
 _RATE_SWEEP_SEC = 60.0
 _last_sweep = 0.0
-
-# Redes desde las que se confía X-Forwarded-For (nginx u otros proxies).
-_trusted_nets = []
-for _p in settings.trusted_proxies_list:
-    try:
-        _trusted_nets.append(ipaddress.ip_network(_p, strict=False))
-    except ValueError:
-        log.warning("bad_trusted_proxy entry=%s", _p)
-
-
-def _is_trusted_ip(host: str) -> bool:
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return any(ip in net for net in _trusted_nets)
-
-
-def _client_ip(request: Request) -> str:
-    """IP real del cliente.
-
-    X-Forwarded-For solo se acepta cuando el peer es un proxy de confianza;
-    si no, cualquier cliente podría falsear su IP y evadir el rate limit.
-    Entre los hops se toma el último que NO sea un proxy (el primer
-    no-confiable desde la derecha).
-    """
-    peer = request.client.host if request.client else "unknown"
-    if not _is_trusted_ip(peer):
-        return peer
-    xff = request.headers.get("x-forwarded-for")
-    if not xff:
-        return peer
-    hops = [h.strip() for h in xff.split(",") if h.strip()]
-    for hop in reversed(hops):
-        if not _is_trusted_ip(hop):
-            return hop
-    return hops[0] if hops else peer
 
 
 def _rate_allow(key: str, limit: int) -> bool:
@@ -104,6 +67,16 @@ def _rate_allow(key: str, limit: int) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Fail-fast: nunca exponer el relay fuera de loopback con la clave de
+    # fábrica. Sin esto un despliegue sin .env arranca con "changeme".
+    _insecure_keys = {"", "changeme", "cambiar_relay_api_key", "cambiar"}
+    _loopback = {"127.0.0.1", "::1", "localhost"}
+    if settings.relay_api_key.strip().lower() in _insecure_keys and settings.relay_bind not in _loopback:
+        raise RuntimeError(
+            "RELAY_API_KEY insegura (valor de fábrica) con RELAY_BIND="
+            f"{settings.relay_bind}. Genera una clave con 'openssl rand -hex 24' "
+            "o enlaza el relay solo a 127.0.0.1."
+        )
     log.info(
         "relay_started worker_id=%s port=%s chat=%s ollama=%s waha=%s session=%s log_dir=%s",
         WORKER_ID,

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from ..common.audit import get_audit_log
 from ..common.logging import log
+from ..common.request import client_ip
 from ..common.session import (
     COOKIE_NAME,
     SCOPE_FULL,
@@ -36,7 +37,7 @@ class LoginRequest(BaseModel):
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "?"
+    return client_ip(request)
 
 
 def _auth_state(request: Request) -> dict:

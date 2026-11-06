@@ -168,15 +168,53 @@ class TestTelegramIntegration:
         assert "REPORTES EJECUTIVOS" in res_cmd_all
         assert "ALERTAS Y REGLAS" in res_cmd_all
 
+        # /diagnostico
+        res_diag = await telegram_bot.process_admin_command("/diagnostico")
+        assert "DIAGNÓSTICO PROFUNDO" in res_diag
+
+        # /seguridad
+        res_sec = await telegram_bot.process_admin_command("/seguridad")
+        assert "AUDITORÍA DE SEGURIDAD" in res_sec
+
+        # /limpieza
+        res_cln = await telegram_bot.process_admin_command("/limpieza")
+        assert "MANTENIMIENTO DEL SERVIDOR" in res_cln
+
+        # /backup
+        with patch.object(telegram_bot, "send_document", new_callable=AsyncMock, return_value=True):
+            res_bk = await telegram_bot.process_admin_command("/backup config", chat_id="123")
+            assert "Respaldo" in res_bk
+
         # /sync_comandos
         with patch.object(telegram_bot, "register_bot_commands", return_value=True):
             res_sync = await telegram_bot.process_admin_command("/sync_comandos")
             assert "Comandos sincronizados con éxito" in res_sync
 
+    @pytest.mark.anyio
+    async def test_channel_post_handling(self):
+        worker = telegram_bot.TelegramBotWorker()
+        channel_update = {
+            "update_id": 9999,
+            "channel_post": {
+                "message_id": 1,
+                "chat": {"id": -1001234567890, "title": "Canal SOC Wazuh", "type": "channel"},
+                "text": "/ping",
+            }
+        }
+        with patch.object(telegram_bot, "send_message", new_callable=AsyncMock) as mock_send:
+            with patch.object(settings, "telegram_chat_id", "-1001234567890"):
+                await worker._handle_update(channel_update)
+                mock_send.assert_awaited_once()
+                args, _ = mock_send.call_args
+                assert "Pong" in args[0]
+
     def test_waha_webhook_command_processing(self):
         old_admin = settings.admin_phone
+        old_token = settings.waha_webhook_token
         try:
             settings.admin_phone = "5219991234567"
+            settings.waha_webhook_token = "test-webhook-token"
+            auth = {"X-Api-Key": "test-webhook-token"}
 
             # Mensaje no autorizado
             unauth_payload = {
@@ -187,8 +225,12 @@ class TestTelegramIntegration:
                     "body": "/status",
                 }
             }
-            res_unauth = self.client.post("/api/v1/waha/webhook", json=unauth_payload)
+            res_unauth = self.client.post("/api/v1/waha/webhook", json=unauth_payload, headers=auth)
             assert res_unauth.status_code == 403
+
+            # Sin token: no debe ejecutar nada
+            res_no_token = self.client.post("/api/v1/waha/webhook", json=unauth_payload)
+            assert res_no_token.status_code == 401
 
             # Mensaje no comando
             plain_payload = {
@@ -199,7 +241,7 @@ class TestTelegramIntegration:
                     "body": "Hola buen día",
                 }
             }
-            res_plain = self.client.post("/api/v1/waha/webhook", json=plain_payload)
+            res_plain = self.client.post("/api/v1/waha/webhook", json=plain_payload, headers=auth)
             assert res_plain.status_code == 200
             assert res_plain.json()["skipped"] == "not_command"
 
@@ -213,10 +255,11 @@ class TestTelegramIntegration:
                 }
             }
             with patch("wazuh_waha.api.waha_webhook.send_text", new_callable=AsyncMock) as mock_send:
-                res_cmd = self.client.post("/api/v1/waha/webhook", json=cmd_payload)
+                res_cmd = self.client.post("/api/v1/waha/webhook", json=cmd_payload, headers=auth)
                 assert res_cmd.status_code == 200
                 assert res_cmd.json()["ok"] is True
                 assert res_cmd.json()["executed"] == "/status"
                 mock_send.assert_awaited_once()
         finally:
             settings.admin_phone = old_admin
+            settings.waha_webhook_token = old_token
