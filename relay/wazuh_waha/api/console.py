@@ -93,6 +93,22 @@ def _ssh_command(dest: str) -> list[str]:
     cmd = ssh_pool._base_cmd()  # type: ignore[attr-defined]
     # _base_cmd termina con user@host; lo reemplazamos y forzamos PTY.
     cmd = cmd[:-1]
+    # La sesión interactiva NO debe compartir el ControlMaster del pool:
+    # si el master rotaba o moría por los polls del relay, la PTY conectada
+    # al mux moría con él (sesiones que se cerraban a los ~0.5 s).
+    # ControlPath=none fuerza una conexión TCP propia y estable. ssh usa el
+    # PRIMER valor de cada keyword, así que se reemplaza en su posición.
+    overrides = {
+        "ControlMaster=": "ControlMaster=no",
+        "ControlPath=": "ControlPath=none",
+        "ControlPersist=": "ControlPersist=no",
+    }
+    for i, opt in enumerate(cmd):
+        prefix = next((p for p in overrides if opt.startswith(p)), None)
+        if prefix:
+            cmd[i] = overrides.pop(prefix)
+            if not overrides:
+                break
     cmd += ["-tt", dest]
     return cmd
 

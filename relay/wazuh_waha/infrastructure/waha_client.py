@@ -49,10 +49,23 @@ def _save_fail_window(window: deque[float]) -> None:
     path = _fail_state_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists():
-            path.touch(mode=0o640)
         payload = json.dumps(list(window)).encode("utf-8")
-        with open(path, "r+b") as fd:
+        try:
+            if not path.exists():
+                path.touch(mode=0o640)
+            fd_handle = open(path, "r+b")
+        except PermissionError:
+            # Archivo corrupto/desasignado (p. ej. escrito antes como root):
+            # el dueño del directorio puede unlink + recrear. Evita bloquear
+            # la persistencia para siempre con un permiso denegado.
+            try:
+                path.unlink()
+            except OSError:
+                log.warning("fail_state_write_error err=cannot_recreate path=%s", path)
+                return
+            path.touch(mode=0o640)
+            fd_handle = open(path, "r+b")
+        with fd_handle as fd:
             fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
             try:
                 fd.seek(0)

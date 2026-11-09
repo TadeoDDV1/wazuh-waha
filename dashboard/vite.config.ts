@@ -36,7 +36,10 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       proxy: {
-        '/api': { target: relayTarget, changeOrigin: false },
+        // ws:true es obligatorio para la consola web: el handshake WebSocket
+        // (Upgrade) de /api/v1/console/ws debe proxyar como WebSocket, no
+        // como HTTP normal (si no, la terminal no conecta en modo dev).
+        '/api': { target: relayTarget, changeOrigin: false, ws: true },
         '/debug': { target: relayTarget, changeOrigin: false },
         '/health': { target: relayTarget, changeOrigin: false },
       },
