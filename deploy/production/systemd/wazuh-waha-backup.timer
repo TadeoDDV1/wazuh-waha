@@ -1,0 +1,12 @@
+[Unit]
+Description=wazuh-waha: respaldo diario
+Documentation=file://__APP_DIR__/README.md
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=20min
+Persistent=true
+Unit=wazuh-waha-backup.service
+
+[Install]
+WantedBy=timers.target

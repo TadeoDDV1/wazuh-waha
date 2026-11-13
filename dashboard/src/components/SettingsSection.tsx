@@ -19,6 +19,7 @@ import {
   Info,
   CheckCircle2,
   Send,
+  Download,
 } from 'lucide-react';
 
 export const SettingsSection: React.FC = () => {
@@ -879,9 +880,20 @@ export const SettingsSection: React.FC = () => {
                 <h3>Registros en Vivo del Servicio (journalctl)</h3>
                 <span className="block-tag">Logs</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
                 <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Últimas 100 líneas del servicio wazuh-waha</span>
-                {loadingLogs && <span style={{ fontSize: '12px', color: 'var(--cyan-accent)' }}>Actualizando...</span>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {loadingLogs && <span style={{ fontSize: '12px', color: 'var(--cyan-accent)' }}>Actualizando...</span>}
+                  <button
+                    type="button"
+                    className="nav-btn"
+                    onClick={() => window.open(dashboardService.getLogsHistoryUrl(2000), '_blank')}
+                    title="Genera y descarga un archivo con el historial completo (relay, contenedores, eventos, alertas y respaldos)"
+                  >
+                    <Download size={13} />
+                    Descargar historial
+                  </button>
+                </div>
               </div>
               <pre className="logs-terminal" style={{
                 background: '#090d16',

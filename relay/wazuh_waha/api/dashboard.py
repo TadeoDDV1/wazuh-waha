@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from ..common.logging import log
 from ..config import ENV_FILE, settings
@@ -1965,6 +1965,42 @@ async def get_dashboard_logs(request: Request, lines: int = 100):
         return {"ok": False, "logs": f"Error leyendo logs: {out}"}
         
     return {"ok": True, "logs": out}
+
+
+@router.get("/api/v1/dashboard/logs/history")
+async def get_dashboard_logs_history(request: Request, lines: int = 2000):
+    """Genera y descarga un archivo unico con el historial consolidado.
+
+    Incluye journal del relay/monitor/respaldos, logs rotados, contenedores,
+    eventos de infraestructura, alertas Wazuh y listado de respaldos.
+    """
+    await verify_api_key(request)
+    lines = max(100, min(lines, 20000))
+
+    script = PROJECT_ROOT / "scripts" / "export-logs.sh"
+    output = Path(settings.relay_log_dir) / "historial-wazuh-waha.log"
+    if not script.exists():
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": f"No existe {script}"},
+        )
+
+    code, out = await asyncio.to_thread(
+        _run_cmd,
+        ["bash", str(script), "--lines", str(lines), "--output", str(output)],
+        90,
+    )
+    if code != 0 or not output.exists():
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": f"No se pudo generar el historial: {out}"},
+        )
+
+    return FileResponse(
+        path=str(output),
+        media_type="text/plain; charset=utf-8",
+        filename="historial-wazuh-waha.log",
+    )
 
 
 

@@ -20,4 +20,6 @@ La guía completa está en el [`README`](../../README.md) y en
 
 - `docker-compose.prod.yml`: WAHA y dashboard, publicados solo en `127.0.0.1`.
 - `Caddyfile`: TLS automático + reverse proxy (dashboard, API, SSE y WebSocket).
-- `systemd/`: unidad del relay y watchdog.
+- `systemd/`: relay, watchdog, avisos de apagado/arranque, monitor cada
+  minuto, respaldos diarios y notificación de fallos (`OnFailure=`).
+- `logrotate-wazuh-waha`: rotación de `eventos.log`, `backup.log` e historial.

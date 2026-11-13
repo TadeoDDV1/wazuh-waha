@@ -127,7 +127,37 @@ sed -e "s|__APP_USER__|$APP_USER|g" \
     > /etc/systemd/system/wazuh-waha-watchdog.service
 cp "$APP_DIR/deploy/production/systemd/wazuh-waha-watchdog.timer" /etc/systemd/system/wazuh-waha-watchdog.timer
 chmod 644 /etc/systemd/system/wazuh-waha.service /etc/systemd/system/wazuh-waha-watchdog.service /etc/systemd/system/wazuh-waha-watchdog.timer
+
+install_unit() {
+  local src="$1" dst="$2"
+  sed -e "s|__APP_USER__|$APP_USER|g" \
+      -e "s|__APP_DIR__|$APP_DIR|g" \
+      -e "s|__RELAY_PORT__|${RELAY_PORT:-8765}|g" \
+      "$src" >"/etc/systemd/system/$dst"
+  chmod 644 "/etc/systemd/system/$dst"
+}
+
+info "Instalando avisos, monitor y respaldos..."
+install_unit "$APP_DIR/deploy/production/systemd/wazuh-waha-boot-notify.service" "wazuh-waha-boot-notify.service"
+install_unit "$APP_DIR/deploy/production/systemd/wazuh-waha-shutdown-notify.service" "wazuh-waha-shutdown-notify.service"
+install_unit "$APP_DIR/deploy/production/systemd/wazuh-waha-monitor.service" "wazuh-waha-monitor.service"
+install_unit "$APP_DIR/deploy/production/systemd/wazuh-waha-monitor.timer" "wazuh-waha-monitor.timer"
+install_unit "$APP_DIR/deploy/production/systemd/wazuh-waha-backup.service" "wazuh-waha-backup.service"
+install_unit "$APP_DIR/deploy/production/systemd/wazuh-waha-backup.timer" "wazuh-waha-backup.timer"
+install_unit "$APP_DIR/deploy/production/systemd/wazuh-waha-failure-notify.service" "wazuh-waha-failure-notify.service"
+install_unit "$APP_DIR/deploy/production/systemd/wazuh-waha-backup-failure-notify.service" "wazuh-waha-backup-failure-notify.service"
+install -d -m 0755 /etc/systemd/system/wazuh-waha.service.d
+install_unit "$APP_DIR/deploy/production/systemd/wazuh-waha.service.d-notify.conf" "wazuh-waha.service.d/notify.conf"
+
+if [ -f "$APP_DIR/deploy/production/logrotate-wazuh-waha" ]; then
+  sed -e "s|__APP_USER__|$APP_USER|g" \
+      "$APP_DIR/deploy/production/logrotate-wazuh-waha" >/etc/logrotate.d/wazuh-waha
+  chmod 644 /etc/logrotate.d/wazuh-waha
+fi
+
 systemctl daemon-reload
+systemctl enable wazuh-waha-boot-notify.service wazuh-waha-shutdown-notify.service >/dev/null 2>&1 || true
+systemctl enable --now wazuh-waha-monitor.timer wazuh-waha-backup.timer >/dev/null 2>&1 || warn "No se pudieron habilitar los timers de monitor/respaldo"
 ok "Unidades systemd instaladas"
 
 info "Configurando Caddy..."

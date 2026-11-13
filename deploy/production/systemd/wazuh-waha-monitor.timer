@@ -1,0 +1,13 @@
+[Unit]
+Description=wazuh-waha: monitor cada minuto de red/servicios/WAHA
+Documentation=file://__APP_DIR__/README.md
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=true
+Unit=wazuh-waha-monitor.service
+
+[Install]
+WantedBy=timers.target

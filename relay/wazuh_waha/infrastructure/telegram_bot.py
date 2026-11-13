@@ -1930,19 +1930,53 @@ async def _send_custom_whatsapp(phone: str, text_message: str) -> str:
 
 
 def _get_recent_system_logs(lines: int = 25) -> str:
-    """Lee y devuelve los últimos logs del relay."""
+    """Lee y devuelve los últimos logs del relay desde journald."""
     limit = min(max(int(lines), 5), 50)
+    import shutil
     import subprocess
-    try:
-        out = subprocess.check_output(
-            ["journalctl", "-u", "wazuh-waha.service", "-n", str(limit), "--no-pager", "-q"],
-            stderr=subprocess.STDOUT,
-            timeout=5,
-        ).decode("utf-8", errors="replace")
-        clean_logs = out[-3500:]
-        return f"📋 *ÚLTIMOS {limit} LOGS DEL RELAY (journalctl):*\n```text\n{clean_logs}\n```"
-    except Exception as e:
-        return f"❌ Error leyendo journalctl: {e}"
+
+    if not shutil.which("journalctl"):
+        return "❌ `journalctl` no está disponible en este host; no puedo leer los logs del relay."
+
+    base_unit = (os.getenv("WAZUH_WAHA_SERVICE") or "wazuh-waha.service").strip()
+    candidates = [base_unit]
+    if base_unit.endswith(".service"):
+        candidates.append(base_unit[: -len(".service")])
+    else:
+        candidates.append(f"{base_unit}.service")
+
+    seen: set[str] = set()
+    last_error = ""
+    for unit in candidates:
+        if not unit or unit in seen:
+            continue
+        seen.add(unit)
+        try:
+            res = subprocess.run(
+                ["journalctl", "-u", unit, "-n", str(limit), "--no-pager", "-q"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5,
+            )
+            out = res.stdout.decode("utf-8", errors="replace").strip()
+            if res.returncode == 0 and out and "-- No entries --" not in out:
+                # Evita que un backtick dentro de un log rompa el bloque Markdown
+                # y Telegram rechace el mensaje.
+                clean_logs = out[-3500:].replace("`", "'")
+                return f"📋 *ÚLTIMOS {limit} LOGS DEL RELAY (journalctl):*\n```text\n{clean_logs}\n```"
+            err = res.stderr.decode("utf-8", errors="replace").strip()
+            last_error = err or "el servicio no tiene entradas en journald"
+        except subprocess.TimeoutExpired:
+            last_error = "journalctl excedió el tiempo de espera (5s)"
+        except Exception as e:
+            last_error = str(e)
+
+    return (
+        "❌ *No pude leer los logs del relay por journald.*\n"
+        f"Unidad consultada: `{base_unit}`\n"
+        f"Detalle: `{last_error[:300]}`\n\n"
+        "Verifica con: `systemctl status wazuh-waha.service`"
+    )
 
 
 def _get_audit_log_entries(lines: int = 10) -> str:
@@ -2299,7 +2333,9 @@ async def process_admin_command(text: str, source: str = "telegram", chat_id: st
         return _get_help_menu()
 
     parts = clean.split()
-    cmd = parts[0].lower()
+    # Telegram envía los comandos como /logs@MiBot en grupos: descartar el sufijo
+    # del bot para que coincidan con el catálogo de comandos.
+    cmd = parts[0].lower().split("@", 1)[0]
     arg = parts[1] if len(parts) > 1 else ""
 
     # Menú y ayuda

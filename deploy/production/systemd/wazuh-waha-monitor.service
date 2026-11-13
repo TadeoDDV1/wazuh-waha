@@ -1,0 +1,16 @@
+[Unit]
+Description=wazuh-waha: monitor de red, servicios, contenedores y sesion WAHA
+Documentation=file://__APP_DIR__/README.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=__APP_USER__
+Group=__APP_USER__
+EnvironmentFile=/etc/wazuh-waha/relay.env
+ExecStart=/usr/bin/python3 __APP_DIR__/scripts/host_monitor.py
+TimeoutStartSec=90
+Nice=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wazuh-waha-monitor

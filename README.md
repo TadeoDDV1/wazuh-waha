@@ -331,6 +331,7 @@ Las principales variables de configuración del sistema se encuentran en el arch
 | `TELEGRAM_BOT_TOKEN` | `""` | Token provisto por `@BotFather` para el bot de Telegram. |
 | `TELEGRAM_CHAT_ID` | `""` | ID numérico del chat, grupo o canal de Telegram autorizado. |
 | `EMAIL_ALERTS_ENABLED` | `false` | Conmutador para activar notificaciones por correo electrónico. |
+| `HOST_NOTIFY_EMAIL` | `true` | Envía también por email los avisos de apagado/arranque/caídas del host. |
 | `SMTP_HOST` | `smtp.gmail.com` | Servidor SMTP saliente para envío de alertas por correo. |
 | `SMTP_PORT` | `587` | Puerto del servidor SMTP (STARTTLS). |
 | `SMTP_USER` | `""` | Usuario de autenticación en el servidor SMTP. |
@@ -370,13 +371,113 @@ docker logs -f wazuh-waha
 docker logs -f wazuh-waha-dashboard
 ```
 
+### Avisos automáticos del servidor
+
+El host envía avisos por WhatsApp (si la sesión WAHA está `WORKING`), Telegram
+y email cuando ocurre un evento de infraestructura:
+
+- **Apagado o reinicio**: `wazuh-waha-shutdown-notify.service` se ejecuta antes
+  de que systemd detenga Docker y avisa del apagado.
+- **Vuelta a estar en línea**: `wazuh-waha-boot-notify.service` avisa al
+  arrancar con el estado de los servicios y contenedores.
+- **Pérdida y recuperación de Internet**: `wazuh-waha-monitor.timer` revisa
+  cada minuto y notifica la caída y la duración al reconectar.
+- **Caída de relay, contenedores, servicios de Wazuh o sesión WAHA**:
+  el mismo monitor avisa en el cambio y cuando se recupera.
+- **Fallo del relay**: `OnFailure=` de `wazuh-waha.service` dispara un aviso.
+- **Respaldo fallido**: `wazuh-waha-backup.service` dispara su propio aviso.
+
+El historial legible de estos eventos queda en
+`/var/log/wazuh-waha/eventos.log` (y `eventos.jsonl` para automatización).
+Se puede desactivar el email de estos avisos con `HOST_NOTIFY_EMAIL=false`.
+
+> **Nota sobre cortes de energía:** si el servidor se apaga de golpe (fallo
+> eléctrico o hardware), ningún proceso local puede enviar el aviso en ese
+> instante. El sistema avisará al volver a arrancar (`boot`) y el monitor
+> reportará la recuperación. Para detectar apagones eléctricos en tiempo real
+> hace falta un monitor externo (otro host o servicio de heartbeat).
+
+### Historial de logs
+
+```bash
+# Genera /var/log/wazuh-waha/historial-wazuh-waha.log con todo el historial
+bash scripts/export-logs.sh
+
+# Incluir más líneas y abrirlo con el paginador del sistema
+bash scripts/export-logs.sh --lines 5000 --open
+
+# También está disponible desde el Dashboard:
+#   Configuración → Logs del Sistema → Descargar historial
+```
+
+El archivo consolidado incluye journal del relay/monitor/respaldos, logs
+rotados, contenedores WAHA/Dashboard, eventos de infraestructura, últimas
+alertas de Wazuh y el listado de respaldos. Los tokens y query strings se
+redactan automáticamente.
+
+### Enriquecimiento y explicaciones
+
+Cada alerta se enriquece de forma **determinista** (sin IA) con:
+
+- traducción al español de la descripción y del log,
+- resumen en lenguaje simple,
+- severidad legible y SLA sugerido,
+- activo afectado (criticidad, responsable, ubicación),
+- contexto de red (servicio, dirección, país/ASN si hay GeoLite2),
+- tácticas y técnicas MITRE ATT&CK,
+- indicadores (IPs, dominios, URLs, hashes, usuarios, procesos),
+- pasos de remediación con comando copiable.
+
+El dashboard muestra esta información en:
+
+- **Telemetría en vivo**: resumen y acción recomendada en el feed.
+- **Alertas recientes**: severidad, resumen y primera acción.
+- **Detecciones**: columnas “Qué pasó” y “Qué hacer”, con panel de detalle
+  (resumen, contexto, acciones y datos técnicos).
+
+Configuración principal:
+
+```env
+ENRICH_ENABLED=true
+ENRICH_CACHE_PATH=/var/lib/wazuh-waha/enrichment_cache.sqlite3
+ENRICH_ASSETS_FILE=/etc/wazuh-waha/assets.json
+ENRICH_GEOIP_DB=/var/lib/wazuh-waha/GeoLite2-City.mmdb
+ENRICH_REDACT_PII=true
+```
+
+Catálogos incluidos: `relay/wazuh_waha/domain/enrichment/catalog/`.
+Se pueden sobreescribir con `ENRICH_CATALOG_DIR` y recargar sin reiniciar:
+
+```bash
+curl -X POST -H "X-Api-Key: $RELAY_API_KEY" \
+  http://127.0.0.1:8765/api/v1/telemetry/enrichment/reload
+```
+
+Endpoints útiles:
+
+- `GET /api/v1/telemetry/enrichment/glossary`
+- `GET /api/v1/telemetry/enrichment/catalogs/status`
+- `GET /api/v1/telemetry/enrichment/metrics`
+- `GET /api/v1/telemetry/events/{id}/enrichment`
+
 ### Política de Respaldos
+
+El respaldo se ejecuta automáticamente todos los días a las 03:30
+(`wazuh-waha-backup.timer`, con retardo aleatorio de hasta 20 minutos y
+`Persistent=true`). Guarda configuración, unidades systemd, configuración de
+Wazuh, estado del relay, logs de eventos, alertas recientes y el volumen de
+sesión de WAHA, con manifiesto y checksums SHA-256.
+
 ```bash
 # Generar un respaldo completo manual
 sudo bash scripts/backup.sh
 
-# Restaurar desde un respaldo previo
-sudo bash scripts/restore.sh /var/backups/wazuh-waha/<archivo-backup>.tar.gz --with-wazuh --with-waha-volume
+# Ver el estado y la fecha del próximo respaldo
+systemctl list-timers wazuh-waha-backup.timer
+tail -n 30 /var/log/wazuh-waha/backup.log
+
+# Restaurar desde un respaldo previo (es un directorio, no un .tar.gz)
+sudo bash scripts/restore.sh /var/backups/wazuh-waha/20261106T205528Z --with-wazuh --with-waha-volume
 
 # Revertir cambios de emergencia (Rollback)
 sudo bash scripts/rollback.sh

@@ -84,29 +84,48 @@ class TestTelegramIntegration:
             settings.telegram_min_level = old_min
 
     def test_telegram_session_persistence(self, tmp_path):
-        with patch.object(telegram_bot, "get_session_file", return_value=tmp_path / "telegram_session.json"):
-            # Guardar sesión
-            ok = telegram_bot.save_telegram_session(
-                token="test-token-123",
-                chat_id="test-chat-456",
-                enabled=True,
-                min_level=9,
-            )
-            assert ok is True
-            assert (tmp_path / "telegram_session.json").exists()
+        # Aislar TODOS los efectos secundarios: sin estos mocks el test escribe
+        # credenciales de prueba en /var/lib/wazuh-waha, en .env y en
+        # /etc/wazuh-waha/relay.env, dejando el bot real desconfigurado.
+        old_token = settings.telegram_bot_token
+        old_chat = settings.telegram_chat_id
+        old_enabled = settings.telegram_enabled
+        old_min = settings.telegram_min_level
+        try:
+            with (
+                patch.object(telegram_bot, "get_session_file", return_value=tmp_path / "telegram_session.json"),
+                patch.object(telegram_bot, "_save_to_env"),
+                patch.object(telegram_bot, "_sync_systemd_env"),
+                patch("wazuh_waha.config.save_overrides"),
+                patch("wazuh_waha.config.load_overrides", return_value={}),
+            ):
+                # Guardar sesión
+                ok = telegram_bot.save_telegram_session(
+                    token="test-token-123",
+                    chat_id="test-chat-456",
+                    enabled=True,
+                    min_level=9,
+                )
+                assert ok is True
+                assert (tmp_path / "telegram_session.json").exists()
 
-            # Resetear memoria
-            settings.telegram_bot_token = ""
-            settings.telegram_chat_id = ""
+                # Resetear memoria
+                settings.telegram_bot_token = ""
+                settings.telegram_chat_id = ""
 
-            # Cargar sesión persistida
-            loaded = telegram_bot.load_telegram_session()
-            assert loaded["token"] == "test-token-123"
-            assert loaded["chat_id"] == "test-chat-456"
-            assert loaded["enabled"] is True
-            assert loaded["min_level"] == 9
-            assert settings.telegram_bot_token == "test-token-123"
-            assert settings.telegram_chat_id == "test-chat-456"
+                # Cargar sesión persistida
+                loaded = telegram_bot.load_telegram_session()
+                assert loaded["token"] == "test-token-123"
+                assert loaded["chat_id"] == "test-chat-456"
+                assert loaded["enabled"] is True
+                assert loaded["min_level"] == 9
+                assert settings.telegram_bot_token == "test-token-123"
+                assert settings.telegram_chat_id == "test-chat-456"
+        finally:
+            settings.telegram_bot_token = old_token
+            settings.telegram_chat_id = old_chat
+            settings.telegram_enabled = old_enabled
+            settings.telegram_min_level = old_min
 
     @pytest.mark.anyio
     async def test_process_admin_commands(self):
@@ -189,6 +208,14 @@ class TestTelegramIntegration:
         with patch.object(telegram_bot, "register_bot_commands", return_value=True):
             res_sync = await telegram_bot.process_admin_command("/sync_comandos")
             assert "Comandos sincronizados con éxito" in res_sync
+
+    @pytest.mark.anyio
+    async def test_logs_command_accepts_bot_suffix(self):
+        # En grupos Telegram envía /logs@MiBot; debe seguir funcionando.
+        with patch.object(telegram_bot, "_get_recent_system_logs", return_value="LOGS OK") as mocked:
+            res = await telegram_bot.process_admin_command("/logs@MiBot 15")
+        assert res == "LOGS OK"
+        mocked.assert_called_once_with(lines=15)
 
     @pytest.mark.anyio
     async def test_channel_post_handling(self):

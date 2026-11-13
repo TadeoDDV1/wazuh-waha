@@ -1,0 +1,21 @@
+[Unit]
+Description=wazuh-waha: respaldo de configuracion, estado y sesion WAHA
+Documentation=file://__APP_DIR__/README.md
+After=network.target docker.service
+Wants=docker.service
+OnFailure=wazuh-waha-backup-failure-notify.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/wazuh-waha/relay.env
+Environment="APP_DIR=__APP_DIR__"
+ExecStart=/usr/bin/bash __APP_DIR__/scripts/backup.sh
+TimeoutStartSec=900
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wazuh-waha-backup

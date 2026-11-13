@@ -44,6 +44,9 @@ export const dashboardService = {
     return response.data;
   },
 
+  getLogsHistoryUrl: (lines = 2000): string =>
+    `${API_URL}/api/v1/dashboard/logs/history?lines=${encodeURIComponent(String(lines))}`,
+
   getStatus: async (): Promise<StatusResponse> => {
     const response = await api.get<StatusResponse>('/status');
     return response.data;

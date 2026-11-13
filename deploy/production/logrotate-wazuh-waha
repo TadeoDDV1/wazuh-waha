@@ -1,0 +1,12 @@
+/var/log/wazuh-waha/eventos.log
+/var/log/wazuh-waha/backup.log
+/var/log/wazuh-waha/historial-*.log {
+    daily
+    rotate 14
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    su __APP_USER__ __APP_USER__
+}

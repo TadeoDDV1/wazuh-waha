@@ -1,0 +1,21 @@
+[Unit]
+Description=wazuh-waha: aviso cuando el servidor se apaga o reinicia
+Documentation=file://__APP_DIR__/README.md
+DefaultDependencies=no
+Before=shutdown.target reboot.target halt.target
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__APP_USER__
+Group=__APP_USER__
+EnvironmentFile=/etc/wazuh-waha/relay.env
+ExecStart=/usr/bin/python3 __APP_DIR__/scripts/host_notify.py --event shutdown --with-status
+TimeoutStartSec=25
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wazuh-waha-shutdown-notify
+
+[Install]
+WantedBy=shutdown.target reboot.target halt.target

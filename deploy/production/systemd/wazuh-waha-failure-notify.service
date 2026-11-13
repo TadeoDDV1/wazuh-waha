@@ -1,0 +1,16 @@
+[Unit]
+Description=wazuh-waha: aviso de fallo del relay
+Documentation=file://__APP_DIR__/README.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=__APP_USER__
+Group=__APP_USER__
+EnvironmentFile=/etc/wazuh-waha/relay.env
+Environment="SERVICE_UNIT=wazuh-waha.service"
+ExecStart=/usr/bin/bash __APP_DIR__/scripts/notify-relay-failure.sh
+TimeoutStartSec=90
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wazuh-waha-failure-notify
