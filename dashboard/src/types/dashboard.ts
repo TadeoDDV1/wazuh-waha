@@ -1,3 +1,5 @@
+import type { Enrichment } from './telemetry';
+
 export interface Component {
   id: string;
   name: string;
@@ -158,6 +160,15 @@ export interface RecentAlert {
   waha_id?: string;
   total_ms?: number;
   error?: string;
+  enrichment?: {
+    description_es?: string | null;
+    summary_es?: string | null;
+    plain_severity?: string | null;
+    business_impact?: string | null;
+    remediation?: Enrichment['remediation'];
+    asset?: Enrichment['asset'];
+    degraded?: boolean;
+  };
 }
 
 export interface NetworkPortService {

@@ -23,6 +23,38 @@ def _finish_record(record: dict, raw_alert: dict | None = None) -> None:
     save_alert_backup(record, raw_alert=raw_alert)
 
 
+def _telemetry_enrichment(event: dict | None) -> dict:
+    """Campos compactos de enriquecimiento para el feed de telemetría."""
+    enr = (event or {}).get("enrichment") or {}
+    translations = enr.get("translations") or {}
+    risk = enr.get("risk") or {}
+    steps = enr.get("remediation") or []
+    return {
+        "summary_es": str(translations.get("summary_es") or ""),
+        "plain_severity": str(risk.get("plain_severity") or ""),
+        "remediation_action": str((steps[0] or {}).get("action") or "") if steps else "",
+    }
+
+
+def _compact_enrichment(event: dict | None) -> dict:
+    """Resumen de enriquecimiento para alertas recientes y respaldos.
+
+    Se evita guardar el objeto completo para no inflar el JSONL de respaldo.
+    """
+    enr = (event or {}).get("enrichment") or {}
+    translations = enr.get("translations") or {}
+    risk = enr.get("risk") or {}
+    return {
+        "description_es": translations.get("description_es"),
+        "summary_es": translations.get("summary_es"),
+        "plain_severity": risk.get("plain_severity"),
+        "business_impact": risk.get("business_impact"),
+        "remediation": (enr.get("remediation") or [])[:2],
+        "asset": enr.get("asset"),
+        "degraded": bool(enr.get("degraded")),
+    }
+
+
 
 router = APIRouter(tags=["alerts"])
 
@@ -59,9 +91,12 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         rule_id, level, agent_id, agent_name, description, len(body_bytes), WORKER_ID,
     )
 
-    # Difundir evento al stream de tráfico en vivo (journal + SSE)
+    # Difundir evento al stream de tráfico en vivo (journal + SSE).
+    # El evento ya sale normalizado y enriquecido; se reutiliza para la
+    # notificación y para el registro de alertas recientes.
+    enriched_event: dict | None = None
     try:
-        traffic_watcher.record_manual_event(alert, source="relay")
+        enriched_event = traffic_watcher.record_manual_event(alert, source="relay")
     except Exception as _tw_err:
         log.debug("Error registrando alerta en traffic_watcher: %s", _tw_err)
 
@@ -75,9 +110,12 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         "alert_timestamp": ts_alert,
         "worker_id": WORKER_ID,
     }
+    if enriched_event:
+        record["enrichment"] = _compact_enrichment(enriched_event)
+    tel_enrich = _telemetry_enrichment(enriched_event)
 
     try:
-        message, meta = await format_alert(alert)
+        message, meta = await format_alert(alert, enriched=enriched_event)
     except Exception as e:
         log.exception("format_error rule=%s agent=%s err=%s", rule_id, agent_id, e)
         record["decision"] = "format_error"
@@ -89,6 +127,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
             agent_id=agent_id, agent_name=agent_name,
             description=description, decision="format_error",
             alert_timestamp=ts_alert,
+            **tel_enrich,
         ))
         raise HTTPException(status_code=500, detail="format error")
 
@@ -107,6 +146,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
             agent_id=agent_id, agent_name=agent_name,
             description=description, decision="deduped",
             alert_timestamp=ts_alert,
+            **tel_enrich,
         ))
         return JSONResponse(status_code=200, content={"status": "deduped", "meta": meta})
 
@@ -177,6 +217,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
                     agent_id=agent_id, agent_name=agent_name,
                     description=description, decision="waha_error",
                     alert_timestamp=ts_alert,
+                    **tel_enrich,
                 ))
                 return {
                     "status": "error",
@@ -227,6 +268,7 @@ async def receive_alert(request: Request, _: None = Depends(verify_api_key)):
         description=description, decision="sent",
         latency_ms=float(elapsed_ms),
         alert_timestamp=ts_alert,
+        **tel_enrich,
     ))
 
     return {

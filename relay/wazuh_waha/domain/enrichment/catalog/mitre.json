@@ -1,0 +1,23 @@
+{
+  "version": "2026.11",
+  "techniques": {
+    "T1003": {"name": "Volcado de credenciales", "tactic": "Acceso a credenciales"},
+    "T1021": {"name": "Servicios remotos", "tactic": "Movimiento lateral"},
+    "T1041": {"name": "Exfiltración por canal de control", "tactic": "Exfiltración"},
+    "T1046": {"name": "Descubrimiento de servicios de red", "tactic": "Descubrimiento"},
+    "T1053": {"name": "Tareas programadas", "tactic": "Persistencia"},
+    "T1059": {"name": "Intérprete de comandos", "tactic": "Ejecución"},
+    "T1068": {"name": "Explotación para escalar privilegios", "tactic": "Escalada de privilegios"},
+    "T1071": {"name": "Comunicación por protocolo de aplicación", "tactic": "Comando y control"},
+    "T1078": {"name": "Cuentas válidas", "tactic": "Acceso inicial"},
+    "T1098": {"name": "Modificación de cuentas", "tactic": "Persistencia"},
+    "T1105": {"name": "Transferencia de herramientas", "tactic": "Comando y control"},
+    "T1110": {"name": "Fuerza bruta", "tactic": "Acceso a credenciales"},
+    "T1136": {"name": "Creación de cuentas", "tactic": "Persistencia"},
+    "T1190": {"name": "Explotación de servicio expuesto", "tactic": "Acceso inicial"},
+    "T1486": {"name": "Cifrado de datos para impacto", "tactic": "Impacto"},
+    "T1547": {"name": "Persistencia en el arranque", "tactic": "Persistencia"},
+    "T1548": {"name": "Abuso de elevación de privilegios", "tactic": "Escalada de privilegios"},
+    "T1565": {"name": "Manipulación de datos", "tactic": "Impacto"}
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "version": "2026.11",
+  "terms": {
+    "MITRE": {
+      "short": "MITRE ATT&CK",
+      "long": "Catálogo público de tácticas y técnicas que usan los atacantes."
+    },
+    "FIM": {
+      "short": "Integridad de archivos",
+      "long": "Vigila si un archivo importante cambió, se creó o se borró."
+    },
+    "SCA": {
+      "short": "Configuración segura",
+      "long": "Revisa si el equipo cumple buenas prácticas de configuración."
+    },
+    "Rootcheck": {
+      "short": "Detección de rootkits",
+      "long": "Busca señales de malware, rootkits o anomalías en el sistema."
+    },
+    "IoC": {
+      "short": "Indicador de compromiso",
+      "long": "Dato que sugiere que algo malicioso ocurrió, como una IP o un archivo."
+    },
+    "CVE": {
+      "short": "Vulnerabilidad conocida",
+      "long": "Fallo de seguridad público con un identificador único."
+    },
+    "ASN": {
+      "short": "Red del proveedor",
+      "long": "Identifica a qué proveedor de Internet pertenece una IP."
+    },
+    "SSH": {
+      "short": "Acceso remoto seguro",
+      "long": "Protocolo para administrar servidores de forma remota y cifrada."
+    },
+    "Syscollector": {
+      "short": "Inventario del equipo",
+      "long": "Recolecta datos de hardware, software, puertos y procesos."
+    },
+    "Fuerza bruta": {
+      "short": "Ataque de fuerza bruta",
+      "long": "Intentar muchas contraseñas hasta acertar una."
+    }
+  }
+}

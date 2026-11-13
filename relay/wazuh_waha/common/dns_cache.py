@@ -85,6 +85,24 @@ async def resolve_many(ips: set[str]) -> dict[str, str]:
     return out
 
 
+def peek(ip: str) -> str:
+    """Devuelve el hostname cacheado sin hacer ninguna consulta de red.
+
+    Se usa en enrichers síncronos para no bloquear el pipeline.
+    """
+    ip = str(ip or "").replace("::ffff:", "").strip()
+    if not ip:
+        return ""
+    cached = _CACHE.get(ip)
+    if not cached:
+        return ""
+    value, expires_at = cached
+    if expires_at <= time.time():
+        _CACHE.pop(ip, None)
+        return ""
+    return value
+
+
 def remember(ip: str, hostname: str) -> None:
     ip = str(ip or "").replace("::ffff:", "").strip()
     hostname = str(hostname or "").strip().lower()

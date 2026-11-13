@@ -144,6 +144,9 @@ class TelemetryStore:
         decision: str,            # 'sent' | 'deduped' | 'format_error' | 'waha_error'
         latency_ms: float | None = None,
         alert_timestamp: str = "",
+        summary_es: str = "",
+        plain_severity: str = "",
+        remediation_action: str = "",
     ) -> None:
         """Registra una alerta que pasó por el pipeline. Llama desde api/alerts.py."""
         async with self._lock:
@@ -183,6 +186,12 @@ class TelemetryStore:
             }
             if latency_ms is not None:
                 entry["latency_ms"] = round(latency_ms, 1)
+            if summary_es:
+                entry["summary_es"] = summary_es
+            if plain_severity:
+                entry["plain_severity"] = plain_severity
+            if remediation_action:
+                entry["remediation_action"] = remediation_action
             self.alerts_live.append(entry)
 
             # Notificar suscriptores SSE

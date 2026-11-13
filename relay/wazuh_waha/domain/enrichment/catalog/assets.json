@@ -1,0 +1,18 @@
+{
+  "version": "2026.11",
+  "defaults": {
+    "criticality": "medium",
+    "owner": "Sin asignar",
+    "location": "No definida"
+  },
+  "assets": {
+    "000": {
+      "name": "Wazuh Manager",
+      "os": "Linux",
+      "criticality": "high",
+      "owner": "SOC",
+      "location": "Infraestructura SOC",
+      "tags": ["manager", "soc"]
+    }
+  }
+}

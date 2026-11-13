@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { dashboardService } from '../services/api';
 import { Loader2, RefreshCw, ShieldAlert, Search, Server, ChevronDown, ChevronRight } from 'lucide-react';
 import { WazuhControlPanel } from './WazuhControlPanel';
+import { EnrichmentPanel } from './enrichment/EnrichmentPanel';
 import './DetectionsView.css';
 
 type ModuleId = 'alerts' | 'fim' | 'sca' | 'rootcheck' | 'vulnerabilities' | 'syscollector' | 'mitre';
@@ -171,7 +172,8 @@ export const DetectionsView: React.FC = () => {
                 <th>Hora</th>
                 <th>Agente</th>
                 <th>{module === 'alerts' ? 'Nivel / Regla' : 'Detalle'}</th>
-                <th>Descripción</th>
+                <th>Qué pasó</th>
+                <th>Qué hacer</th>
               </tr>
             </thead>
             <tbody>
@@ -192,12 +194,21 @@ export const DetectionsView: React.FC = () => {
                           <span className="mono">{String(item.file || item.name || item.title || item.event || item.package || item.local?.port || item.id || '-').slice(0, 60)}</span>
                         )}
                       </td>
-                      <td>{isAlert ? item.description : (item.description || item.title || item.rationale || item.event || '-')}</td>
+                      <td>
+                        {isAlert
+                          ? (item.description_es || item.description)
+                          : (item.description || item.title || item.rationale || item.event || '-')}
+                      </td>
+                      <td className="det-action">
+                        {isAlert && item.enrichment?.remediation?.[0]?.action
+                          ? item.enrichment.remediation[0].action
+                          : '-'}
+                      </td>
                     </tr>
                     {expanded === idx && (
                       <tr className="det-raw-row">
-                        <td colSpan={5}>
-                          <pre>{JSON.stringify(raw, null, 2).slice(0, 12000)}</pre>
+                        <td colSpan={6}>
+                          <EnrichmentPanel enrichment={item.enrichment} raw={raw} />
                         </td>
                       </tr>
                     )}

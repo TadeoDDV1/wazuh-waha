@@ -171,7 +171,7 @@ async def toggle_manager_module(request: Request, _: None = Depends(verify_write
 def _detection_from_alert(a: dict[str, Any]) -> dict[str, Any]:
     rule = a.get("rule", {}) or {}
     agent = a.get("agent", {}) or {}
-    return {
+    item = {
         "module": "alerts",
         "timestamp": a.get("timestamp"),
         "agent_id": str(agent.get("id", "000")),
@@ -185,6 +185,17 @@ def _detection_from_alert(a: dict[str, Any]) -> dict[str, Any]:
         "full_log": a.get("full_log", ""),
         "raw": a,
     }
+    try:
+        from ..common.traffic_stream import normalize_wazuh_event
+
+        enriched = normalize_wazuh_event({**a, "_source": "wazuh"})
+        enrichment = enriched.get("enrichment")
+        if enrichment:
+            item["enrichment"] = enrichment
+            item["description_es"] = (enrichment.get("translations") or {}).get("description_es")
+    except Exception as exc:
+        log.debug("detection_enrichment_error rule=%s err=%s", item["rule_id"], exc)
+    return item
 
 
 @router.get("/detections")

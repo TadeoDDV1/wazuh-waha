@@ -47,44 +47,60 @@ export const RecentAlertsDrawer: React.FC = () => {
               <p>No se han registrado alertas en este arranque del relay.</p>
             </div>
           ) : (
-            recentAlerts.map((alert, idx) => (
-              <div key={idx} className="alert-item-card">
-                <div className="alert-card-top">
-                  <div className="alert-rule-chip">
-                    <span>Regla {alert.rule_id}</span>
-                    {getLevelBadge(alert.level)}
+            recentAlerts.map((alert, idx) => {
+              const enr = alert.enrichment;
+              const summary = enr?.summary_es || enr?.description_es || alert.description;
+              const action = enr?.remediation?.[0]?.action;
+              const severity = enr?.plain_severity;
+              return (
+                <div key={idx} className="alert-item-card">
+                  <div className="alert-card-top">
+                    <div className="alert-rule-chip">
+                      <span>Regla {alert.rule_id}</span>
+                      {getLevelBadge(alert.level)}
+                    </div>
+                    <span className="alert-decision-badge">
+                      {alert.result === 'sent' ? (
+                        <CheckCircle2 size={12} style={{ color: 'var(--green-healthy)' }} />
+                      ) : (
+                        <AlertCircle size={12} style={{ color: 'var(--yellow-warning)' }} />
+                      )}
+                      <span>{alert.result || alert.decision || 'ok'}</span>
+                    </span>
                   </div>
-                  <span className="alert-decision-badge">
-                    {alert.result === 'sent' ? (
-                      <CheckCircle2 size={12} style={{ color: 'var(--green-healthy)' }} />
-                    ) : (
-                      <AlertCircle size={12} style={{ color: 'var(--yellow-warning)' }} />
-                    )}
-                    <span>{alert.result || alert.decision || 'ok'}</span>
-                  </span>
-                </div>
 
-                <div className="alert-card-desc">{alert.description}</div>
+                  {severity && (
+                    <div className="alert-severity-badge">{severity}</div>
+                  )}
 
-                <div className="alert-card-meta">
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <Clock size={12} />
-                    {formatTs(alert.ts)}
-                  </span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <User size={12} />
-                    {alert.agent_name || 'Agente'} (ID: {alert.agent_id})
-                  </span>
-                  {alert.total_ms && <span>{alert.total_ms}ms</span>}
-                </div>
+                  <div className="alert-card-desc">{summary}</div>
 
-                {alert.msg_preview && (
-                  <div className="alert-card-preview">
-                    {alert.msg_preview}
+                  {action && (
+                    <div className="alert-card-action">
+                      <strong>Qué hacer:</strong> {action}
+                    </div>
+                  )}
+
+                  <div className="alert-card-meta">
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                      <Clock size={12} />
+                      {formatTs(alert.ts)}
+                    </span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                      <User size={12} />
+                      {alert.agent_name || 'Agente'} (ID: {alert.agent_id})
+                    </span>
+                    {alert.total_ms && <span>{alert.total_ms}ms</span>}
                   </div>
-                )}
-              </div>
-            ))
+
+                  {!enr?.summary_es && alert.msg_preview && (
+                    <div className="alert-card-preview">
+                      {alert.msg_preview}
+                    </div>
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
       </div>

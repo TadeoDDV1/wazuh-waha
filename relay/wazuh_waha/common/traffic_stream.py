@@ -110,12 +110,13 @@ def normalize_wazuh_event(raw: dict[str, Any]) -> dict[str, Any]:
     ts = raw.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%S.000+0000", time.gmtime())
     event_id = str(raw.get("id") or f"{ts}:{rule_id}:{agent.get('id', '000')}")
 
-    return {
+    normalized = {
         "id": event_id,
         "timestamp": ts,
         "rule_id": rule_id,
         "level": level,
         "description": description,
+        "description_raw": desc_raw,
         "agent_id": str(agent.get("id", "000")),
         "agent_name": agent.get("name", "manager"),
         "src_ip": str(src_ip) if src_ip else "",
@@ -133,6 +134,45 @@ def normalize_wazuh_event(raw: dict[str, Any]) -> dict[str, Any]:
         "raw_json": _clip_raw(raw),
         "process": proc,
     }
+
+    if settings.enrich_enabled:
+        try:
+            from ..domain.enrichment import build_canonical_event, get_enrichment_pipeline
+
+            canonical = build_canonical_event(raw, normalized)
+            canonical = get_enrichment_pipeline().enrich(raw, canonical)
+            normalized["enrichment"] = canonical.enrichment.model_dump(mode="json")
+            normalized["schema_version"] = canonical.schema_version
+            normalized["catalog_version"] = canonical.catalog_version
+        except Exception as exc:  # el enriquecimiento nunca debe romper el stream
+            _log.warning("enrichment_error event_id=%s err=%s", event_id, exc)
+            normalized["enrichment"] = {
+                "translations": {
+                    "description_es": description,
+                    "full_log_es": "",
+                    "summary_es": description,
+                    "method": "raw",
+                    "confidence": 0.3,
+                },
+                "risk": {
+                    "technical_severity": "info",
+                    "plain_severity": "Informativo",
+                    "business_impact": "",
+                    "mitre_tactics": [],
+                    "mitre_techniques": [],
+                    "kill_chain_phase": None,
+                    "sla": None,
+                },
+                "remediation": [],
+                "iocs": [],
+                "sources": [],
+                "confidence": 0.3,
+                "elapsed_ms": 0,
+                "degraded": True,
+                "errors": [f"pipeline: {exc}"],
+            }
+
+    return normalized
 
 
 class TrafficStreamWatcher:
@@ -255,12 +295,22 @@ class TrafficStreamWatcher:
             "pid": os.getpid(),
         }
 
-    def record_manual_event(self, raw_alert: dict[str, Any], source: str = "relay") -> None:
-        """Inyecta un evento (alerts.py, simulate) → journal + broadcast local."""
+    def record_manual_event(
+        self,
+        raw_alert: dict[str, Any],
+        source: str = "relay",
+        enriched: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Inyecta un evento (alerts.py, simulate) → journal + broadcast local.
+
+        Devuelve el evento normalizado/enriquecido para que el llamador pueda
+        reutilizarlo (p. ej. al formatear la notificación) sin repetir trabajo.
+        """
         raw = dict(raw_alert)
         raw.setdefault("_source", source)
-        normalized = normalize_wazuh_event(raw)
+        normalized = enriched or normalize_wazuh_event(raw)
         self._ingest(normalized)
+        return normalized
 
     def _ingest(self, normalized: dict[str, Any]) -> None:
         eid = str(normalized.get("id", ""))

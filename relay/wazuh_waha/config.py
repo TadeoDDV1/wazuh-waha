@@ -129,6 +129,17 @@ class Settings(BaseSettings):
     network_packet_capture_max_events: int = 50
     network_max_connections: int = 1500
 
+    # --- Enriquecimiento determinista de eventos ---
+    enrich_enabled: bool = True
+    enrich_cache_enabled: bool = True
+    enrich_cache_path: str = "/var/lib/wazuh-waha/enrichment_cache.sqlite3"
+    enrich_cache_ttl_sec: int = 86400
+    enrich_catalog_dir: str = ""
+    enrich_assets_file: str = "/etc/wazuh-waha/assets.json"
+    enrich_geoip_db: str = "/var/lib/wazuh-waha/GeoLite2-City.mmdb"
+    enrich_redact_pii: bool = True
+    enrich_ui_simple_mode_default: bool = True
+
     # --- Consola web / SSH ---
     console_enabled: bool = False
     console_targets: str = "local,manager"

@@ -74,7 +74,23 @@ def get_rule_groups(rule: dict, rule_id: str) -> list[str]:
     return groups or ["default"]
 
 
-async def format_alert(alert: dict) -> tuple[str, dict]:
+def _append_remediation(msg: str, enriched: dict | None) -> str:
+    """Añade una sección breve de acciones al mensaje de notificación."""
+    if not msg or not enriched:
+        return msg
+    enrichment = enriched.get("enrichment") or {}
+    steps = enrichment.get("remediation") or []
+    if not steps:
+        return msg
+    lines = ["", "🧭 *¿Qué hacer?*"]
+    for idx, step in enumerate(steps[:2], start=1):
+        action = str(step.get("action") or "").strip()
+        if action:
+            lines.append(f"{idx}. {action}")
+    return msg + "\n".join(lines)
+
+
+async def format_alert(alert: dict, enriched: dict | None = None) -> tuple[str, dict]:
     rule = alert.get("rule", {}) or {}
     agent = alert.get("agent", {}) or {}
     rule_id = str(rule.get("id", "0"))
@@ -124,6 +140,18 @@ async def format_alert(alert: dict) -> tuple[str, dict]:
     else:
         meta["decision"] = "default"
         msg = templates.render_default(alert)
+
+    if enriched:
+        enrichment = enriched.get("enrichment") or {}
+        translations = enrichment.get("translations") or {}
+        risk = enrichment.get("risk") or {}
+        meta["enrichment"] = {
+            "summary_es": translations.get("summary_es"),
+            "description_es": translations.get("description_es"),
+            "plain_severity": risk.get("plain_severity"),
+            "degraded": bool(enrichment.get("degraded")),
+        }
+        msg = _append_remediation(msg, enriched)
 
     # Reserva atómica: evita que dos workers envíen la misma alerta a la vez.
     # alerts.py libera la reserva si el envío falla por completo.

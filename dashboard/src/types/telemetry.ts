@@ -36,6 +36,86 @@ export interface LiveAlertEntry {
   module_id: string;
   alert_timestamp: string;
   latency_ms?: number;
+  summary_es?: string;
+  plain_severity?: string;
+  remediation_action?: string;
+}
+
+/* ── Enriquecimiento determinista ───────────────────────────────────────── */
+
+export interface EnrichmentAsset {
+  agent_id: string;
+  name: string;
+  os?: string | null;
+  ip?: string | null;
+  criticality: 'low' | 'medium' | 'high' | 'critical';
+  owner?: string | null;
+  location?: string | null;
+  tags: string[];
+}
+
+export interface EnrichmentNetwork {
+  src_ip?: string | null;
+  dst_ip?: string | null;
+  src_port?: number | null;
+  dst_port?: number | null;
+  protocol?: string | null;
+  service?: string | null;
+  direction?: string | null;
+  hostname?: string | null;
+  asn?: string | null;
+  country?: string | null;
+  city?: string | null;
+  site_category?: string | null;
+  is_private?: boolean | null;
+}
+
+export interface EnrichmentRisk {
+  technical_severity: 'info' | 'low' | 'medium' | 'high' | 'critical';
+  plain_severity: string;
+  business_impact: string;
+  mitre_tactics: string[];
+  mitre_techniques: string[];
+  kill_chain_phase?: string | null;
+  sla?: string | null;
+}
+
+export interface EnrichmentTranslation {
+  description_es: string;
+  full_log_es: string;
+  summary_es?: string | null;
+  method: 'catalog' | 'regex' | 'template' | 'raw';
+  confidence: number;
+}
+
+export interface EnrichmentRemediation {
+  order: number;
+  action: string;
+  why: string;
+  command?: string | null;
+  reference?: string | null;
+  risk: 'low' | 'medium' | 'high';
+}
+
+export interface EnrichmentIoc {
+  type: 'ip' | 'domain' | 'url' | 'hash' | 'user' | 'process' | 'file';
+  value: string;
+  defanged?: string | null;
+  confidence: number;
+}
+
+export interface Enrichment {
+  asset?: EnrichmentAsset | null;
+  network?: EnrichmentNetwork | null;
+  risk: EnrichmentRisk;
+  translations: EnrichmentTranslation;
+  remediation: EnrichmentRemediation[];
+  iocs: EnrichmentIoc[];
+  sources: string[];
+  confidence: number;
+  elapsed_ms: number;
+  degraded: boolean;
+  errors: string[];
 }
 
 export interface TelemetrySnapshot {
@@ -70,6 +150,9 @@ export interface TrafficEvent {
   groups?: string[];
   source?: string;
   raw_json?: Record<string, unknown> | null;
+  enrichment?: Enrichment;
+  schema_version?: string;
+  catalog_version?: string;
 }
 
 export interface TrafficSourceInfo {

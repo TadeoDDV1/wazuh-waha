@@ -1,0 +1,357 @@
+{
+  "version": "2026.11",
+  "rules": {
+    "5710": {
+      "title": "Fallo de autenticación por SSH",
+      "category": "Acceso remoto",
+      "summary": "Alguien intentó entrar por SSH y no lo consiguió.",
+      "risk": "Puede ser un error de contraseña o un ataque de fuerza bruta.",
+      "business_impact": "Riesgo de acceso no autorizado al servidor.",
+      "severity": "high",
+      "mitre": {"tactics": ["Acceso a credenciales"], "techniques": ["T1110"]},
+      "remediation": [
+        {
+          "action": "Bloquear la IP de origen en el firewall",
+          "why": "Evita que el atacante siga intentando entrar.",
+          "command": "ufw deny from {src_ip}",
+          "risk": "low"
+        },
+        {
+          "action": "Deshabilitar el login por contraseña y exigir claves SSH",
+          "why": "Las claves son mucho más difíciles de adivinar que una contraseña.",
+          "command": "sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && systemctl reload sshd",
+          "risk": "medium"
+        }
+      ]
+    },
+    "5712": {
+      "title": "Intento de login SSH con usuario inexistente",
+      "category": "Acceso remoto",
+      "summary": "Alguien intentó entrar con un usuario que no existe en el servidor.",
+      "risk": "Es una señal típica de reconocimiento o fuerza bruta.",
+      "business_impact": "Puede preceder a un intento de acceso real.",
+      "severity": "high",
+      "mitre": {"tactics": ["Acceso a credenciales"], "techniques": ["T1110"]},
+      "remediation": [
+        {
+          "action": "Revisar y bloquear la IP de origen",
+          "why": "Reduce la superficie de ataque y corta el intento.",
+          "command": "ufw deny from {src_ip}",
+          "risk": "low"
+        }
+      ]
+    },
+    "550": {
+      "title": "Archivo del sistema modificado",
+      "category": "Integridad de archivos",
+      "summary": "Un archivo importante cambió y no se sabe si fue por una actualización.",
+      "risk": "Si el cambio no fue autorizado, puede ser manipulación maliciosa.",
+      "business_impact": "Riesgo de alteración de binarios o configuración crítica.",
+      "severity": "high",
+      "mitre": {"tactics": ["Persistencia"], "techniques": ["T1547"]},
+      "remediation": [
+        {
+          "action": "Comparar el archivo con el paquete original del sistema",
+          "why": "Permite saber si el cambio fue legítimo.",
+          "command": "dpkg -V",
+          "risk": "low"
+        }
+      ]
+    },
+    "554": {
+      "title": "Nuevo archivo en directorio supervisado",
+      "category": "Integridad de archivos",
+      "summary": "Apareció un archivo nuevo en una carpeta importante del sistema.",
+      "risk": "Puede ser una herramienta de ataque o un archivo de persistencia.",
+      "business_impact": "Riesgo de ejecución de código no autorizado.",
+      "severity": "high",
+      "mitre": {"tactics": ["Persistencia"], "techniques": ["T1105"]},
+      "remediation": [
+        {
+          "action": "Revisar propietario, permisos y contenido del archivo",
+          "why": "Confirma si el archivo es legítimo antes de borrarlo.",
+          "command": "ls -la {file}",
+          "risk": "low"
+        }
+      ]
+    },
+    "553": {
+      "title": "Archivo eliminado en directorio crítico",
+      "category": "Integridad de archivos",
+      "summary": "Se borró un archivo importante del sistema.",
+      "risk": "Puede ser una técnica para ocultar rastros o romper el sistema.",
+      "business_impact": "Riesgo de pérdida de evidencia o de servicio.",
+      "severity": "high",
+      "mitre": {"tactics": ["Impacto"], "techniques": ["T1565"]},
+      "remediation": [
+        {
+          "action": "Identificar qué proceso borró el archivo y restaurarlo",
+          "why": "Permite recuperar el servicio y saber si fue intencional.",
+          "command": "journalctl -n 100",
+          "risk": "low"
+        }
+      ]
+    },
+    "510": {
+      "title": "Anomalía detectada por Rootcheck",
+      "category": "Malware",
+      "summary": "El sistema muestra señales compatibles con un rootkit o malware.",
+      "risk": "Puede indicar que el equipo está comprometido.",
+      "business_impact": "Riesgo alto de control no autorizado del equipo.",
+      "severity": "critical",
+      "mitre": {"tactics": ["Persistencia"], "techniques": ["T1547"]},
+      "remediation": [
+        {
+          "action": "Aislar el equipo de la red y analizarlo",
+          "why": "Evita que el posible malware se propague.",
+          "command": "ufw deny out",
+          "risk": "medium"
+        }
+      ]
+    },
+    "80710": {
+      "title": "Vulnerabilidad conocida detectada",
+      "category": "Vulnerabilidades",
+      "summary": "El equipo tiene un software con un fallo de seguridad público.",
+      "risk": "Un atacante podría aprovecharlo para entrar o escalar privilegios.",
+      "business_impact": "Riesgo de compromiso del equipo o de datos.",
+      "severity": "high",
+      "mitre": {"tactics": ["Acceso inicial"], "techniques": ["T1190"]},
+      "remediation": [
+        {
+          "action": "Actualizar el paquete afectado",
+          "why": "La actualización corrige el fallo conocido.",
+          "command": "apt update && apt upgrade",
+          "risk": "medium"
+        }
+      ]
+    },
+    "5401": {
+      "title": "Cambio de usuario con 'su' exitoso",
+      "category": "Identidades",
+      "summary": "Un usuario cambió de identidad en la consola local.",
+      "risk": "Puede ser normal o un intento de usar una cuenta con más permisos.",
+      "business_impact": "Riesgo de uso indebido de cuentas privilegiadas.",
+      "severity": "medium",
+      "mitre": {"tactics": ["Escalada de privilegios"], "techniques": ["T1548"]},
+      "remediation": [
+        {
+          "action": "Verificar que el cambio de usuario esté autorizado",
+          "why": "Confirma que no se está usando una cuenta ajena.",
+          "command": "last -a | head",
+          "risk": "low"
+        }
+      ]
+    },
+    "5402": {
+      "title": "Fallo al cambiar de usuario con 'su'",
+      "category": "Identidades",
+      "summary": "Alguien intentó cambiar de usuario y falló.",
+      "risk": "Puede ser un error de contraseña o un intento de suplantación.",
+      "business_impact": "Riesgo de acceso no autorizado a cuentas locales.",
+      "severity": "medium",
+      "mitre": {"tactics": ["Acceso a credenciales"], "techniques": ["T1110"]},
+      "remediation": [
+        {
+          "action": "Revisar los intentos repetidos del mismo usuario",
+          "why": "Permite distinguir un error de un ataque.",
+          "command": "grep 'su:' /var/log/auth.log | tail -50",
+          "risk": "low"
+        }
+      ]
+    },
+    "57103": {
+      "title": "Contraseña incorrecta al usar sudo",
+      "category": "Privilegios",
+      "summary": "Un usuario intentó ejecutar un comando como administrador y falló.",
+      "risk": "Puede ser un error humano o un intento de adivinar la contraseña.",
+      "business_impact": "Riesgo de acceso a privilegios de root.",
+      "severity": "medium",
+      "mitre": {"tactics": ["Escalada de privilegios"], "techniques": ["T1548"]},
+      "remediation": [
+        {
+          "action": "Verificar la identidad del usuario y revisar intentos previos",
+          "why": "Permite detectar un patrón de ataque.",
+          "command": "grep 'sudo' /var/log/auth.log | tail -50",
+          "risk": "low"
+        }
+      ]
+    },
+    "57104": {
+      "title": "Comando administrativo ejecutado con sudo",
+      "category": "Privilegios",
+      "summary": "Se ejecutó un comando con permisos de administrador.",
+      "risk": "Es normal en mantenimiento, pero requiere trazabilidad.",
+      "business_impact": "Riesgo si el comando no estaba autorizado.",
+      "severity": "low",
+      "mitre": {"tactics": ["Escalada de privilegios"], "techniques": ["T1548"]},
+      "remediation": [
+        {
+          "action": "Confirmar que el comando corresponde a una tarea autorizada",
+          "why": "Evita cambios no planificados en el servidor.",
+          "command": "grep 'sudo' /var/log/auth.log | tail -20",
+          "risk": "low"
+        }
+      ]
+    },
+    "57106": {
+      "title": "Intento de sudo por usuario no autorizado",
+      "category": "Privilegios",
+      "summary": "Un usuario que no está en sudoers intentó obtener permisos de root.",
+      "risk": "Es una señal clara de intento de escalada de privilegios.",
+      "business_impact": "Riesgo alto de compromiso de la cuenta de administrador.",
+      "severity": "critical",
+      "mitre": {"tactics": ["Escalada de privilegios"], "techniques": ["T1548"]},
+      "remediation": [
+        {
+          "action": "Suspender la cuenta y revisar el origen del intento",
+          "why": "Contiene un posible intento de escalada.",
+          "command": "passwd -l {user}",
+          "risk": "medium"
+        }
+      ]
+    },
+    "57111": {
+      "title": "Ataque de fuerza bruta SSH detectado",
+      "category": "Amenaza de red",
+      "summary": "Se detectaron muchos intentos fallidos de SSH en poco tiempo.",
+      "risk": "El atacante está probando contraseñas de forma automatizada.",
+      "business_impact": "Riesgo de acceso si alguna contraseña es débil.",
+      "severity": "critical",
+      "mitre": {"tactics": ["Acceso a credenciales"], "techniques": ["T1110"]},
+      "remediation": [
+        {
+          "action": "Bloquear la IP de origen",
+          "why": "Corta el ataque de inmediato.",
+          "command": "ufw deny from {src_ip}",
+          "risk": "low"
+        },
+        {
+          "action": "Activar o revisar Fail2ban",
+          "why": "Bloquea automáticamente los intentos repetidos.",
+          "command": "systemctl status fail2ban",
+          "risk": "low"
+        }
+      ]
+    },
+    "2902": {
+      "title": "Escaneo de puertos detectado",
+      "category": "Amenaza de red",
+      "summary": "Alguien está revisando qué servicios tiene abiertos el equipo.",
+      "risk": "Es un paso previo a un ataque más dirigido.",
+      "business_impact": "Riesgo de exposición de servicios internos.",
+      "severity": "medium",
+      "mitre": {"tactics": ["Descubrimiento"], "techniques": ["T1046"]},
+      "remediation": [
+        {
+          "action": "Revisar qué puertos están expuestos y cerrar los innecesarios",
+          "why": "Reduce la superficie de ataque.",
+          "command": "ss -tulpn",
+          "risk": "low"
+        }
+      ]
+    },
+    "2903": {
+      "title": "Posible escaneo de servicios",
+      "category": "Amenaza de red",
+      "summary": "Se detectaron conexiones a varios puertos desde el mismo origen.",
+      "risk": "Puede ser un escaneo de reconocimiento.",
+      "business_impact": "Riesgo de exposición de servicios internos.",
+      "severity": "medium",
+      "mitre": {"tactics": ["Descubrimiento"], "techniques": ["T1046"]},
+      "remediation": [
+        {
+          "action": "Revisar la IP de origen y los puertos consultados",
+          "why": "Permite saber si fue un escaneo o un error.",
+          "command": "ss -tunap | grep {src_ip}",
+          "risk": "low"
+        }
+      ]
+    },
+    "57128": {
+      "title": "Posible ataque de denegación de servicio",
+      "category": "Amenaza de red",
+      "summary": "Se detectó tráfico anómalo que puede saturar el servicio.",
+      "risk": "Puede dejar el servicio o el equipo sin respuesta.",
+      "business_impact": "Riesgo de interrupción del servicio.",
+      "severity": "high",
+      "mitre": {"tactics": ["Impacto"], "techniques": ["T1486"]},
+      "remediation": [
+        {
+          "action": "Revisar el tráfico y aplicar límites en el firewall",
+          "why": "Reduce el impacto del tráfico malicioso.",
+          "command": "ss -s",
+          "risk": "low"
+        }
+      ]
+    },
+    "57121": {
+      "title": "Posible reverse shell detectada",
+      "category": "Ejecución",
+      "summary": "Un proceso intentó abrir una conexión de control remoto.",
+      "risk": "Es una técnica típica para controlar el equipo desde fuera.",
+      "business_impact": "Riesgo alto de control remoto no autorizado.",
+      "severity": "critical",
+      "mitre": {"tactics": ["Ejecución"], "techniques": ["T1059"]},
+      "remediation": [
+        {
+          "action": "Aislar el equipo y revisar el proceso",
+          "why": "Contiene una posible conexión de control remoto.",
+          "command": "ps auxf",
+          "risk": "medium"
+        }
+      ]
+    },
+    "57122": {
+      "title": "Ejecución de proceso sospechoso",
+      "category": "Ejecución",
+      "summary": "Se ejecutó un proceso que no es habitual en el sistema.",
+      "risk": "Puede ser una herramienta de ataque o malware.",
+      "business_impact": "Riesgo de ejecución de código no autorizado.",
+      "severity": "high",
+      "mitre": {"tactics": ["Ejecución"], "techniques": ["T1059"]},
+      "remediation": [
+        {
+          "action": "Revisar el proceso, su ruta y su usuario",
+          "why": "Permite confirmar si es legítimo.",
+          "command": "ps -fp {pid}",
+          "risk": "low"
+        }
+      ]
+    },
+    "57138": {
+      "title": "Ejecución desde directorio temporal",
+      "category": "Ejecución",
+      "summary": "Se ejecutó un archivo desde una carpeta temporal.",
+      "risk": "Es una técnica común para ocultar malware.",
+      "business_impact": "Riesgo de ejecución de código no autorizado.",
+      "severity": "high",
+      "mitre": {"tactics": ["Ejecución"], "techniques": ["T1059"]},
+      "remediation": [
+        {
+          "action": "Revisar el archivo y su origen antes de borrarlo",
+          "why": "Confirma si es malware o un archivo temporal legítimo.",
+          "command": "ls -la /tmp",
+          "risk": "low"
+        }
+      ]
+    },
+    "57140": {
+      "title": "Modificación de tareas programadas",
+      "category": "Persistencia",
+      "summary": "Se modificó una tarea que se ejecuta automáticamente.",
+      "risk": "Es una forma habitual de mantener acceso al equipo.",
+      "business_impact": "Riesgo de persistencia de un atacante.",
+      "severity": "high",
+      "mitre": {"tactics": ["Persistencia"], "techniques": ["T1053"]},
+      "remediation": [
+        {
+          "action": "Revisar las tareas programadas y eliminar las no autorizadas",
+          "why": "Corta una posible persistencia.",
+          "command": "crontab -l",
+          "risk": "low"
+        }
+      ]
+    }
+  }
+}

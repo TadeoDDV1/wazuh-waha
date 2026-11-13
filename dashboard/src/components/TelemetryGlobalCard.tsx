@@ -193,9 +193,14 @@ const AlertRow: React.FC<{ alert: LiveAlertEntry }> = ({ alert }) => (
         whiteSpace: 'nowrap',
         color: 'var(--text-primary)',
       }}
-      title={alert.description}
+      title={`${alert.summary_es || alert.description}${alert.remediation_action ? `\nAcción: ${alert.remediation_action}` : ''}`}
     >
-      {alert.description}
+      {alert.summary_es || alert.description}
+      {alert.remediation_action && (
+        <span style={{ color: 'var(--cyan-accent)', marginLeft: 6 }}>
+          → {alert.remediation_action}
+        </span>
+      )}
     </span>
     <span
       style={{

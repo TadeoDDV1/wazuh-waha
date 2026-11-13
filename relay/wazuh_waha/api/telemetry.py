@@ -2398,3 +2398,96 @@ async def network_probe(
     )
 
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Enriquecimiento determinista: consulta, catálogos y métricas
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/api/v1/telemetry/events/{event_id}/enrichment")
+async def event_enrichment(
+    event_id: str,
+    _: None = Depends(verify_api_key),
+) -> JSONResponse:
+    """Devuelve el evento enriquecido más reciente con ese id."""
+    wanted = str(event_id)
+    for item in reversed(traffic_watcher.get_recent(limit=400)):
+        if str(item.get("id")) == wanted:
+            return JSONResponse(content={"ok": True, "item": item})
+    return JSONResponse(
+        status_code=404,
+        content={"ok": False, "error": "evento no encontrado en el buffer reciente"},
+    )
+
+
+@router.get("/api/v1/telemetry/enrichment/glossary")
+async def enrichment_glossary(_: None = Depends(verify_api_key)) -> JSONResponse:
+    """Glosario de términos para tooltips del dashboard."""
+    from ..domain.enrichment import get_glossary
+
+    data = get_glossary()
+    return JSONResponse(content={"ok": True, "version": data.get("version"), "terms": data.get("terms") or {}})
+
+
+@router.get("/api/v1/telemetry/enrichment/catalogs/status")
+async def enrichment_catalogs_status(_: None = Depends(verify_api_key)) -> JSONResponse:
+    """Estado y tamaño de los catálogos de enriquecimiento."""
+    from ..domain.enrichment import get_catalog_version
+    from ..domain.enrichment.catalogs import get_assets, get_mitre, get_rules, get_services
+
+    rules = get_rules()
+    assets = get_assets()
+    services = get_services()
+    mitre = get_mitre()
+    return JSONResponse(
+        content={
+            "ok": True,
+            "catalog_version": get_catalog_version(),
+            "rules": len((rules.get("rules") or {})),
+            "assets": len((assets.get("assets") or {})),
+            "services": len((services.get("services") or {})),
+            "mitre_techniques": len((mitre.get("techniques") or {})),
+            "enabled": bool(settings.enrich_enabled),
+            "geoip_db": settings.enrich_geoip_db,
+            "assets_file": settings.enrich_assets_file,
+        }
+    )
+
+
+@router.get("/api/v1/telemetry/enrichment/metrics")
+async def enrichment_metrics(_: None = Depends(verify_api_key)) -> JSONResponse:
+    """Métricas básicas del pipeline y de la caché de enriquecimiento."""
+    from ..domain.enrichment import get_catalog_version, get_enrichment_pipeline
+
+    pipeline = get_enrichment_pipeline()
+    cache_stats = pipeline.cache.stats() if pipeline.cache else {"enabled": False}
+    return JSONResponse(
+        content={
+            "ok": True,
+            "enabled": bool(settings.enrich_enabled),
+            "enrichers": [e.name for e in pipeline.enrichers],
+            "cache": cache_stats,
+            "catalog_version": get_catalog_version(),
+            "timestamp": time.time(),
+        }
+    )
+
+
+@router.post("/api/v1/telemetry/enrichment/reload")
+async def enrichment_reload(_: None = Depends(verify_write)) -> JSONResponse:
+    """Recarga catálogos y reinicia el pipeline (sin reiniciar el relay)."""
+    from ..domain.enrichment import (
+        clear_catalog_cache,
+        get_catalog_version,
+        reset_enrichment_pipeline,
+    )
+
+    clear_catalog_cache()
+    reset_enrichment_pipeline()
+    return JSONResponse(
+        content={
+            "ok": True,
+            "catalog_version": get_catalog_version(),
+            "detail": "Catálogos recargados y pipeline reiniciado",
+        }
+    )

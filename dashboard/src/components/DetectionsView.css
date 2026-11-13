@@ -125,7 +125,7 @@
 .det-level.med { background: rgba(234, 179, 8, 0.15); color: #facc15; }
 .det-level.low { background: rgba(16, 185, 129, 0.15); color: #34d399; }
 
-.det-raw-row td { background: #05080e; }
-.det-raw-row pre { margin: 0; max-height: 360px; overflow: auto; color: #a5b4c8; font-size: 11px; }
+.det-raw-row td { background: #05080e; padding: 12px; }
+.det-action { max-width: 260px; color: #9fb3c8; font-size: 11px; }
 
 .det-empty { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 50px; color: #64748b; font-size: 13px; }
