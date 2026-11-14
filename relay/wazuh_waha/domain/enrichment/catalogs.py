@@ -30,9 +30,13 @@ def _catalog_path(name: str) -> Path:
 
 
 def _read_structured(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
+    # El archivo de usuario es opcional. Si el directorio contenedor no es
+    # accesible (p. ej. /etc/wazuh-waha con permisos 0750 y el servicio
+    # corriendo como otro usuario), ``Path.exists()`` lanza PermissionError
+    # en lugar de devolver False. Se trata como catálogo ausente.
     try:
+        if not path.exists():
+            return {}
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         log.warning("catalog_read_error path=%s err=%s", path, exc)

@@ -157,3 +157,25 @@ def test_enrichment_api_endpoints():
     metrics = client.get("/api/v1/telemetry/enrichment/metrics", headers=headers)
     assert metrics.status_code == 200
     assert "cache" in metrics.json()
+
+
+def test_catalog_read_permission_denied(monkeypatch, tmp_path):
+    """Un catálogo de usuario inaccesible no debe romper el enriquecimiento.
+
+    ``Path.exists()`` propaga ``PermissionError`` cuando el directorio
+    contenedor no es accesible; debe tratarse como catálogo ausente.
+    """
+    from pathlib import Path
+
+    from wazuh_waha.domain.enrichment import catalogs
+
+    target = tmp_path / "blocked" / "assets.json"
+    real_exists = Path.exists
+
+    def fake_exists(self):
+        if self == target:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", fake_exists)
+    assert catalogs._read_structured(target) == {}
